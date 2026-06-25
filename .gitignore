@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local gateway/runtime artifacts
+src-tauri/.env
+src-tauri/*.db
+src-tauri/*.db-shm
+src-tauri/*.db-wal
+src-tauri/sqlx_temp/
+docs/superpowers/
