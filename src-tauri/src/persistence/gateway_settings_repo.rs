@@ -14,7 +14,7 @@ impl GatewaySettingsRepo {
             INSERT OR IGNORE INTO gateway_settings (
                 id, bind_host, bind_port, allow_remote, log_retention_days, created_at, updated_at
             )
-            VALUES ('default', '127.0.0.1', 3000, 0, 30, $1, $1)
+            VALUES ('default', '127.0.0.1', 2013, 0, 30, $1, $1)
             "#,
             now,
         )
