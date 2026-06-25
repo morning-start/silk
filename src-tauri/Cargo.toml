@@ -1,16 +1,11 @@
 [package]
 name = "silk"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Silk 丝路 — 纯本地桌面 AI 多模型中转客户端"
+authors = ["morning-start"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "silk_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -23,3 +18,44 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# 数据库
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "uuid"] }
+
+# 时间
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# 加密
+aes-gcm = "0.10"
+pbkdf2 = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+
+# 错误处理
+thiserror = "2"
+
+# HTTP 客户端（网关转发用，Phase 2 需要）
+reqwest = { version = "0.12", features = ["rustls-tls", "stream", "socks"] }
+
+# HTTP 服务端（Phase 2 需要）
+axum = { version = "0.7", features = ["macros"] }
+hyper = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+
+# SSE 客户端（Phase 2 需要）
+bytes = "1"
+futures = "0.3"
+
+# 并发容器（Route Manager 用）
+dashmap = "6"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = "0.3"
