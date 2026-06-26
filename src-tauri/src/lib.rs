@@ -6,9 +6,20 @@ pub mod persistence;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 use tauri::Manager;
+use tokio::sync::RwLock;
+use std::sync::Arc;
+
+use crate::models::GatewaySettings;
+use crate::persistence::GatewaySettingsRepo;
 
 /// 数据库连接池（全局唯一）
 static DB_POOL: tokio::sync::OnceCell<SqlitePool> = tokio::sync::OnceCell::const_new();
+
+/// 运行时网关设置状态
+#[derive(Clone)]
+pub struct AppState {
+    pub gateway_settings: Arc<RwLock<GatewaySettings>>,
+}
 
 /// 初始化数据库连接池并运行迁移
 pub async fn init_database(
@@ -58,7 +69,14 @@ pub fn run() {
                 .app_data_dir()
                 .expect("无法解析应用数据目录");
 
-            if let Err(err) = tauri::async_runtime::block_on(init_database(&data_dir)) {
+            if let Err(err) = tauri::async_runtime::block_on(async {
+                let pool = init_database(&data_dir).await?;
+                let settings = GatewaySettingsRepo::load_effective(pool).await?;
+                app.manage(AppState {
+                    gateway_settings: Arc::new(RwLock::new(settings)),
+                });
+                Ok::<(), sqlx::Error>(())
+            }) {
                 panic!("数据库初始化失败: {err}");
             }
 
