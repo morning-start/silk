@@ -5,27 +5,29 @@ use crate::models::{GatewaySettings, UpdateGatewaySettings};
 pub struct GatewaySettingsRepo;
 
 impl GatewaySettingsRepo {
-    /// 确保全局网关设置存在，并返回当前值
-    pub async fn get_or_create_default(pool: &SqlitePool) -> Result<GatewaySettings, sqlx::Error> {
-        let now = chrono::Utc::now().naive_utc();
+    /// 运行时默认网关设置（数据库不存在配置时使用）
+    pub fn runtime_default(now: chrono::NaiveDateTime) -> GatewaySettings {
+        GatewaySettings {
+            id: "default".to_string(),
+            bind_host: "127.0.0.1".to_string(),
+            bind_port: 2013,
+            allow_remote: 0,
+            auth_token_hash: None,
+            log_retention_days: 30,
+            default_provider_id: None,
+            default_route_id: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 
-        sqlx::query!(
-            r#"
-            INSERT OR IGNORE INTO gateway_settings (
-                id, bind_host, bind_port, allow_remote, log_retention_days, created_at, updated_at
-            )
-            VALUES ('default', '127.0.0.1', 2013, 0, 30, $1, $1)
-            "#,
-            now,
-        )
-        .execute(pool)
-        .await?;
+    /// 读取当前全局网关设置；如果数据库中还没有记录，则返回运行时默认值
+    pub async fn load_effective(pool: &SqlitePool) -> Result<GatewaySettings, sqlx::Error> {
+        if let Some(settings) = Self::find(pool).await? {
+            return Ok(settings);
+        }
 
-        sqlx::query_as::<_, GatewaySettings>(
-            r#"SELECT * FROM gateway_settings WHERE id = 'default'"#,
-        )
-        .fetch_one(pool)
-        .await
+        Ok(Self::runtime_default(chrono::Utc::now().naive_utc()))
     }
 
     /// 查询当前全局网关设置
@@ -45,7 +47,21 @@ impl GatewaySettingsRepo {
         let now = chrono::Utc::now().naive_utc();
         let allow_remote = update.allow_remote.map(|v| if v { 1 } else { 0 });
 
-        sqlx::query_as::<_, GatewaySettings>(
+        let mut tx = pool.begin().await?;
+
+        sqlx::query!(
+            r#"
+            INSERT OR IGNORE INTO gateway_settings (
+                id, bind_host, bind_port, allow_remote, log_retention_days, created_at, updated_at
+            )
+            VALUES ('default', '127.0.0.1', 2013, 0, 30, $1, $1)
+            "#,
+            now,
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        let result = sqlx::query_as::<_, GatewaySettings>(
             r#"
             UPDATE gateway_settings
             SET bind_host = COALESCE($2, bind_host),
@@ -69,7 +85,10 @@ impl GatewaySettingsRepo {
         .bind(update.default_provider_id.as_deref())
         .bind(update.default_route_id.as_deref())
         .bind(now)
-        .fetch_one(pool)
-        .await
+        .fetch_one(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(result)
     }
 }
