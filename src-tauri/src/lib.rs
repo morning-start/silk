@@ -5,6 +5,7 @@ pub mod persistence;
 
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
+use tauri::Manager;
 
 /// 数据库连接池（全局唯一）
 static DB_POOL: tokio::sync::OnceCell<SqlitePool> = tokio::sync::OnceCell::const_new();
@@ -51,6 +52,18 @@ pub fn get_db_pool() -> Option<&'static SqlitePool> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("无法解析应用数据目录");
+
+            if let Err(err) = tauri::async_runtime::block_on(init_database(&data_dir)) {
+                panic!("数据库初始化失败: {err}");
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Phase 4 将在这里注册 IPC 命令
         ])
