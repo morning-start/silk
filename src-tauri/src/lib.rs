@@ -1,5 +1,6 @@
 pub mod crypto;
 pub mod error;
+pub mod gateway;
 pub mod models;
 pub mod persistence;
 
@@ -9,16 +10,16 @@ use tauri::Manager;
 use tokio::sync::RwLock;
 use std::sync::Arc;
 
-use crate::models::GatewaySettings;
-use crate::persistence::GatewaySettingsRepo;
+use crate::gateway::{load_gateway_context, spawn_gateway_server, GatewayContext, GatewayServerHandle};
 
 /// 数据库连接池（全局唯一）
 static DB_POOL: tokio::sync::OnceCell<SqlitePool> = tokio::sync::OnceCell::const_new();
 
-/// 运行时网关设置状态
+/// 运行时网关状态
 #[derive(Clone)]
 pub struct AppState {
-    pub gateway_settings: Arc<RwLock<GatewaySettings>>,
+    pub gateway: GatewayContext,
+    pub gateway_server: Arc<RwLock<Option<GatewayServerHandle>>>,
 }
 
 /// 初始化数据库连接池并运行迁移
@@ -71,9 +72,12 @@ pub fn run() {
 
             if let Err(err) = tauri::async_runtime::block_on(async {
                 let pool = init_database(&data_dir).await?;
-                let settings = GatewaySettingsRepo::load_effective(pool).await?;
+                let gateway = load_gateway_context(pool).await?;
+                let gateway_server = spawn_gateway_server(gateway.clone()).await?;
+
                 app.manage(AppState {
-                    gateway_settings: Arc::new(RwLock::new(settings)),
+                    gateway,
+                    gateway_server: Arc::new(RwLock::new(Some(gateway_server))),
                 });
                 Ok::<(), sqlx::Error>(())
             }) {
