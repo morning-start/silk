@@ -1,3 +1,4 @@
+pub mod commands;
 pub mod crypto;
 pub mod error;
 pub mod gateway;
@@ -94,7 +95,33 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Phase 4 将在这里注册 IPC 命令
+            // Gateway 控制
+            commands::gateway_status,
+            commands::gateway_start,
+            commands::gateway_stop,
+            commands::gateway_restart,
+            // Provider 管理
+            commands::list_providers,
+            commands::get_provider,
+            commands::create_provider,
+            commands::update_provider,
+            commands::delete_provider,
+            // 路由规则管理
+            commands::list_routing_rules,
+            commands::get_routing_rule,
+            commands::create_routing_rule,
+            commands::update_routing_rule,
+            commands::delete_routing_rule,
+            // 日志管理
+            commands::list_logs,
+            commands::logs_by_provider,
+            commands::logs_by_request_id,
+            commands::count_logs,
+            commands::cleanup_logs,
+            commands::clear_all_logs,
+            // 设置
+            commands::get_gateway_settings,
+            commands::update_gateway_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

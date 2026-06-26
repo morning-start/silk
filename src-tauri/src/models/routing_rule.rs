@@ -23,7 +23,7 @@ pub struct RoutingRule {
 }
 
 /// 用于创建路由规则的输入结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NewRoutingRule {
     pub name: String,
     pub match_host: Option<String>,
