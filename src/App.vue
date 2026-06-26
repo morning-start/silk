@@ -1,160 +1,148 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { ref, onMounted } from "vue";
+import { useRouter } from "vue-router";
+import {
+  NLayout,
+  NLayoutSider,
+  NMenu,
+  NLayoutContent,
+  NLayoutHeader,
+  NButton,
+  NText,
+  NIcon,
+  NBadge,
+  useMessage,
+} from "naive-ui";
+import {
+  ServerOutline,
+  GitNetworkOutline,
+  ListOutline,
+  DocumentTextOutline,
+  SettingsOutline,
+  PlayOutline,
+  StopOutline,
+  RefreshOutline,
+} from "@vicons/ionicons5";
+import { useGatewayStore } from "./stores/gateway";
+import { storeToRefs } from "pinia";
 
-const greetMsg = ref("");
-const name = ref("");
+const router = useRouter();
+const message = useMessage();
+const gatewayStore = useGatewayStore();
+const { status } = storeToRefs(gatewayStore);
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
+const collapsed = ref(false);
+const activeKey = ref("providers");
+
+const menuOptions: any[] = [
+  { label: "Provider 管理", key: "providers", icon: ServerOutline, route: "/providers" },
+  { label: "负载均衡分组", key: "groups", icon: GitNetworkOutline, route: "/groups" },
+  { label: "路由规则", key: "routing-rules", icon: ListOutline, route: "/routing-rules" },
+  { label: "请求日志", key: "logs", icon: DocumentTextOutline, route: "/logs" },
+  { label: "设置", key: "settings", icon: SettingsOutline, route: "/settings" },
+];
+
+function handleMenuSelect(key: string, item: any) {
+  activeKey.value = key;
+  router.push(item.route);
 }
+
+async function handleStart() {
+  try {
+    await gatewayStore.start();
+    message.success("网关已启动");
+  } catch (e: any) {
+    message.error(e.message || "启动失败");
+  }
+}
+
+async function handleStop() {
+  try {
+    await gatewayStore.stop();
+    message.success("网关已停止");
+  } catch (e: any) {
+    message.error(e.message || "停止失败");
+  }
+}
+
+async function handleRestart() {
+  try {
+    await gatewayStore.restart();
+    message.success("网关已重启");
+  } catch (e: any) {
+    message.error(e.message || "重启失败");
+  }
+}
+
+onMounted(() => {
+  gatewayStore.fetchStatus();
+});
 </script>
 
 <template>
-  <main class="container">
-    <h1>Welcome to Tauri + Vue</h1>
+  <n-layout has-sider style="height: 100vh">
+    <n-layout-sider
+      bordered
+      collapse-mode="width"
+      :collapsed="collapsed"
+      :width="220"
+      :collapsed-width="64"
+      show-trigger
+      @collapse="collapsed = true"
+      @expand="collapsed = false"
+    >
+      <div style="padding: 16px; text-align: center">
+        <n-text strong style="font-size: 16px">
+          {{ collapsed ? "Silk" : "Silk 丝路" }}
+        </n-text>
+      </div>
+      <n-menu
+        :value="activeKey"
+        :collapsed="collapsed"
+        :collapsed-width="64"
+        :options="menuOptions"
+        @update:value="handleMenuSelect"
+      />
+    </n-layout-sider>
 
-    <div class="row">
-      <a href="https://vite.dev" target="_blank">
-        <img src="/vite.svg" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img src="/tauri.svg" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
-      </a>
-    </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
+    <n-layout>
+      <n-layout-header
+        style="
+          height: 56px;
+          padding: 0 24px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          border-bottom: 1px solid #eee;
+          background: #fff;
+        "
+      >
+        <div style="display: flex; align-items: center; gap: 12px">
+          <n-badge :value="status?.running ? '运行中' : '已停止'" :type="status?.running ? 'success' : 'default'">
+            <n-text style="font-size: 14px; font-weight: 500">
+              {{ status?.address || "未启动" }}
+            </n-text>
+          </n-badge>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <n-button type="success" size="small" @click="handleStart">
+            <template #icon><n-icon :component="PlayOutline" /></template>
+            启动
+          </n-button>
+          <n-button type="warning" size="small" @click="handleStop">
+            <template #icon><n-icon :component="StopOutline" /></template>
+            停止
+          </n-button>
+          <n-button size="small" @click="handleRestart">
+            <template #icon><n-icon :component="RefreshOutline" /></template>
+            重启
+          </n-button>
+        </div>
+      </n-layout-header>
 
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
-  </main>
+      <n-layout-content style="padding: 24px; background: #f5f5f5">
+        <router-view />
+      </n-layout-content>
+    </n-layout>
+  </n-layout>
 </template>
-
-<style scoped>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
-}
-
-</style>
-<style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
-</style>
