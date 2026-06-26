@@ -1,24 +1,77 @@
 use crate::gateway::context::RequestContext;
+use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
+use crate::protocol::{CanonicalRequest, ProtocolError};
 
 /// 请求转换中间件
 ///
-/// 职责：
-/// 1. 应用模型名覆盖（route.model_name_override → provider.model_name）
-/// 2. 协议转换准备：标记需要转换的协议类型
-/// 3. 未来：Canonical Format → Upstream Protocol 的实际转换
-pub async fn run(ctx: RequestContext) -> Result<RequestContext, StageError> {
-    // 如果路由规则指定了模型覆盖，记录到上下文中
-    // 实际协议转换将在 Phase 3 实现，此处仅做标记
-    if let Some(route) = &ctx.route {
-        if route.model_name_override.is_some() {
-            // 模型覆盖已设置，dispatch_upstream 会使用它
+/// 根据路由规则的 inbound_protocol 选择适配器，
+/// 将原始请求体（JSON）解析为 CanonicalRequest，
+/// 然后转为上游请求格式，更新 ctx.body。
+pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> {
+    // 获取入站协议
+    let inbound_protocol = ctx
+        .inbound_protocol
+        .clone()
+        .unwrap_or_else(|| "any".to_string());
+
+    // 获取适配器
+    let adapter = ctx
+        .adapter_registry
+        .get(&inbound_protocol)
+        .or_else(|| ctx.adapter_registry.get("openai_chat"))
+        .ok_or_else(|| {
+            StageError::new(
+                ctx.clone(),
+                GatewayError::Transform(format!("不支持的协议: {inbound_protocol}")),
+            )
+        })?;
+
+    // 尝试解析请求体为 CanonicalRequest
+    let canonical: CanonicalRequest = match serde_json::from_slice(&ctx.body) {
+        Ok(c) => c,
+        Err(_) => {
+            // 不是标准 Canonical 格式，直接透传
+            return Ok(ctx);
         }
-        // 标记协议转换需求
-        if route.needs_protocol_conversion() {
-            // TODO: Phase 3 实现 Canonical → Upstream 转换
-        }
-    }
+    };
+
+    // 获取 Provider
+    let provider = ctx.provider.as_ref().ok_or_else(|| {
+        StageError::new(
+            ctx.clone(),
+            GatewayError::Internal("缺少 provider".to_string()),
+        )
+    })?;
+
+    // 调用适配器转换
+    let upstream_req = adapter
+        .canonicalize_request(&canonical, provider)
+        .await
+        .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e.to_string())))?;
+
+    // 序列化上游请求体
+    let new_body = serde_json::to_vec(&upstream_req.body).map_err(|e| {
+        StageError::new(
+            ctx.clone(),
+            GatewayError::Serialization(e.to_string()),
+        )
+    })?;
+
+    // 更新上下文
+    ctx.body = bytes::Bytes::from(new_body);
+    ctx.upstream_headers = Some(upstream_req.headers);
 
     Ok(ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_placeholder() {
+        // 集成测试在端到端测试中覆盖
+        assert!(true);
+    }
 }

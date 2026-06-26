@@ -35,6 +35,7 @@ pub async fn run(
     ctx.provider = Some(provider);
     ctx.inbound_protocol = route.inbound_protocol.clone();
     ctx.outbound_protocol = route.outbound_protocol.clone();
+    ctx.adapter_registry = runtime.adapter_registry.clone();
 
     Ok(ctx)
 }

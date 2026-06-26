@@ -3,6 +3,7 @@ pub mod error;
 pub mod gateway;
 pub mod models;
 pub mod persistence;
+pub mod protocol;
 
 use std::path::Path;
 use std::sync::Arc;

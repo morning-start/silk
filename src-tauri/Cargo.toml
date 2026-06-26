@@ -39,6 +39,7 @@ rand = "0.8"
 
 # 错误处理
 thiserror = "2"
+async-trait = "0.1"
 
 # HTTP 客户端（网关转发用，Phase 2 需要）
 reqwest = { version = "0.12", features = ["rustls-tls", "stream", "socks"] }
