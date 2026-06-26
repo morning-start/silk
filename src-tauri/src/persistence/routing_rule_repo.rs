@@ -22,10 +22,10 @@ impl RoutingRuleRepo {
         sqlx::query_as::<_, RoutingRule>(
             r#"
             INSERT INTO routing_rules (id, name, match_host, match_path, match_method, match_content_type,
-                                       inbound_protocol, outbound_protocol, target_provider_id, failover_provider_id,
-                                       protocol_conversion, model_name_override, metadata_json,
+                                       inbound_protocol, outbound_protocol, target_provider_id, target_group_id,
+                                       failover_provider_id, protocol_conversion, model_name_override, metadata_json,
                                        priority, enabled, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             RETURNING *
             "#,
         )
@@ -38,6 +38,7 @@ impl RoutingRuleRepo {
         .bind(new.inbound_protocol.as_deref().unwrap_or("any"))
         .bind(new.outbound_protocol.as_deref().unwrap_or("openai_response"))
         .bind(new.target_provider_id.as_str())
+        .bind(new.target_group_id.as_deref())
         .bind(new.failover_provider_id.as_deref())
         .bind(protocol_conversion)
         .bind(new.model_name_override.as_deref())
@@ -113,13 +114,14 @@ impl RoutingRuleRepo {
                 inbound_protocol = COALESCE($7, inbound_protocol),
                 outbound_protocol = COALESCE($8, outbound_protocol),
                 target_provider_id = COALESCE($9, target_provider_id),
-                failover_provider_id = COALESCE($10, failover_provider_id),
-                protocol_conversion = COALESCE($11, protocol_conversion),
-                model_name_override = COALESCE($12, model_name_override),
-                metadata_json = COALESCE($13, metadata_json),
-                priority = COALESCE($14, priority),
-                enabled = COALESCE($15, enabled),
-                updated_at = $16
+                target_group_id = COALESCE($10, target_group_id),
+                failover_provider_id = COALESCE($11, failover_provider_id),
+                protocol_conversion = COALESCE($12, protocol_conversion),
+                model_name_override = COALESCE($13, model_name_override),
+                metadata_json = COALESCE($14, metadata_json),
+                priority = COALESCE($15, priority),
+                enabled = COALESCE($16, enabled),
+                updated_at = $17
             WHERE id = $1
             RETURNING *
             "#,
@@ -133,6 +135,7 @@ impl RoutingRuleRepo {
         .bind(update.inbound_protocol.as_deref())
         .bind(update.outbound_protocol.as_deref())
         .bind(update.target_provider_id.as_deref())
+        .bind(update.target_group_id.as_deref())
         .bind(update.failover_provider_id.as_deref())
         .bind(protocol_conversion)
         .bind(update.model_name_override.as_deref())

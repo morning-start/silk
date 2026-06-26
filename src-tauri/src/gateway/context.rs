@@ -6,8 +6,9 @@ use axum::http::{HeaderMap, Method, Uri};
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
+use crate::gateway::group_manager::GroupManager;
 use crate::models::{GatewaySettings, Provider, RoutingRule};
-use crate::persistence::{GatewaySettingsRepo, RoutingRuleRepo};
+use crate::persistence::{GatewaySettingsRepo, GroupRepo, RoutingRuleRepo};
 use crate::protocol::AdapterRegistry;
 
 // ---------------------------------------------------------------------------
@@ -22,6 +23,7 @@ pub struct GatewayContext {
     pub provider_cache: Arc<ProviderCache>,
     pub log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
     pub adapter_registry: Arc<AdapterRegistry>,
+    pub group_manager: Arc<GroupManager>,
 }
 
 impl GatewayContext {
@@ -32,6 +34,7 @@ impl GatewayContext {
         provider_cache: Arc<ProviderCache>,
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
         adapter_registry: Arc<AdapterRegistry>,
+        group_manager: Arc<GroupManager>,
     ) -> Self {
         Self {
             pool,
@@ -40,6 +43,7 @@ impl GatewayContext {
             provider_cache,
             log_sender,
             adapter_registry,
+            group_manager,
         }
     }
 }
@@ -79,6 +83,26 @@ impl RouteManager {
             .iter()
             .find(|route| route.matches(host, method, path, content_type))
             .cloned()
+    }
+
+    /// 根据路由规则解析目标 Provider ID
+    ///
+    /// 如果规则指向 group，通过 GroupManager 选择一个 Provider；
+    /// 如果规则直接指向 provider，返回该 provider_id。
+    pub async fn resolve_provider_id(
+        &self,
+        route: &RoutingRule,
+        group_manager: &GroupManager,
+    ) -> Option<String> {
+        if let Some(ref group_id) = route.target_group_id {
+            // 从分组中选择一个 Provider
+            group_manager
+                .select_provider(group_id)
+                .await
+                .map(|member| member.provider_id)
+        } else {
+            Some(route.target_provider_id.clone())
+        }
     }
 }
 
@@ -303,6 +327,8 @@ pub async fn load_gateway_context(
     let route_manager = RouteManager::load(&pool).await?;
     let provider_cache = Arc::new(ProviderCache::new(Duration::from_secs(300)));
     let adapter_registry = Arc::new(AdapterRegistry::new());
+    let group_manager = Arc::new(GroupManager::new());
+    group_manager.load(&pool).await?;
 
     Ok(GatewayContext::new(
         pool,
@@ -311,5 +337,6 @@ pub async fn load_gateway_context(
         provider_cache,
         log_sender,
         adapter_registry,
+        group_manager,
     ))
 }

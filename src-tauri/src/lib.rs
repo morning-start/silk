@@ -122,6 +122,16 @@ pub fn run() {
             // 设置
             commands::get_gateway_settings,
             commands::update_gateway_settings,
+            // 分组管理
+            commands::list_groups,
+            commands::find_groups_by_model,
+            commands::get_group,
+            commands::create_group,
+            commands::update_group,
+            commands::delete_group,
+            commands::add_group_member,
+            commands::update_group_member,
+            commands::remove_group_member,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
