@@ -30,6 +30,15 @@ pub enum GatewayError {
 
     #[error("请求超时")]
     Timeout,
+
+    #[error("序列化错误: {0}")]
+    Serialization(String),
+}
+
+impl From<crate::protocol::ProtocolError> for GatewayError {
+    fn from(err: crate::protocol::ProtocolError) -> Self {
+        GatewayError::Transform(err.to_string())
+    }
 }
 
 impl GatewayError {
@@ -39,7 +48,9 @@ impl GatewayError {
             GatewayError::NotFound(_) => StatusCode::NOT_FOUND,
             GatewayError::Upstream(_) => StatusCode::BAD_GATEWAY,
             GatewayError::Timeout => StatusCode::GATEWAY_TIMEOUT,
-            GatewayError::Database(_) | GatewayError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            GatewayError::Database(_)
+            | GatewayError::Internal(_)
+            | GatewayError::Serialization(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -52,6 +63,7 @@ impl GatewayError {
             GatewayError::Database(_) => "database_error",
             GatewayError::Internal(_) => "internal_error",
             GatewayError::Timeout => "timeout",
+            GatewayError::Serialization(_) => "serialization_error",
         }
     }
 }

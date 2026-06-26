@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 
 use crate::models::{GatewaySettings, Provider, RoutingRule};
 use crate::persistence::{GatewaySettingsRepo, RoutingRuleRepo};
+use crate::protocol::AdapterRegistry;
 
 // ---------------------------------------------------------------------------
 // GatewayContext
@@ -20,6 +21,7 @@ pub struct GatewayContext {
     pub route_manager: Arc<RouteManager>,
     pub provider_cache: Arc<ProviderCache>,
     pub log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
+    pub adapter_registry: Arc<AdapterRegistry>,
 }
 
 impl GatewayContext {
@@ -29,6 +31,7 @@ impl GatewayContext {
         route_manager: Arc<RouteManager>,
         provider_cache: Arc<ProviderCache>,
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
+        adapter_registry: Arc<AdapterRegistry>,
     ) -> Self {
         Self {
             pool,
@@ -36,6 +39,7 @@ impl GatewayContext {
             route_manager,
             provider_cache,
             log_sender,
+            adapter_registry,
         }
     }
 }
@@ -174,6 +178,8 @@ pub struct RequestContext {
     pub response_bytes_sent: u64,
     /// 最后收到的 SSE 事件 ID（用于断线重连）
     pub last_event_id: Option<String>,
+    /// 适配器注册表（用于协议转换）
+    pub adapter_registry: Arc<crate::protocol::AdapterRegistry>,
 }
 
 impl Clone for RequestContext {
@@ -201,6 +207,7 @@ impl Clone for RequestContext {
             response: None,
             response_bytes_sent: self.response_bytes_sent,
             last_event_id: self.last_event_id.clone(),
+            adapter_registry: self.adapter_registry.clone(),
         }
     }
 }
@@ -256,6 +263,7 @@ impl RequestContext {
             response: None,
             response_bytes_sent: 0,
             last_event_id: None,
+            adapter_registry: Arc::new(crate::protocol::AdapterRegistry::new()),
         }
     }
 
@@ -294,6 +302,7 @@ pub async fn load_gateway_context(
     let settings = GatewaySettingsRepo::load_effective(&pool).await?;
     let route_manager = RouteManager::load(&pool).await?;
     let provider_cache = Arc::new(ProviderCache::new(Duration::from_secs(300)));
+    let adapter_registry = Arc::new(AdapterRegistry::new());
 
     Ok(GatewayContext::new(
         pool,
@@ -301,5 +310,6 @@ pub async fn load_gateway_context(
         Arc::new(route_manager),
         provider_cache,
         log_sender,
+        adapter_registry,
     ))
 }
