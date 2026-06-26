@@ -1,5 +1,6 @@
 pub mod context;
 pub mod error;
+pub mod group_manager;
 pub mod middleware;
 pub mod pipeline;
 

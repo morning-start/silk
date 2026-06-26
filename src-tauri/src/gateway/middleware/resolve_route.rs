@@ -26,11 +26,22 @@ pub async fn run(
             )
         })?;
 
-    // 2. 加载 Provider（优先缓存）
-    let provider = load_provider_with_cache(runtime, &route.target_provider_id, error_ctx.clone())
-        .await?;
+    // 2. 解析目标 Provider ID（支持负载均衡分组）
+    let provider_id = runtime
+        .route_manager
+        .resolve_provider_id(&route, &runtime.group_manager)
+        .await
+        .ok_or_else(|| {
+            StageError::new(
+                error_ctx.clone(),
+                GatewayError::NotFound("无法解析目标 Provider".to_string()),
+            )
+        })?;
 
-    // 3. 填充上下文
+    // 3. 加载 Provider（优先缓存）
+    let provider = load_provider_with_cache(runtime, &provider_id, error_ctx.clone()).await?;
+
+    // 4. 填充上下文
     ctx.route = Some(route.clone());
     ctx.provider = Some(provider);
     ctx.inbound_protocol = route.inbound_protocol.clone();
