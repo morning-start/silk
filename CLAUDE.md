@@ -25,41 +25,107 @@ cargo test                # Run Rust tests
 
 ## Current State
 
-**Scaffold only** — the codebase is the default `create-tauri-app` template. No core features implemented yet:
-- `src/App.vue` has the boilerplate greet demo
-- `src-tauri/src/lib.rs` has the boilerplate greet command
-- `index.html` still has the default "Tauri + Vue + Typescript" title
-- No Tailwind, NaiveUI, Vue Router, or Pinia installed
-- No axum, SQLx, or protocol conversion dependencies in Cargo.toml
+**Backend core implemented** — the Rust backend has a working HTTP gateway with middleware pipeline, protocol adapters, and SQLite persistence:
 
-## Architecture (Planned)
+### ✅ Implemented (Rust Backend)
+- **Axum HTTP Gateway** at `src-tauri/src/gateway/` — HTTP server with 7-stage middleware pipeline
+- **Middleware Pipeline** (`pipeline.rs`): extract → resolve_route → normalize_protocol → transform_request → dispatch_upstream → transform_response → persist_log
+- **Protocol Adapters** at `src-tauri/src/protocol/` — OpenAI Chat, Claude Messages, OpenAI Response adapters with `ProviderAdapter` trait
+- **SSE Streaming** (`stream_response.rs`) — Full SSE parsing, heartbeat, reconnect with Last-Event-ID
+- **SQLite Persistence** at `src-tauri/src/persistence/` — Provider, RoutingRule, Group, Log, GatewaySettings repos
+- **Provider Cache** — TTL-based in-memory cache (5 min)
+- **Route Manager** — Host/Path/Method/ContentType matching with group load balancing
+- **AES-GCM Encryption** — Secure API key storage
+- **Async Log Writer** — Channel-based batch write to SQLite
 
-The project follows a **5-layer architecture**:
+### 🚧 In Progress
+- `src/App.vue` still has boilerplate (no UI yet)
+- NaiveUI, Pinia, Vue Router not installed yet
+- No frontend views implemented
 
-```
-Vue3 + NaiveUI + Tailwind (UI)
-    ↕ Tauri IPC (invoke / events)
-Rust Backend (axum HTTP gateway + protocol conversion + media proxy)
-    ↕ async functions
-Persistence (SQLite via sqlx)
-    ↕
-Tauri native layer (tray, window management, file I/O)
-```
-
-**Key flow:** External AI tools → axum localhost gateway → protocol conversion (if LLM, unified to OpenAI Response) / passthrough (if media) → upstream provider → SSE streaming response back.
-
-**Protocol design:** Three inbound protocols (OpenAI Chat, Claude Messages, OpenAI Response) are bidirectionally convertible. All models — including Qwen and native OpenAI — are unified to **OpenAI Response** as the single outbound standard format.
-
-### Planned Module Structure (not yet created)
-
+### 📦 Planned
 - `src/views/` — Provider management, routing rules, log viewer, settings
 - `src/stores/` — Pinia stores for providers, logs, settings
 - `src/components/` — Reusable UI components
-- `src-tauri/src/gateway/` — axum HTTP server, routing, SSE handling
-- `src-tauri/src/protocol/` — Three-protocol bidirectional conversion (OpenAI Chat / Claude Messages / OpenAI Response), unified outbound as OpenAI Response
-- `src-tauri/src/proxy/` — Media API transparent forwarding
-- `src-tauri/src/persistence/` — SQLite models, sqlx queries
-- `src-tauri/src/commands/` — Tauri IPC command handlers
+
+## Architecture
+
+```
+Vue3 + NaiveUI + Tailwind (UI Layer)
+    ↕ Tauri IPC (invoke / events)
+Rust Backend
+    ├─ Axum HTTP Gateway (127.0.0.1:port)
+    │   └─ 7-stage Middleware Pipeline
+    ├─ Protocol Adapters (OpenAI/Claude/Response)
+    ├─ Provider Cache (TTL 5min)
+    └─ Route Manager (Group Load Balancing)
+    ↕ async functions
+Persistence (SQLite via SQLx)
+    ├─ Provider Repo (AES-GCM encrypted keys)
+    ├─ RoutingRule Repo
+    ├─ Group Repo
+    ├─ Log Repo (async batch write)
+    └─ GatewaySettings Repo
+    ↕
+Tauri Native Layer (tray, window management, file I/O)
+```
+
+### Key Flow
+
+```
+External AI Tool → Axum Gateway
+    ↓
+extract::initialize() + read_body()    → Generate request_id, read body (2MB limit)
+    ↓
+resolve_route::run()                   → Match Host/Path/Method/ContentType → find Provider
+    ↓
+normalize_protocol::run()              → Set inbound/outbound protocol from route
+    ↓
+transform_request::run()               → Adapter converts to upstream format
+    ↓
+dispatch_upstream::run()               → Forward to upstream (retry + backoff + SSE reconnect)
+    ↓
+transform_response::run()              → Adapter converts response
+    ↓
+persist_log::run() → finalize()        → Async log write + build final response
+```
+
+### Module Structure
+
+```
+src-tauri/src/
+├── lib.rs                    # Tauri entry point
+├── main.rs                   # App entry
+├── error.rs                  # Global error types
+├── crypto/                   # AES-GCM encryption
+├── gateway/
+│   ├── mod.rs                # Server startup
+│   ├── pipeline.rs           # 7-stage middleware pipeline
+│   ├── context.rs            # RequestContext + GatewayContext
+│   ├── error.rs              # GatewayError enum
+│   ├── group_manager.rs      # Provider group load balancing
+│   └── middleware/
+│       ├── extract.rs        # Request extraction
+│       ├── resolve_route.rs  # Route resolution
+│       ├── normalize_protocol.rs
+│       ├── transform_request.rs
+│       ├── dispatch_upstream.rs
+│       ├── transform_response.rs
+│       ├── stream_response.rs  # SSE handling
+│       ├── persist_log.rs
+│       └── finalize.rs
+├── protocol/
+│   ├── adapter.rs            # ProviderAdapter trait
+│   ├── registry.rs           # Adapter registry
+│   ├── canonical.rs          # Canonical format
+│   └── adapters/
+│       ├── openai_chat.rs
+│       ├── claude.rs
+│       └── openai_response.rs
+├── persistence/              # SQLite repos
+├── models/                   # Data models
+└── commands/                 # Tauri IPC handlers
+```
 
 ## Tech Stack Decisions (Locked)
 
@@ -69,7 +135,6 @@ Tauri native layer (tray, window management, file I/O)
 | Axum (not Actix/Salvo) | Best Tokio/Tower ecosystem compatibility |
 | NaiveUI (not Element Plus) | Better TS support, smaller, superior theming |
 | SQLx + SQLite (not redb/sled) | Need SQL for log pagination/filtering |
-| sse-reqwest-client (not reqwest-eventsource) | The latter is unmaintained |
 | hyper-rustls (not native-tls) | Pure Rust TLS, no cross-platform OpenSSL issues |
 | Bun (not npm/pnpm) | Faster installs, HMR, builds |
 | Tokio full async | Single async runtime for all I/O |
@@ -83,3 +148,21 @@ Tauri native layer (tray, window management, file I/O)
 - **Package manager:** Bun, not npm
 - **Bundle identifier:** `morning-start.silk`
 - **Comments/documents:** Chinese is used in docs and UI text
+- **Middleware pattern:** Each stage is a separate module in `middleware/` with a `run()` function
+- **Protocol adapters:** Implement `ProviderAdapter` trait, register in `AdapterRegistry`
+- **Error handling:** `GatewayError` enum with `status_code()` and `error_code()` methods
+
+## API Endpoints
+
+| Method | Path | Handler |
+|--------|------|---------|
+| GET | `/health` | Returns `{"status": "ok", "service": "silk-gateway"}` |
+| * | `/*` | `GatewayPipeline` (full middleware pipeline) |
+
+## Database Tables
+
+- `providers` — AI service providers (API keys encrypted with AES-GCM)
+- `routing_rules` — Host/Path/Method/ContentType matching rules
+- `provider_groups` — Groups for load balancing
+- `request_logs` — Full request/response logs (async batch write)
+- `gateway_settings` — Server config (bind host/port, etc.)
