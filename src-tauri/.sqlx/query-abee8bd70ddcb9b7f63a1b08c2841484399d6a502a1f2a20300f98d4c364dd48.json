@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT OR IGNORE INTO gateway_settings (\n                id, bind_host, bind_port, allow_remote, log_retention_days, created_at, updated_at\n            )\n            VALUES ('default', '127.0.0.1', 2013, 0, 30, $1, $1)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "abee8bd70ddcb9b7f63a1b08c2841484399d6a502a1f2a20300f98d4c364dd48"
+}

@@ -4,13 +4,16 @@ pub mod gateway;
 pub mod models;
 pub mod persistence;
 
+use std::path::Path;
+use std::sync::Arc;
+
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 use tauri::Manager;
 use tokio::sync::RwLock;
-use std::sync::Arc;
 
-use crate::gateway::{load_gateway_context, spawn_gateway_server, GatewayContext, GatewayServerHandle};
+use crate::gateway::spawn_gateway_server;
+use crate::gateway::{load_gateway_context, GatewayContext, GatewayServerHandle};
 
 /// 数据库连接池（全局唯一）
 static DB_POOL: tokio::sync::OnceCell<SqlitePool> = tokio::sync::OnceCell::const_new();
@@ -23,12 +26,9 @@ pub struct AppState {
 }
 
 /// 初始化数据库连接池并运行迁移
-pub async fn init_database(
-    data_dir: &std::path::Path,
-) -> Result<&'static SqlitePool, sqlx::Error> {
+pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx::Error> {
     DB_POOL
         .get_or_try_init(|| async move {
-            // 确保数据目录存在
             std::fs::create_dir_all(data_dir)?;
 
             let db_path = data_dir.join("silk.db");
@@ -41,12 +41,10 @@ pub async fn init_database(
                 .connect(&db_url)
                 .await?;
 
-            // 启用 WAL 模式（提升并发读写性能）
             sqlx::query("PRAGMA journal_mode = WAL")
                 .execute(&pool)
                 .await?;
 
-            // 运行迁移
             sqlx::migrate!("./migrations").run(&pool).await?;
 
             Ok(pool)
@@ -54,7 +52,6 @@ pub async fn init_database(
         .await
 }
 
-/// 获取全局数据库连接池（需先调用 init_database）
 pub fn get_db_pool() -> Option<&'static SqlitePool> {
     DB_POOL.get()
 }
@@ -62,6 +59,9 @@ pub fn get_db_pool() -> Option<&'static SqlitePool> {
 // Tauri 入口
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 日志 channel：容量 1000，背压时丢弃最旧日志
+    let (log_sender, log_receiver) = tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -72,7 +72,13 @@ pub fn run() {
 
             if let Err(err) = tauri::async_runtime::block_on(async {
                 let pool = init_database(&data_dir).await?;
-                let gateway = load_gateway_context(pool).await?;
+
+                // 启动后台日志写入任务
+                let log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
+                app.manage(log_writer_handle);
+
+                // 加载网关上下文（含 log_sender）
+                let gateway = load_gateway_context(pool.clone(), log_sender).await?;
                 let gateway_server = spawn_gateway_server(gateway.clone()).await?;
 
                 app.manage(AppState {
