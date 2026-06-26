@@ -52,6 +52,7 @@ tower-http = { version = "0.6", features = ["cors", "fs"] }
 # SSE 客户端（Phase 2 需要）
 bytes = "1"
 futures = "0.3"
+tokio-stream = "0.1"
 
 # 并发容器（Route Manager 用）
 dashmap = "6"
