@@ -28,23 +28,22 @@ pub struct AppState {
 }
 
 /// 初始化数据库连接池并运行迁移
-pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx::Error> {
+pub async fn init_database(_data_dir: &Path) -> Result<&'static SqlitePool, sqlx::Error> {
     DB_POOL
         .get_or_try_init(|| async move {
-            std::fs::create_dir_all(data_dir)?;
-
-            let db_path = data_dir.join("silk.db");
-            let db_url = format!("sqlite://{}", db_path.display());
+            // 使用临时目录，确保目录存在
+            let temp_dir = std::env::temp_dir();
+            let _ = std::fs::create_dir_all(&temp_dir);
+            let db_path = temp_dir.join("silk.db");
+            let _ = std::fs::File::create(&db_path);
+            let path_str = db_path.to_str().unwrap_or("silk.db").replace('\\', "/");
+            let db_url = format!("sqlite:///{path_str}");
 
             let pool = SqlitePoolOptions::new()
                 .max_connections(5)
                 .min_connections(1)
                 .acquire_timeout(std::time::Duration::from_secs(5))
                 .connect(&db_url)
-                .await?;
-
-            sqlx::query("PRAGMA journal_mode = WAL")
-                .execute(&pool)
                 .await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
