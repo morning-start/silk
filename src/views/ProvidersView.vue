@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, h } from "vue";
+import { ref, computed, onMounted } from "vue";
 import {
   NButton,
   NModal,
@@ -46,7 +46,6 @@ const formValue = ref({
   models: [] as string[],
   api_base_url: "",
   api_key: "",
-  model_name: "",
   proxy_url: "",
   timeout_seconds: 30,
   max_retries: 3,
@@ -55,25 +54,7 @@ const formValue = ref({
 });
 
 // 模型获取
-const modelOptions = ref<{ label: string; value: string; owned_by?: string | null; endpoints?: string[] }[]>([]);
 const fetchingModels = ref(false);
-
-// 自定义模型选择器标签渲染
-function renderModelLabel(option: { label: string; value: string; owned_by?: string | null; endpoints?: string[] }) {
-  const chips: any[] = [];
-  if (option.owned_by) {
-    chips.push(h(NTag, { size: 'tiny', round: true, style: 'margin-left: 8px' }, { default: () => option.owned_by }));
-  }
-  if (option.endpoints && option.endpoints.length > 0) {
-    option.endpoints.forEach((ept: string) => {
-      chips.push(h(NTag, { size: 'tiny', round: true, type: 'info', style: 'margin-left: 4px' }, { default: () => ept }));
-    });
-  }
-  return h('div', { style: 'display: flex; align-items: center;' }, [
-    h('span', option.label),
-    ...chips,
-  ]);
-}
 
 const protocolOptions = [
   { label: "Chat", value: "chat" },
@@ -89,14 +70,12 @@ function handleAdd() {
     models: [],
     api_base_url: "",
     api_key: "",
-    model_name: "",
     proxy_url: "",
     timeout_seconds: 30,
     max_retries: 3,
     status: "enabled",
     extraKeys: [],
   };
-  modelOptions.value = [];
   showModal.value = true;
 }
 
@@ -116,7 +95,6 @@ async function fetchModels() {
   // 发送前确保 URL 已清洗
   normalizeUrl();
   fetchingModels.value = true;
-  modelOptions.value = [];
   try {
     const models = await api.fetchProviderModels({
       api_base_url: formValue.value.api_base_url,
@@ -124,16 +102,10 @@ async function fetchModels() {
       proxy_url: formValue.value.proxy_url || undefined,
       timeout_seconds: formValue.value.timeout_seconds,
     });
-    modelOptions.value = models.map((m) => ({
-      label: m.id,
-      value: m.id,
-      owned_by: m.owned_by,
-      endpoints: m.supported_endpoint_types,
-    }));
-    if (models.length > 0 && !formValue.value.model_name) {
-      formValue.value.model_name = models[0].id;
+    formValue.value.models = models.map((m) => m.id);
+    if (models.length > 0) {
+      message.success(`获取到 ${models.length} 个模型`);
     }
-    message.success(`获取到 ${models.length} 个模型`);
   } catch (e: any) {
     message.error(e.message || "获取模型列表失败");
   } finally {
@@ -157,22 +129,12 @@ function handleEdit(row: Provider) {
     models: row.models || [],
     api_base_url: row.api_base_url,
     api_key: "",
-    model_name: row.model_name || "",
     proxy_url: row.proxy_url || "",
     timeout_seconds: row.timeout_seconds,
     max_retries: row.max_retries,
     status: row.status,
     extraKeys: [],
   };
-  // 编辑时从已有的 models 填充下拉选项
-  if (row.models && row.models.length > 0) {
-    modelOptions.value = row.models.map((m: string) => ({
-      label: m,
-      value: m,
-      owned_by: null,
-      endpoints: [],
-    }));
-  }
   showModal.value = true;
 }
 
@@ -349,19 +311,19 @@ onMounted(() => {
             <NButton size="tiny" quaternary @click="addExtraKey">+ 添加密钥</NButton>
           </div>
         </NFormItem>
-        <NFormItem label="默认模型">
-          <div style="display: flex; gap: 8px; width: 100%; align-items: flex-start">
-            <NSelect
-              v-model:value="formValue.model_name"
-              :options="modelOptions"
-              :placeholder="modelOptions.length > 0 ? '选择模型' : 'gpt-4o'"
-              :allow-clear="true"
-              :filterable="true"
-              :tag="true"
-              style="flex: 1"
-              :disabled="fetchingModels"
-              :render-label="renderModelLabel"
-            />
+        <NFormItem label="模型">
+          <div style="display: flex; gap: 8px; width: 100%; flex-wrap: wrap; align-items: center">
+            <template v-if="formValue.models.length > 0">
+              <NTag
+                v-for="(m, i) in formValue.models"
+                :key="i"
+                closable
+                size="small"
+                @close="formValue.models.splice(i, 1)"
+              >
+                {{ m }}
+              </NTag>
+            </template>
             <NButton
               secondary
               size="small"
