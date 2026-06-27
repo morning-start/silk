@@ -4,6 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 // Types
 // ---------------------------------------------------------------------------
 
+export interface ProviderKeyEntry {
+  name: string;
+  value: string;
+  enabled: boolean;
+}
+
 export interface Provider {
   id: string;
   name: string;

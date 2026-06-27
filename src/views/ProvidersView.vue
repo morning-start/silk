@@ -231,6 +231,15 @@ function handleEdit(row: Provider) {
     max_retries: row.max_retries,
     status: row.status,
   };
+  // 编辑时从已有的 models 填充下拉选项
+  if (row.models && row.models.length > 0) {
+    modelOptions.value = row.models.map((m: string) => ({
+      label: m,
+      value: m,
+      owned_by: null,
+      endpoints: [],
+    }));
+  }
   showModal.value = true;
 }
 
