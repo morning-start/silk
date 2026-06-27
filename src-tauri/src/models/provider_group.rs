@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+use crate::load_balancer::LoadBalancedItem;
+
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct ProviderGroup {
     pub id: String,
@@ -20,6 +22,11 @@ pub struct GroupMember {
     pub weight: i64,
     pub enabled: i64,
     pub created_at: chrono::NaiveDateTime,
+}
+
+impl LoadBalancedItem for GroupMember {
+    fn weight(&self) -> i64 { self.weight }
+    fn enabled(&self) -> bool { self.enabled != 0 }
 }
 
 /// 负载均衡策略

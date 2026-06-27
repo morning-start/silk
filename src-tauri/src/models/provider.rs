@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+use crate::load_balancer::LoadBalancedItem;
+
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
@@ -74,6 +76,11 @@ pub struct ProviderKeyEntry {
     pub enabled: bool,
     #[serde(default = "default_weight")]
     pub weight: i64,
+}
+
+impl LoadBalancedItem for ProviderKeyEntry {
+    fn weight(&self) -> i64 { self.weight.max(1) }
+    fn enabled(&self) -> bool { self.enabled }
 }
 
 fn default_weight() -> i64 { 1 }
