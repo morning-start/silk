@@ -36,7 +36,7 @@ const filteredProviders = computed(() => {
     (p) =>
       p.name.toLowerCase().includes(q) ||
       p.api_base_url.toLowerCase().includes(q) ||
-      p.provider_type.toLowerCase().includes(q)
+      p.protocols?.some((pr: string) => pr.toLowerCase().includes(q))
   );
 });
 
@@ -45,7 +45,7 @@ const editingId = ref<string | null>(null);
 
 const formValue = ref({
   name: "",
-  provider_type: "openai",
+  protocols: [] as string[],
   api_base_url: "",
   api_key: "",
   model_name: "",
@@ -59,29 +59,35 @@ const formValue = ref({
 const modelOptions = ref<{ label: string; value: string }[]>([]);
 const fetchingModels = ref(false);
 
-const typeOptions = [
-  { label: "OpenAI", value: "openai" },
-  { label: "Anthropic", value: "anthropic" },
-  { label: "Azure", value: "azure" },
-  { label: "自定义", value: "custom" },
+const protocolOptions = [
+  { label: "Chat 对话", value: "chat" },
+  { label: "Response 响应", value: "response" },
+  { label: "Message 消息(Anthropic)", value: "message" },
 ];
 
 const columns: DataTableColumns<Provider> = [
   { title: "名称", key: "name", width: 120 },
   {
-    title: "类型",
-    key: "provider_type",
-    width: 100,
+    title: "接口协议",
+    key: "protocols",
+    width: 160,
     render(row) {
-      const colors: Record<string, string> = {
-        openai: "blue",
-        anthropic: "orange",
-        azure: "azure",
-        custom: "default",
+      const labels: Record<string, string> = {
+        chat: "Chat",
+        response: "Response",
+        message: "Message",
       };
-      return h(NTag, { size: "small", type: (colors[row.provider_type] || "default") as any }, {
-        default: () => row.provider_type,
-      });
+      const colors: Record<string, string> = {
+        chat: "info",
+        response: "success",
+        message: "warning",
+      };
+      if (!row.protocols || row.protocols.length === 0) return h(NText, { depth: 3 }, { default: () => "未配置" });
+      return h("span", { style: "display:flex;gap:4px;flex-wrap:wrap" },
+        row.protocols.map((p: string) =>
+          h(NTag, { size: "small", type: (colors[p] || "default") as any }, { default: () => labels[p] || p })
+        )
+      );
     },
   },
   { title: "Base URL", key: "api_base_url", ellipsis: { tooltip: true } },
@@ -125,7 +131,7 @@ function handleAdd() {
   editingId.value = null;
   formValue.value = {
     name: "",
-    provider_type: "openai",
+    protocols: [],
     api_base_url: "",
     api_key: "",
     model_name: "",
@@ -178,7 +184,7 @@ function handleEdit(row: Provider) {
   editingId.value = row.id;
   formValue.value = {
     name: row.name,
-    provider_type: row.provider_type,
+    protocols: row.protocols || [],
     api_base_url: row.api_base_url,
     api_key: "",
     model_name: row.model_name || "",
@@ -300,8 +306,13 @@ onMounted(() => {
         <NFormItem label="名称" required>
           <NInput v-model:value="formValue.name" placeholder="如：OpenAI 官方" />
         </NFormItem>
-        <NFormItem label="类型" required>
-          <NSelect v-model:value="formValue.provider_type" :options="typeOptions" />
+        <NFormItem label="接口协议" required>
+          <NSelect
+            v-model:value="formValue.protocols"
+            :options="protocolOptions"
+            multiple
+            placeholder="选择支持的接口协议"
+          />
         </NFormItem>
         <NFormItem label="API 地址" required>
           <NInput v-model:value="formValue.api_base_url" placeholder="https://api.openai.com" @blur="normalizeUrl" />

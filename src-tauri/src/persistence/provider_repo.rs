@@ -16,16 +16,17 @@ impl ProviderRepo {
 
         sqlx::query_as::<_, Provider>(
             r#"
-            INSERT INTO providers (id, name, provider_type, api_base_url, api_key, model_name,
+            INSERT INTO providers (id, name, provider_type, protocols, api_base_url, api_key, model_name,
                                    proxy_url, timeout_seconds, max_retries, status, health_status,
                                    last_health_check_at, metadata_json, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING *
             "#,
         )
         .bind(id)
         .bind(new.name.as_str())
-        .bind(new.provider_type.as_str())
+        .bind("custom") // provider_type 保留旧字段，统一设为 custom
+        .bind(serde_json::to_string(&new.protocols).unwrap_or_default())
         .bind(new.api_base_url.as_str())
         .bind(encrypted_key)
         .bind(new.model_name.as_deref())
@@ -88,24 +89,26 @@ impl ProviderRepo {
             UPDATE providers
             SET name = COALESCE($2, name),
                 provider_type = COALESCE($3, provider_type),
-                api_base_url = COALESCE($4, api_base_url),
-                api_key = COALESCE($5, api_key),
-                model_name = COALESCE($6, model_name),
-                proxy_url = COALESCE($7, proxy_url),
-                timeout_seconds = COALESCE($8, timeout_seconds),
-                max_retries = COALESCE($9, max_retries),
-                status = COALESCE($10, status),
-                health_status = COALESCE($11, health_status),
-                last_health_check_at = COALESCE($12, last_health_check_at),
-                metadata_json = COALESCE($13, metadata_json),
-                updated_at = $14
+                protocols = COALESCE($4, protocols),
+                api_base_url = COALESCE($5, api_base_url),
+                api_key = COALESCE($6, api_key),
+                model_name = COALESCE($7, model_name),
+                proxy_url = COALESCE($8, proxy_url),
+                timeout_seconds = COALESCE($9, timeout_seconds),
+                max_retries = COALESCE($10, max_retries),
+                status = COALESCE($11, status),
+                health_status = COALESCE($12, health_status),
+                last_health_check_at = COALESCE($13, last_health_check_at),
+                metadata_json = COALESCE($14, metadata_json),
+                updated_at = $15
             WHERE id = $1
             RETURNING *
             "#,
         )
         .bind(id)
         .bind(update.name.as_deref())
-        .bind(update.provider_type.as_deref())
+        .bind(update.protocols.as_ref().map(|_| "custom"))
+        .bind(update.protocols.as_ref().map(|p| serde_json::to_string(p).unwrap_or_default()))
         .bind(update.api_base_url.as_deref())
         .bind(encrypted_key)
         .bind(update.model_name.as_deref())

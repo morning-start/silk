@@ -5,7 +5,10 @@ use sqlx::FromRow;
 pub struct Provider {
     pub id: String,
     pub name: String,
+    /// 旧类型字段，保留用于向后兼容（不再在前端展示）
     pub provider_type: String,
+    /// 支持的接口协议列表（JSON 数组），如 ["chat","response","message"]
+    pub protocols: String,
     pub api_base_url: String,
     /// 加密的 API Key（AES-GCM 密文，hex 编码存储）
     pub api_key: String,
@@ -25,7 +28,8 @@ pub struct Provider {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewProvider {
     pub name: String,
-    pub provider_type: String,
+    /// 支持的接口协议，如 ["chat", "response", "message"]
+    pub protocols: Vec<String>,
     pub api_base_url: String,
     /// 明文 API Key，存储时由调用方加密
     pub api_key: String,
@@ -43,7 +47,7 @@ pub struct NewProvider {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateProvider {
     pub name: Option<String>,
-    pub provider_type: Option<String>,
+    pub protocols: Option<Vec<String>>,
     pub api_base_url: Option<String>,
     /// 明文 API Key，存储时由调用方加密
     pub api_key: Option<String>,
@@ -84,6 +88,11 @@ impl Provider {
     /// 归一化的健康状态标签
     pub fn health_status_label(&self) -> &str {
         self.health_status.as_deref().unwrap_or("unknown")
+    }
+
+    /// 解析 protocols JSON 字段为 Vec<String>
+    pub fn protocols_vec(&self) -> Vec<String> {
+        serde_json::from_str(&self.protocols).unwrap_or_default()
     }
 
     /// 规范化 API Base URL：去除尾部 /v1 或 /v1/
