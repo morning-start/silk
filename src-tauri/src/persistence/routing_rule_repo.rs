@@ -149,7 +149,8 @@ impl RoutingRuleRepo {
 
     /// 删除路由规则
     pub async fn delete(pool: &SqlitePool, id: &str) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query!(r#"DELETE FROM routing_rules WHERE id = $1"#, id)
+        let result = sqlx::query(r#"DELETE FROM routing_rules WHERE id = $1"#)
+            .bind(id)
             .execute(pool)
             .await?;
 
