@@ -12,7 +12,6 @@ import {
   NCard,
   NSpace,
   NSelect,
-  NDivider,
   useMessage,
 } from "naive-ui";
 import { useGatewayStore } from "../stores/gateway";
@@ -133,19 +132,23 @@ onMounted(() => {
 
 <template>
   <div class="settings-page">
-    <div class="settings-header">
-      <h2 class="page-title">系统设置</h2>
-      <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存更改</NButton>
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <h2 class="page-title">系统设置</h2>
+      </div>
+      <div class="toolbar-right">
+        <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存更改</NButton>
+      </div>
     </div>
 
     <!-- 网关基础 -->
     <NCard :bordered="false" class="settings-card" size="small" title="网关基础">
-      <NForm ref="formRef" :model="formValue" label-placement="left" label-width="130">
+      <NForm ref="formRef" :model="formValue" label-placement="left" label-width="100">
         <div class="form-row">
           <NFormItem label="监听地址" style="flex: 1">
             <NInput v-model:value="formValue.bind_host" placeholder="127.0.0.1" />
           </NFormItem>
-          <NFormItem label="监听端口" style="flex: 0 0 160px">
+          <NFormItem label="监听端口" style="flex: 1">
             <NInputNumber v-model:value="formValue.bind_port" :min="1" :max="65535" style="width: 100%" />
           </NFormItem>
         </div>
@@ -153,7 +156,7 @@ onMounted(() => {
           <NFormItem label="允许远程访问" style="flex: 1">
             <NSwitch v-model:value="formValue.allow_remote" />
           </NFormItem>
-          <NFormItem label="日志保留天数" style="flex: 0 0 160px">
+          <NFormItem label="日志保留天数" style="flex: 1">
             <NInputNumber v-model:value="formValue.log_retention_days" :min="1" :max="3650" style="width: 100%" />
           </NFormItem>
         </div>
@@ -168,11 +171,9 @@ onMounted(() => {
       </NForm>
     </NCard>
 
-    <NDivider class="section-divider" />
-
     <!-- 限流配额 -->
     <NCard :bordered="false" class="settings-card" size="small" title="限流配额">
-      <NForm :model="formValue" label-placement="left" label-width="130">
+      <NForm :model="formValue" label-placement="left" label-width="100">
         <div class="form-row">
           <NFormItem label="每分钟请求上限" style="flex: 1">
             <NInputNumber v-model:value="formValue.rate_limit_max_requests_per_minute" :min="1" :max="100000" style="width: 100%" />
@@ -186,8 +187,6 @@ onMounted(() => {
         </NFormItem>
       </NForm>
     </NCard>
-
-    <NDivider class="section-divider" />
 
     <!-- Key 管理 -->
     <NCard :bordered="false" class="settings-card" size="small" title="Key 管理">
@@ -230,12 +229,10 @@ onMounted(() => {
       </div>
     </NCard>
 
-    <NDivider class="section-divider" />
-
     <!-- 日志规则 -->
     <NCard :bordered="false" class="settings-card" size="small" title="日志规则">
-      <NForm :model="formValue" label-placement="left" label-width="130">
-        <NFormItem label="日志保留天数" style="max-width: 280px">
+      <NForm :model="formValue" label-placement="left" label-width="100">
+        <NFormItem label="日志保留天数" style="max-width: 360px">
           <NInputNumber v-model:value="formValue.log_retention_days" :min="1" :max="3650" style="width: 100%" />
         </NFormItem>
         <NFormItem label="自动清理">
@@ -245,11 +242,9 @@ onMounted(() => {
       </NForm>
     </NCard>
 
-    <NDivider class="section-divider" />
-
     <!-- 全局负载均衡 -->
     <NCard :bordered="false" class="settings-card" size="small" title="全局负载均衡">
-      <NForm :model="formValue" label-placement="left" label-width="130">
+      <NForm :model="formValue" label-placement="left" label-width="100">
         <div class="form-row">
           <NFormItem label="默认调度策略" style="flex: 1">
             <NSelect
@@ -261,7 +256,7 @@ onMounted(() => {
               ]"
             />
           </NFormItem>
-          <NFormItem label="健康检查间隔" style="flex: 0 0 160px">
+          <NFormItem label="健康检查间隔" style="flex: 1">
             <NSelect
               :value="'30s'"
               :options="[
@@ -277,7 +272,7 @@ onMounted(() => {
           <NFormItem label="失败切换阈值" style="flex: 1">
             <NInputNumber :value="3" :min="1" :max="20" style="width: 100%" />
           </NFormItem>
-          <NFormItem label="恢复检测次数" style="flex: 0 0 160px">
+          <NFormItem label="恢复检测次数" style="flex: 1">
             <NInputNumber :value="2" :min="1" :max="20" style="width: 100%" />
           </NFormItem>
         </div>
@@ -291,15 +286,25 @@ onMounted(() => {
 
 <style scoped>
 .settings-page {
-  max-width: 720px;
-  margin: 0 auto;
+  max-width: 1200px;
 }
 
-.settings-header {
+.toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
 }
 
 .page-title {
@@ -310,15 +315,12 @@ onMounted(() => {
 
 .settings-card {
   border-radius: 12px;
-}
-
-.section-divider {
-  margin: 24px 0;
+  margin-bottom: 16px;
 }
 
 .form-row {
   display: flex;
-  gap: 16px;
+  gap: 12px;
 }
 
 .add-key-box {
