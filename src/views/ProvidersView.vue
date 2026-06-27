@@ -49,7 +49,8 @@ const formValue = ref({
   timeout_seconds: 30,
   max_retries: 3,
   status: "enabled" as string,
-  keys: [] as { name: string; value: string; enabled: boolean }[],
+  key_strategy: "round_robin",
+  keys: [] as { name: string; value: string; enabled: boolean; weight: number }[],
 });
 
 // 模型获取
@@ -72,13 +73,14 @@ function handleAdd() {
     timeout_seconds: 30,
     max_retries: 3,
     status: "enabled",
-    keys: [{ name: "默认", value: "", enabled: true }],
+    key_strategy: "round_robin",
+    keys: [{ name: "默认", value: "", enabled: true, weight: 1 }],
   };
   showModal.value = true;
 }
 
 function addKey() {
-  formValue.value.keys.push({ name: "", value: "", enabled: true });
+  formValue.value.keys.push({ name: "", value: "", enabled: true, weight: 1 });
 }
 
 function removeKey(index: number) {
@@ -132,7 +134,8 @@ function handleEdit(row: Provider) {
     timeout_seconds: row.timeout_seconds,
     max_retries: row.max_retries,
     status: row.status,
-    keys: [{ name: "默认", value: "", enabled: true }],
+    key_strategy: "round_robin",
+    keys: [{ name: "默认", value: "", enabled: true, weight: 1 }],
   };
   showModal.value = true;
 }
@@ -295,11 +298,23 @@ onMounted(() => {
         </NFormItem>
 
         <!-- API 密钥 -->
+        <NFormItem label="密钥策略">
+          <NSelect
+            v-model:value="formValue.key_strategy"
+            :options="[
+              { label: '轮询', value: 'round_robin' },
+              { label: '加权轮询', value: 'weighted' },
+              { label: '顺序故障转移', value: 'failover' },
+            ]"
+            style="width: 200px"
+          />
+        </NFormItem>
         <NFormItem label="密钥">
           <div style="width: 100%">
             <div v-for="(k, i) in formValue.keys" :key="i" style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
               <NInput v-model:value="k.name" placeholder="名称" size="small" style="flex:0 0 80px" />
               <NInput v-model:value="k.value" type="password" placeholder="sk-..." size="small" style="flex:1" show-password-on="click" />
+              <NInputNumber v-if="formValue.key_strategy === 'weighted'" v-model:value="k.weight" :min="1" :max="100" size="small" style="width:70px" placeholder="权重" />
               <NSwitch v-model:value="k.enabled" size="small" />
               <NButton quaternary size="tiny" type="error" @click="removeKey(i)">×</NButton>
             </div>

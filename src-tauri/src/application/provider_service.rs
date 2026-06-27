@@ -31,6 +31,7 @@ pub struct CreateProviderPayload {
     pub api_key: String,
     pub models: Vec<String>,
     pub keys: Vec<crate::models::ProviderKeyEntry>,
+    pub key_strategy: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
     pub max_retries: Option<i64>,
@@ -54,6 +55,7 @@ pub struct UpdateProviderPayload {
     pub api_key: Option<String>,
     pub models: Option<Vec<String>>,
     pub keys: Option<Vec<crate::models::ProviderKeyEntry>>,
+    pub key_strategy: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
     pub max_retries: Option<i64>,
@@ -111,6 +113,7 @@ pub async fn create(
         protocols: payload.protocols,
         models: payload.models,
         keys: encrypt_keys(payload.keys, &master_key),
+        key_strategy: payload.key_strategy,
         api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
         proxy_url: payload.proxy_url,
         timeout_seconds: payload.timeout_seconds,
@@ -143,6 +146,7 @@ pub async fn update(
         protocols: payload.protocols,
         models: payload.models,
         keys: payload.keys.map(|k| encrypt_keys(k, &master_key)),
+        key_strategy: payload.key_strategy,
         api_base_url: payload
             .api_base_url
             .map(|u| crate::models::Provider::normalize_api_base_url(&u)),
