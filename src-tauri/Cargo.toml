@@ -61,3 +61,6 @@ dashmap = "6"
 # 日志
 tracing = "0.1"
 tracing-subscriber = "0.3"
+
+# LLM 协议转换
+linguafranca = "0.3"
