@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 export interface Provider {
   id: string;
   name: string;
-  provider_type: string;
+  protocols: string[];
   api_base_url: string;
   model_name: string | null;
   proxy_url: string | null;

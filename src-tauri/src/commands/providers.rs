@@ -54,7 +54,7 @@ pub async fn create_provider(
 
     let new = NewProvider {
         name: payload.name,
-        provider_type: payload.provider_type,
+        protocols: payload.protocols,
         api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
         api_key: payload.api_key, // 明文，Repo 会加密
         model_name: payload.model_name,
@@ -95,7 +95,7 @@ pub async fn update_provider(
 
     let update = UpdateProvider {
         name: payload.name,
-        provider_type: payload.provider_type,
+        protocols: payload.protocols,
         api_base_url: payload.api_base_url.map(|u| crate::models::Provider::normalize_api_base_url(&u)),
         api_key: payload.api_key,
         model_name: payload.model_name,
@@ -298,7 +298,7 @@ pub async fn fetch_provider_models(
 pub struct ProviderResponse {
     pub id: String,
     pub name: String,
-    pub provider_type: String,
+    pub protocols: Vec<String>,
     pub api_base_url: String,
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
@@ -313,16 +313,16 @@ pub struct ProviderResponse {
 impl From<Provider> for ProviderResponse {
     fn from(p: Provider) -> Self {
         Self {
-            id: p.id,
-            name: p.name,
-            provider_type: p.provider_type,
-            api_base_url: p.api_base_url,
-            model_name: p.model_name,
-            proxy_url: p.proxy_url,
+            id: p.id.clone(),
+            name: p.name.clone(),
+            protocols: p.protocols_vec(),
+            api_base_url: p.api_base_url.clone(),
+            model_name: p.model_name.clone(),
+            proxy_url: p.proxy_url.clone(),
             timeout_seconds: p.timeout_seconds,
             max_retries: p.max_retries,
-            status: p.status,
-            health_status: p.health_status,
+            status: p.status.clone(),
+            health_status: p.health_status.clone(),
             created_at: p.created_at.to_string(),
             updated_at: p.updated_at.to_string(),
         }
@@ -332,7 +332,7 @@ impl From<Provider> for ProviderResponse {
 #[derive(Debug, Deserialize)]
 pub struct CreateProviderPayload {
     pub name: String,
-    pub provider_type: String,
+    pub protocols: Vec<String>,
     pub api_base_url: String,
     pub api_key: String,
     pub model_name: Option<String>,
@@ -354,7 +354,7 @@ pub struct ProviderTestResponse {
 #[derive(Debug, Deserialize)]
 pub struct UpdateProviderPayload {
     pub name: Option<String>,
-    pub provider_type: Option<String>,
+    pub protocols: Option<Vec<String>>,
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,
     pub model_name: Option<String>,
