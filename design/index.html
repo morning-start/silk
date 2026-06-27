@@ -1,0 +1,1116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Silk Gateway 管理系统</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#f5f5f5;--surface:#fff;--surface-alt:#fafafa;--fg:#111;--fg-2:#3a3a3a;--muted:#707070;--border:#e5e5e5;--border-strong:#d4d4d4;--accent:#3B82F6;--accent-hover:#2563EB;--accent-soft:rgba(59,130,246,.1);--success:#16A34A;--success-soft:rgba(22,163,74,.12);--warning:#D97706;--warning-soft:rgba(217,119,6,.12);--danger:#DC2626;--danger-soft:rgba(220,38,38,.12);--sidebar-bg:#0f0f14;--sidebar-fg:#a0a0a0;--sidebar-active:#fff;--sidebar-hover:rgba(255,255,255,.06);--sidebar-width:240px;--topbar-height:60px;--font-body:'Inter',system-ui,sans-serif;--font-mono:'JetBrains Mono',ui-monospace,monospace;--radius:8px;--radius-lg:12px;--shadow-sm:0 1px 2px rgba(0,0,0,.04);--shadow:0 1px 3px rgba(0,0,0,.08);--shadow-lg:0 4px 12px rgba(0,0,0,.1);--transition:150ms ease}
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{-webkit-text-size-adjust:100%}
+    body{font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--fg);background:var(--bg);text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;display:flex;min-height:100vh}
+    button{font:inherit;cursor:pointer;border:none;background:none}
+    input,select,textarea{font:inherit;color:inherit}
+    a{color:inherit;text-decoration:none}
+    table{width:100%;border-collapse:collapse}
+    .sidebar{position:fixed;inset:0 auto 0 0;width:var(--sidebar-width);background:var(--sidebar-bg);color:var(--sidebar-fg);display:flex;flex-direction:column;z-index:100;overflow-y:auto}
+    .sidebar-brand{padding:20px 20px 16px;border-bottom:1px solid rgba(255,255,255,.06)}
+    .sidebar-brand h1{font-size:16px;font-weight:600;color:var(--sidebar-active);letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+    .sidebar-brand h1 .logo-dot{width:10px;height:10px;background:var(--accent);border-radius:3px}
+    .sidebar-brand p{font-size:11px;color:var(--sidebar-fg);margin-top:4px;font-family:var(--font-mono)}
+    .sidebar-nav{flex:1;padding:12px;display:flex;flex-direction:column;gap:2px}
+    .sidebar-nav button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:6px;font-size:13px;color:var(--sidebar-fg);text-align:left;transition:all var(--transition)}
+    .sidebar-nav button:hover{background:var(--sidebar-hover);color:var(--sidebar-active)}
+    .sidebar-nav button.active{background:var(--accent);color:#fff}
+    .sidebar-section{padding:16px 12px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.25);margin-top:8px;border-top:1px solid rgba(255,255,255,.06)}
+    .sidebar-nav button svg{width:18px;height:18px;flex-shrink:0}
+    .sidebar-footer{padding:12px 16px;border-top:1px solid rgba(255,255,255,.06);font-size:11px;color:var(--sidebar-fg);font-family:var(--font-mono)}
+    .main{flex:1;margin-left:var(--sidebar-width);display:flex;flex-direction:column;min-height:100vh}
+    .topbar{position:sticky;top:0;z-index:50;height:var(--topbar-height);background:rgba(255,255,255,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 28px}
+    .topbar-title{font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px}
+    .topbar-actions{display:flex;align-items:center;gap:12px}
+    .topbar-actions .status-dot{width:8px;height:8px;background:var(--success);border-radius:50%;animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .topbar-actions .status-text{font-size:12px;font-family:var(--font-mono);color:var(--muted)}
+    .theme-toggle{width:36px;height:36px;display:grid;place-items:center;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;transition:all var(--transition)}
+    .theme-toggle:hover{border-color:var(--accent);color:var(--accent)}
+    .content{flex:1;padding:28px}
+    .screen{display:none}
+    .screen.active{display:block}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm)}
+    .card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+    .card-header h3{font-size:14px;font-weight:600}
+    .card-body{padding:20px}
+    .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+    .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow-sm)}
+    .stat-card .stat-label{font-size:12px;color:var(--muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+    .stat-card .stat-value{font-size:28px;font-weight:700;letter-spacing:-.03em;font-family:var(--font-mono)}
+    .stat-card .stat-value.success{color:var(--success)}
+    .stat-card .stat-value.accent{color:var(--accent)}
+    .stat-card .stat-sub{font-size:12px;color:var(--muted);margin-top:4px}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:var(--radius);font-size:13px;font-weight:500;transition:all var(--transition);white-space:nowrap}
+    .btn-primary{background:var(--accent);color:#fff}
+    .btn-primary:hover{background:var(--accent-hover)}
+    .btn-secondary{background:var(--surface);color:var(--fg);border:1px solid var(--border)}
+    .btn-secondary:hover{border-color:var(--fg)}
+    .btn-ghost{color:var(--muted);padding:6px 10px}
+    .btn-ghost:hover{color:var(--fg);background:var(--bg)}
+    .btn-danger{background:var(--danger);color:#fff}
+    .btn-sm{padding:5px 10px;font-size:12px}
+    .btn-icon{width:32px;height:32px;display:inline-grid;place-items:center;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);color:var(--muted)}
+    .btn-icon:hover{color:var(--fg);border-color:var(--fg-2)}
+    .table-wrap{overflow-x:auto}
+    .ds-table th{padding:10px 14px;text-align:left;font-size:11px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border-bottom:1px solid var(--border);background:var(--surface-alt);font-weight:500}
+    .ds-table td{padding:12px 14px;border-bottom:1px solid var(--border);font-size:13px}
+    .ds-table tbody tr:hover{background:var(--surface-alt)}
+    .ds-table .num{font-family:var(--font-mono);text-align:right}
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:500}
+    .badge-success{background:var(--success-soft);color:var(--success)}
+    .badge-warning{background:var(--warning-soft);color:var(--warning)}
+    .badge-danger{background:var(--danger-soft);color:var(--danger)}
+    .badge-neutral{background:var(--bg);color:var(--muted)}
+    .badge-accent{background:var(--accent-soft);color:var(--accent)}
+    .status-dot-sm{width:6px;height:6px;border-radius:50%;display:inline-block}
+    .status-dot-sm.online{background:var(--success)}
+    .status-dot-sm.offline{background:#ccc}
+    .status-dot-sm.error{background:var(--danger)}
+    .field{display:flex;flex-direction:column;gap:6px}
+    .field label{font-size:12px;font-weight:500;color:var(--muted)}
+    .input,.textarea,select.input{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--fg);font-size:13px;transition:border-color var(--transition)}
+    .input:focus,.textarea:focus,select.input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+    .textarea{min-height:80px;resize:vertical;font-family:var(--font-mono);font-size:13px}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .form-stack{display:flex;flex-direction:column;gap:16px}
+    .toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap}
+    .toolbar-left{display:flex;align-items:center;gap:10px}
+    .toolbar-right{display:flex;align-items:center;gap:8px}
+    .search-box{position:relative}
+    .search-box input{padding-left:34px;width:240px}
+    .search-box svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);width:16px;height:16px}
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:200}
+    .modal-overlay.open{display:flex}
+    .modal{background:var(--surface);border-radius:var(--radius-xl);box-shadow:var(--shadow-xl);width:100%;max-width:480px;max-height:85vh;overflow-y:auto;border:1px solid var(--border)}
+    .modal-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+    .modal-header h3{font-size:15px;font-weight:600}
+    .modal-body{padding:20px}
+    .modal-footer{padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+    .method{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;font-family:var(--font-mono)}
+    .method-GET{background:#dbeafe;color:#1d4ed8}
+    .method-POST{background:#dcfce7;color:#15803d}
+    .method-PUT{background:#fef3c7;color:#b45309}
+    .method-DELETE{background:#fee2e2;color:#dc2626}
+    .toggle{width:36px;height:20px;background:#ccc;border-radius:999px;position:relative;cursor:pointer;transition:background var(--transition)}
+    .toggle.on{background:var(--success)}
+    .toggle::after{content:'';position:absolute;width:16px;height:16px;background:#fff;border-radius:50%;top:2px;left:2px;transition:transform var(--transition);box-shadow:0 1px 2px rgba(0,0,0,.2)}
+    .toggle.on::after{transform:translateX(16px)}
+    .pagination{display:flex;align-items:center;justify-content:space-between;padding:12px 0}
+    .pagination-info{font-size:12px;color:var(--muted)}
+    .pagination-btns{display:flex;gap:4px}
+    .chart-area{background:var(--surface-alt);border:1px dashed var(--border);border-radius:var(--radius-lg);height:220px;display:grid;place-items:center;color:var(--muted);font-size:13px;font-family:var(--font-mono)}
+    .row{display:flex;align-items:center;gap:10px}
+    .row-between{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .gap-sm{gap:6px}
+    .gap-md{gap:12px}
+    .mt-12{margin-top:12px}
+    .mt-16{margin-top:16px}
+    .mt-24{margin-top:24px}
+    .mb-16{margin-bottom:16px}
+    .text-muted{color:var(--muted)}
+    .text-mono{font-family:var(--font-mono);font-size:12px}
+    .text-sm{font-size:12px}
+    .text-accent{color:var(--accent)}
+    .flex-1{flex:1}
+    .req-builder{display:flex;flex-direction:column;gap:12px}
+    .req-line{display:flex;gap:8px}
+    .req-line select{width:100px;flex-shrink:0}
+    .req-line input{flex:1}
+    .kv-row{display:grid;grid-template-columns:1fr 1fr 32px;gap:8px;align-items:center}
+    .metric-row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .screen.active{animation:fadeIn .2s ease}
+    .provider-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+    .provider-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow-sm);transition:all var(--transition);cursor:pointer}
+    .provider-card:hover{border-color:var(--accent);box-shadow:var(--shadow)}
+    .provider-card .pc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .provider-card .pc-name{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+    .provider-card .pc-url{font-family:var(--font-mono);font-size:12px;color:var(--muted);margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .provider-card .pc-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+    .provider-card .pc-keys{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--accent-soft);color:var(--accent);border-radius:999px;font-size:11px;font-weight:500;font-family:var(--font-mono)}
+    .provider-card .pc-actions{display:flex;gap:6px}
+    .pc-key-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+    .pc-key-row .key-name{width:120px;flex-shrink:0}
+    .pc-key-row .key-value{flex:1;font-family:var(--font-mono)}
+    .model-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+    .model-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow-sm);transition:all var(--transition)}
+    .model-card:hover{border-color:var(--accent);box-shadow:var(--shadow)}
+    .model-card .mc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .model-card .mc-name{font-size:16px;font-weight:600}
+    .model-card .mc-strategy{font-size:11px;font-family:var(--font-mono);padding:3px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+    .model-card .mc-stats{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:12px;color:var(--muted)}
+    .model-card .mc-stats .num{font-family:var(--font-mono);color:var(--fg);font-weight:500}
+    .model-card .mc-specs{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+    .model-card .mc-specs .num{font-family:var(--font-mono);color:var(--fg);font-weight:500}
+    .model-card .mc-pricing{display:flex;align-items:center;gap:6px;margin-bottom:12px;font-size:12px;color:var(--muted)}
+    .model-card .mc-pricing .num{font-family:var(--font-mono);color:var(--accent);font-weight:500}
+    .model-card .mc-caps{display:flex;flex-wrap:wrap;gap:6px}
+    .model-card .mc-cap{padding:3px 10px;border-radius:999px;font-size:11px;font-weight:500;font-family:var(--font-mono)}
+    .mc-cap-think{background:#fef3c7;color:#b45309}
+    .mc-cap-image{background:#dbeafe;color:#1d4ed8}
+    .mc-cap-text{background:#dcfce7;color:#15803d}
+    .mc-cap-draw{background:#fce7f3;color:#be185d}
+    .mc-cap-code{background:#e0e7ff;color:#4338ca}
+    .mc-cap-audio{background:#f3e8ff;color:#7c3aed}
+
+    /* Settings Tabs */
+    .settings-tabs{display:flex;gap:4px;background:var(--surface-alt);border-radius:var(--radius);padding:4px;margin-bottom:16px}
+    .settings-tab{flex:1;padding:10px 16px;border:none;background:transparent;border-radius:6px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;transition:all var(--transition);text-align:center}
+    .settings-tab:hover{color:var(--fg);background:var(--surface)}
+    .settings-tab.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow-sm)}
+
+    /* Nav Progress */
+    .nav-progress{position:fixed;top:0;left:0;right:0;height:2px;z-index:999;opacity:0;transition:opacity .3s}
+    .nav-progress-bar{height:100%;background:var(--accent);width:0%;transition:width .3s}
+
+    /* Toast */
+    .toast-container{position:fixed;top:80px;right:20px;z-index:300;display:flex;flex-direction:column;gap:8px}
+    .toast{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow-lg);border:1px solid var(--border);min-width:280px;max-width:400px;animation:toastIn .3s ease}
+    .toast.success{border-left:3px solid var(--success)}
+    .toast.error{border-left:3px solid var(--danger)}
+    .toast.warning{border-left:3px solid var(--warning)}
+    .toast.info{border-left:3px solid var(--accent)}
+    @keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+    @keyframes toastOut{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(20px)}}
+
+    .welcome-card{background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1px solid var(--border)}
+    .welcome-card .card-body{padding:24px 28px}
+    .main-footer{padding:20px 28px;border-top:1px solid var(--border);text-align:center;font-size:12px;color:var(--muted)}
+
+    /* Dark Theme */
+    body.dark{--bg:#0f0f14;--surface:#1a1a24;--surface-alt:#22222f;--fg:#e8e8ec;--fg-2:#a0a0b0;--muted:#6b6b7b;--border:#2a2a38;--border-strong:#3a3a4a;--sidebar-bg:#0a0a10;--sidebar-fg:#888898;--sidebar-active:#fff;--sidebar-hover:rgba(255,255,255,.04);--accent-soft:rgba(59,130,246,.15);--success-soft:rgba(22,163,74,.15);--warning-soft:rgba(217,119,6,.15);--danger-soft:rgba(220,38,38,.15)}
+    body.dark .card{background:var(--surface);border-color:var(--border)}
+    body.dark .stat-card{background:var(--surface);border-color:var(--border)}
+    body.dark .provider-card{background:var(--surface);border-color:var(--border)}
+    body.dark .model-card{background:var(--surface);border-color:var(--border)}
+    body.dark .ds-table th{background:var(--surface-alt);border-color:var(--border);color:var(--muted)}
+    body.dark .ds-table td{border-color:var(--border)}
+    body.dark .ds-table tbody tr:hover{background:var(--surface-alt)}
+    body.dark .badge-neutral{background:var(--surface-alt);color:var(--muted)}
+    body.dark .modal{background:var(--surface)}
+    body.dark .modal-header{border-color:var(--border)}
+    body.dark .modal-footer{border-color:var(--border)}
+    body.dark .input,body.dark .textarea,body.dark select.input{background:var(--surface);border-color:var(--border);color:var(--fg)}
+    body.dark .input:focus,body.dark .textarea:focus,body.dark select.input:focus{border-color:var(--accent)}
+    body.dark .btn-secondary{background:var(--surface);border-color:var(--border);color:var(--fg)}
+    body.dark .btn-secondary:hover{border-color:var(--muted)}
+    body.dark .btn-ghost{color:var(--muted)}
+    body.dark .btn-ghost:hover{color:var(--fg);background:var(--surface-alt)}
+    body.dark .btn-icon{background:var(--surface);border-color:var(--border);color:var(--muted)}
+    body.dark .btn-icon:hover{color:var(--fg);border-color:var(--muted)}
+    body.dark .chart-area{background:var(--surface-alt);border-color:var(--border);color:var(--muted)}
+    body.dark .welcome-card{background:linear-gradient(135deg,#1a1a2e,#16162a);border-color:var(--border)}
+    body.dark .sidebar{border-right:1px solid var(--border)}
+    body.dark .main-footer{border-color:var(--border)}
+    body.dark .topbar{border-color:var(--border)}
+    body.dark .toggle{background:#3a3a4a}
+    body.dark .toggle.on{background:var(--success)}
+    body.dark .method-GET{background:rgba(59,130,246,.15);color:#60a5fa}
+    body.dark .method-POST{background:rgba(22,163,74,.15);color:#4ade80}
+    body.dark .method-PUT{background:rgba(217,119,6,.15);color:#fbbf24}
+    body.dark .method-DELETE{background:rgba(220,38,38,.15);color:#f87171}
+    body.dark .mc-cap-think{background:rgba(217,119,6,.12);color:#fbbf24}
+    body.dark .mc-cap-image{background:rgba(59,130,246,.12);color:#60a5fa}
+    body.dark .mc-cap-text{background:rgba(22,163,74,.12);color:#4ade80}
+    body.dark .mc-cap-draw{background:rgba(236,72,153,.12);color:#f472b6}
+    body.dark .mc-cap-code{background:rgba(99,102,241,.12);color:#818cf8}
+    body.dark .mc-cap-audio{background:rgba(168,85,247,.12);color:#c084fc}
+    body.dark .status-dot-sm.offline{background:#4a4a5a}
+    body.dark .nav-progress{background:var(--accent)}
+  </style>
+</head>
+<body>
+<div class="nav-progress" id="navProgress"><div class="nav-progress-bar"></div></div>
+<div class="toast-container" id="toastContainer"></div>
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <h1><span class="logo-dot"></span> Silk Gateway</h1>
+    <p>v1.0.0 · 多模型中转网关</p>
+  </div>
+  <nav class="sidebar-nav">
+    <button class="active" data-screen="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>仪表盘</button>
+    <div class="sidebar-section">服务管理</div>
+    <button data-screen="providers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Provider 服务商</button>
+    <button data-screen="routes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>路由规则</button>
+    <button data-screen="loadbalancer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模型广场</button>
+    <div class="sidebar-section">监控与日志</div>
+    <button data-screen="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>请求日志</button>
+    <button data-screen="monitoring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>实时监控</button>
+    <button data-screen="analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>用量分析</button>
+    <div class="sidebar-section">系统</div>
+    <button data-screen="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>系统设置</button>
+    <button data-screen="debugger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>API 调试</button>
+  </nav>
+  <div class="sidebar-footer">gateway.silk.io · 127.0.0.1:8080</div>
+</aside>
+<main class="main">
+  <header class="topbar">
+    <span class="topbar-title" id="pageTitle">仪表盘</span>
+    <div class="topbar-actions">
+      <span class="status-dot"></span>
+      <span class="status-text">运行中 · 127.0.0.1:8080</span>
+      <button class="theme-toggle" onclick="toggleTheme()" title="切换主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:18px;height:18px"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      </button>
+    </div>
+  </header>
+  <div class="content">
+    <!-- Dashboard -->
+    <div class="screen active" id="screen-dashboard">
+      <div class="welcome-card card mb-16">
+        <div class="card-body row-between">
+          <div>
+            <h2 style="font-size:20px;font-weight:700;margin-bottom:4px">欢迎回来 👋</h2>
+            <p class="text-muted" style="font-size:14px">网关运行正常，今日已处理 <span class="num" style="color:var(--accent);font-weight:600">128,492</span> 个请求</p>
+          </div>
+          <div class="row gap-md">
+            <button class="btn btn-secondary" onclick="switchScreen('logs')">查看日志</button>
+            <button class="btn btn-primary" onclick="switchScreen('providers')">管理 Provider</button>
+          </div>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label">今日 Token 消耗</div><div class="stat-value accent">2.4M</div><div class="stat-sub">↑ 8.7% 较昨日</div></div>
+        <div class="stat-card"><div class="stat-label">平均响应时间</div><div class="stat-value success">1.2<span style="font-size:.5em;opacity:.7">s</span></div><div class="stat-sub">↓ 0.3s 较昨日</div></div>
+        <div class="stat-card"><div class="stat-label">平均延迟</div><div class="stat-value">47<span style="font-size:.5em;opacity:.7">ms</span></div><div class="stat-sub">↑ 3ms 较昨日</div></div>
+        <div class="stat-card"><div class="stat-label">活跃服务商</div><div class="stat-value">12</div><div class="stat-sub">共 15 个已配置</div></div>
+      </div>
+      <div class="row-between mb-16">
+        <h3 style="font-size:15px;font-weight:600">最近请求</h3>
+        <button class="btn btn-ghost btn-sm" onclick="switchScreen('logs')">查看全部 →</button>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap">
+            <table class="ds-table">
+              <thead><tr><th>时间</th><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>服务商</th></tr></thead>
+              <tbody>
+                <tr><td class="text-mono">14:23:01</td><td><span class="method method-GET">GET</span></td><td class="text-mono">/v1/chat/completions</td><td><span class="badge badge-success">200</span></td><td class="num">34ms</td><td>OpenAI</td></tr>
+                <tr><td class="text-mono">14:22:58</td><td><span class="method method-POST">POST</span></td><td class="text-mono">/v1/embeddings</td><td><span class="badge badge-success">200</span></td><td class="num">12ms</td><td>OpenAI</td></tr>
+                <tr><td class="text-mono">14:22:55</td><td><span class="method method-GET">GET</span></td><td class="text-mono">/v1/models</td><td><span class="badge badge-success">200</span></td><td class="num">8ms</td><td>Anthropic</td></tr>
+                <tr><td class="text-mono">14:22:51</td><td><span class="method method-POST">POST</span></td><td class="text-mono">/v1/messages</td><td><span class="badge badge-warning">429</span></td><td class="num">156ms</td><td>OpenAI</td></tr>
+                <tr><td class="text-mono">14:22:48</td><td><span class="method method-GET">GET</span></td><td class="text-mono">/v1/chat/completions</td><td><span class="badge badge-success">200</span></td><td class="num">41ms</td><td>Google</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="row-between mt-24 mb-16">
+        <h3 style="font-size:15px;font-weight:600">网关控制</h3>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <div class="row-between">
+            <div>
+              <div style="font-weight:500;margin-bottom:4px">网关状态</div>
+              <div class="text-sm text-muted">运行时间 <span class="text-mono">3d 14h 22m</span></div>
+            </div>
+            <div class="row gap-md">
+              <button class="btn btn-secondary" onclick="restartGateway()">重启网关</button>
+              <button class="btn btn-danger" onclick="stopGateway()">停止网关</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Providers -->
+    <div class="screen" id="screen-providers">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <h2 style="font-size:18px;font-weight:600">Provider 服务商</h2>
+          <span class="badge badge-accent">15 个服务商</span>
+        </div>
+        <div class="toolbar-right">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input class="input" placeholder="搜索服务商...">
+          </div>
+          <button class="btn btn-primary" onclick="openModal('addProvider')">+ 新增服务商</button>
+        </div>
+      </div>
+      <div class="provider-grid" id="providerGrid">
+        <div class="provider-card" onclick="openModal('editProvider')">
+          <div class="pc-header">
+            <span class="pc-name">OpenAI</span>
+            <span class="badge badge-success"><span class="status-dot-sm online"></span>在线</span>
+          </div>
+          <div class="pc-url">api.openai.com</div>
+          <div class="pc-meta">
+            <span class="pc-keys">🔑 3 keys</span>
+            <span class="badge badge-success">正常</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 60</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 1.2s</span>
+          </div>
+          <div class="pc-actions">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openModal('editProvider')">编辑</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();testProvider(this)">测试</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="event.stopPropagation()">删除</button>
+          </div>
+        </div>
+        <div class="provider-card" onclick="openModal('editProvider')">
+          <div class="pc-header">
+            <span class="pc-name">Anthropic</span>
+            <span class="badge badge-success"><span class="status-dot-sm online"></span>在线</span>
+          </div>
+          <div class="pc-url">api.anthropic.com</div>
+          <div class="pc-meta">
+            <span class="pc-keys">🔑 2 keys</span>
+            <span class="badge badge-success">正常</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 100</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 1.8s</span>
+          </div>
+          <div class="pc-actions">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openModal('editProvider')">编辑</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();testProvider(this)">测试</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="event.stopPropagation()">删除</button>
+          </div>
+        </div>
+        <div class="provider-card" onclick="openModal('editProvider')">
+          <div class="pc-header">
+            <span class="pc-name">Google Gemini</span>
+            <span class="badge badge-success"><span class="status-dot-sm online"></span>在线</span>
+          </div>
+          <div class="pc-url">generativelanguage.googleapis.com</div>
+          <div class="pc-meta">
+            <span class="pc-keys">🔑 1 key</span>
+            <span class="badge badge-success">正常</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 40</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 0.8s</span>
+          </div>
+          <div class="pc-actions">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openModal('editProvider')">编辑</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();testProvider(this)">测试</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="event.stopPropagation()">删除</button>
+          </div>
+        </div>
+        <div class="provider-card" onclick="openModal('editProvider')">
+          <div class="pc-header">
+            <span class="pc-name">DeepSeek</span>
+            <span class="badge badge-neutral"><span class="status-dot-sm offline"></span>离线</span>
+          </div>
+          <div class="pc-url">api.deepseek.com</div>
+          <div class="pc-meta">
+            <span class="pc-keys">🔑 2 keys</span>
+            <span class="badge badge-warning">超时</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 25</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 2.1s</span>
+          </div>
+          <div class="pc-actions">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openModal('editProvider')">编辑</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();testProvider(this)">测试</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="event.stopPropagation()">删除</button>
+          </div>
+        </div>
+        <div class="provider-card" onclick="openModal('editProvider')">
+          <div class="pc-header">
+            <span class="pc-name">Moonshot</span>
+            <span class="badge badge-success"><span class="status-dot-sm online"></span>在线</span>
+          </div>
+          <div class="pc-url">api.moonshot.cn</div>
+          <div class="pc-meta">
+            <span class="pc-keys">🔑 1 key</span>
+            <span class="badge badge-success">正常</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 35</span>
+            <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 0.9s</span>
+          </div>
+          <div class="pc-actions">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openModal('editProvider')">编辑</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();testProvider(this)">测试</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="event.stopPropagation()">删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Routes -->
+    <div class="screen" id="screen-routes">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <h2 style="font-size:18px;font-weight:600">路由规则</h2>
+          <span class="badge badge-accent">8 条规则</span>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-primary" onclick="openModal('addRoute')">+ 新增路由</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap">
+            <table class="ds-table">
+              <thead><tr><th>规则名称</th><th>匹配路径</th><th>方法</th><th>目标</th><th>协议转换</th><th>状态</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><strong>ChatGPT 聊天</strong></td>
+                  <td class="text-mono text-sm">/v1/chat/*</td>
+                  <td><span class="method method-GET">GET</span> <span class="method method-POST">POST</span></td>
+                  <td>OpenAI</td>
+                  <td><span class="badge badge-neutral">无</span></td>
+                  <td><div class="toggle on" onclick="this.classList.toggle('on')"></div></td>
+                  <td><button class="btn btn-ghost btn-sm">编辑</button></td>
+                </tr>
+                <tr>
+                  <td><strong>Claude 消息</strong></td>
+                  <td class="text-mono text-sm">/v1/messages</td>
+                  <td><span class="method method-POST">POST</span></td>
+                  <td>Anthropic</td>
+                  <td><span class="badge badge-neutral">无</span></td>
+                  <td><div class="toggle on" onclick="this.classList.toggle('on')"></div></td>
+                  <td><button class="btn btn-ghost btn-sm">编辑</button></td>
+                </tr>
+                <tr>
+                  <td><strong>Gemini 代理</strong></td>
+                  <td class="text-mono text-sm">/v1/gemini/*</td>
+                  <td><span class="method method-GET">GET</span> <span class="method method-POST">POST</span></td>
+                  <td>LB-Group-1</td>
+                  <td><span class="badge badge-accent">Protobuf→JSON</span></td>
+                  <td><div class="toggle on" onclick="this.classList.toggle('on')"></div></td>
+                  <td><button class="btn btn-ghost btn-sm">编辑</button></td>
+                </tr>
+                <tr>
+                  <td><strong>嵌入向量</strong></td>
+                  <td class="text-mono text-sm">/v1/embeddings</td>
+                  <td><span class="method method-POST">POST</span></td>
+                  <td>OpenAI</td>
+                  <td><span class="badge badge-neutral">无</span></td>
+                  <td><div class="toggle on" onclick="this.classList.toggle('on')"></div></td>
+                  <td><button class="btn btn-ghost btn-sm">编辑</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Model Square -->
+    <div class="screen" id="screen-loadbalancer">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <h2 style="font-size:18px;font-weight:600">模型广场</h2>
+          <span class="badge badge-accent">5 个模型</span>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-primary" onclick="openModal('addGroup')">+ 新增模型映射</button>
+        </div>
+      </div>
+      <div class="model-grid" id="modelGrid">
+        <div class="model-card">
+          <div class="mc-header">
+            <span class="mc-name">gpt-4</span>
+            <span class="mc-strategy">加权轮询</span>
+          </div>
+          <div class="mc-stats">
+            <span>服务商 <span class="num">2/3</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>连接 <span class="num">20</span></span>
+          </div>
+          <div class="mc-specs">
+            <span>输入 <span class="num">128K</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>上下文 <span class="num">128K</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>输出 <span class="num">4K</span></span>
+          </div>
+          <div class="mc-pricing">
+            <span>输入 <span class="num">$30/1M</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>输出 <span class="num">$60/1M</span></span>
+          </div>
+          <div class="mc-caps">
+            <span class="mc-cap mc-cap-think">思考</span>
+            <span class="mc-cap mc-cap-image">识图</span>
+            <span class="mc-cap mc-cap-text">文本</span>
+            <span class="mc-cap mc-cap-code">代码</span>
+          </div>
+        </div>
+        <div class="model-card">
+          <div class="mc-header">
+            <span class="mc-name">claude-3-opus</span>
+            <span class="mc-strategy">轮询</span>
+          </div>
+          <div class="mc-stats">
+            <span>服务商 <span class="num">1/1</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>连接 <span class="num">5</span></span>
+          </div>
+          <div class="mc-specs">
+            <span>输入 <span class="num">200K</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>上下文 <span class="num">200K</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>输出 <span class="num">4K</span></span>
+          </div>
+          <div class="mc-pricing">
+            <span>输入 <span class="num">$15/1M</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>输出 <span class="num">$75/1M</span></span>
+          </div>
+          <div class="mc-caps">
+            <span class="mc-cap mc-cap-think">思考</span>
+            <span class="mc-cap mc-cap-image">识图</span>
+            <span class="mc-cap mc-cap-text">文本</span>
+          </div>
+        </div>
+        <div class="model-card">
+          <div class="mc-header">
+            <span class="mc-name">gemini-pro</span>
+            <span class="mc-strategy">加权轮询</span>
+          </div>
+          <div class="mc-stats">
+            <span>服务商 <span class="num">2/2</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>连接 <span class="num">12</span></span>
+          </div>
+          <div class="mc-specs">
+            <span>输入 <span class="num">32K</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>上下文 <span class="num">8K</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>输出 <span class="num">2K</span></span>
+          </div>
+          <div class="mc-pricing">
+            <span>输入 <span class="num">$0.125/1M</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>输出 <span class="num">$0.5/1M</span></span>
+          </div>
+          <div class="mc-caps">
+            <span class="mc-cap mc-cap-image">识图</span>
+            <span class="mc-cap mc-cap-text">文本</span>
+            <span class="mc-cap mc-cap-draw">生图</span>
+          </div>
+        </div>
+        <div class="model-card">
+          <div class="mc-header">
+            <span class="mc-name">gpt-4o-mini</span>
+            <span class="mc-strategy">最少连接</span>
+          </div>
+          <div class="mc-stats">
+            <span>服务商 <span class="num">3/4</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>连接 <span class="num">8</span></span>
+          </div>
+          <div class="mc-specs">
+            <span>输入 <span class="num">128K</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>上下文 <span class="num">128K</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>输出 <span class="num">4K</span></span>
+          </div>
+          <div class="mc-pricing">
+            <span>输入 <span class="num">$0.15/1M</span></span>
+            <span style="color:var(--border)">·</span>
+            <span>输出 <span class="num">$0.6/1M</span></span>
+          </div>
+          <div class="mc-caps">
+            <span class="mc-cap mc-cap-think">思考</span>
+            <span class="mc-cap mc-cap-image">识图</span>
+            <span class="mc-cap mc-cap-text">文本</span>
+            <span class="mc-cap mc-cap-audio">语音</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Logs -->
+    <div class="screen" id="screen-logs">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <h2 style="font-size:18px;font-weight:600">请求日志</h2>
+          <span class="badge badge-accent">共 128,492 条</span>
+        </div>
+        <div class="toolbar-right">
+          <select class="input" style="width:auto"><option>全部状态</option><option>2xx 成功</option><option>4xx 客户端错误</option><option>5xx 服务端错误</option></select>
+          <select class="input" style="width:auto"><option>全部服务商</option><option>OpenAI</option><option>Anthropic</option><option>Google</option></select>
+          <button class="btn btn-secondary">导出 CSV</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger)">清理日志</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap">
+            <table class="ds-table">
+              <thead><tr><th>时间</th><th>方法</th><th>路径</th><th>状态</th><th>耗时</th><th>Token</th><th>服务商</th><th>大小</th></tr></thead>
+              <tbody>
+                <tr><td class="text-mono">14:23:01.342</td><td><span class="method method-GET">GET</span></td><td class="text-mono text-sm">/v1/chat/completions</td><td><span class="badge badge-success">200</span></td><td class="num">34ms</td><td class="num">1.2K</td><td>OpenAI</td><td class="num">2.4KB</td></tr>
+                <tr><td class="text-mono">14:22:58.104</td><td><span class="method method-POST">POST</span></td><td class="text-mono text-sm">/v1/embeddings</td><td><span class="badge badge-success">200</span></td><td class="num">12ms</td><td class="num">0.3K</td><td>OpenAI</td><td class="num">0.8KB</td></tr>
+                <tr><td class="text-mono">14:22:55.891</td><td><span class="method method-GET">GET</span></td><td class="text-mono text-sm">/v1/models</td><td><span class="badge badge-success">200</span></td><td class="num">8ms</td><td class="num">0.1K</td><td>Anthropic</td><td class="num">1.1KB</td></tr>
+                <tr><td class="text-mono">14:22:51.223</td><td><span class="method method-POST">POST</span></td><td class="text-mono text-sm">/v1/messages</td><td><span class="badge badge-warning">429</span></td><td class="num">156ms</td><td class="num">0.8K</td><td>OpenAI</td><td class="num">0.3KB</td></tr>
+                <tr><td class="text-mono">14:22:48.556</td><td><span class="method method-GET">GET</span></td><td class="text-mono text-sm">/v1/chat/completions</td><td><span class="badge badge-success">200</span></td><td class="num">41ms</td><td class="num">2.1K</td><td>Google</td><td class="num">3.1KB</td></tr>
+                <tr><td class="text-mono">14:22:45.102</td><td><span class="method method-POST">POST</span></td><td class="text-mono text-sm">/v1/chat/completions</td><td><span class="badge badge-success">200</span></td><td class="num">52ms</td><td class="num">1.5K</td><td>OpenAI</td><td class="num">2.7KB</td></tr>
+                <tr><td class="text-mono">14:22:41.889</td><td><span class="method method-POST">POST</span></td><td class="text-mono text-sm">/v1/chat/completions</td><td><span class="badge badge-danger">500</span></td><td class="num">2.1s</td><td class="num">0.5K</td><td>DeepSeek</td><td class="num">0.2KB</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="pagination">
+        <span class="pagination-info">显示 1-20 / 128,492 条</span>
+        <div class="pagination-btns">
+          <button class="btn btn-secondary btn-sm">上一页</button>
+          <button class="btn btn-secondary btn-sm">1</button>
+          <button class="btn btn-primary btn-sm">2</button>
+          <button class="btn btn-secondary btn-sm">3</button>
+          <button class="btn btn-ghost btn-sm">...</button>
+          <button class="btn btn-secondary btn-sm">643</button>
+          <button class="btn btn-secondary btn-sm">下一页</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="screen" id="screen-settings">
+      <h2 style="font-size:18px;font-weight:600;margin-bottom:20px">系统设置</h2>
+      <div class="card mb-16">
+        <div class="card-body" style="padding:8px">
+          <div class="settings-tabs">
+            <button class="settings-tab active" data-settings="basic">网关基础</button>
+            <button class="settings-tab" data-settings="token">Key 管理</button>
+            <button class="settings-tab" data-settings="logging">日志规则</button>
+            <button class="settings-tab" data-settings="balancer">全局负载均衡</button>
+            <button class="settings-tab" data-settings="limits">限流配额</button>
+          </div>
+        </div>
+      </div>
+      <div id="settings-content-basic" class="settings-section">
+        <div class="card">
+          <div class="card-header"><h3>网关基础配置</h3><button class="btn btn-primary btn-sm">保存更改</button></div>
+          <div class="card-body form-stack">
+            <div class="form-row">
+              <div class="field"><label>监听地址</label><input class="input" value="0.0.0.0"></div>
+              <div class="field"><label>监听端口</label><input class="input" value="8080"></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>工作线程数</label><input class="input" value="4"></div>
+              <div class="field"><label>请求超时 (秒)</label><input class="input" value="60"></div>
+            </div>
+            <div class="field"><label>管理员 Token</label><div class="row gap-sm"><input type="password" class="input" value="sk-admin-xxxxxxxxxxxx" style="flex:1"><button class="btn btn-secondary">显示</button></div></div>
+          </div>
+        </div>
+      </div>
+      <div id="settings-content-token" class="settings-section" style="display:none">
+        <div class="card">
+          <div class="card-header"><h3>Key 管理</h3><button class="btn btn-primary btn-sm">保存更改</button></div>
+          <div class="card-body form-stack">
+            <div class="row-between" style="margin-bottom:12px">
+              <label style="font-weight:500;font-size:13px">API Key 列表</label>
+              <button class="btn btn-ghost btn-sm" onclick="addSettingsKey()">+ 添加 Key</button>
+            </div>
+            <div id="settingsKeys">
+              <div class="pc-key-row mb-12">
+                <input class="input key-name" value="主 Key" style="width:120px;flex-shrink:0" placeholder="名称">
+                <input class="input key-value" value="sk-gateway-xxxx-xxxx" style="font-family:var(--font-mono);flex:1" type="password">
+                <button class="btn btn-ghost btn-sm" onclick="toggleKeyVisibility(this)">显示</button>
+                <button class="btn btn-secondary btn-sm">复制</button>
+                <button class="btn-icon" onclick="this.parentElement.remove()">×</button>
+              </div>
+              <div class="pc-key-row mb-12">
+                <input class="input key-name" value="备用 Key" style="width:120px;flex-shrink:0" placeholder="名称">
+                <input class="input key-value" value="sk-gateway-yyyy-yyyy" style="font-family:var(--font-mono);flex:1" type="password">
+                <button class="btn btn-ghost btn-sm" onclick="toggleKeyVisibility(this)">显示</button>
+                <button class="btn btn-secondary btn-sm">复制</button>
+                <button class="btn-icon" onclick="this.parentElement.remove()">×</button>
+              </div>
+            </div>
+            <hr class="rule">
+            <div class="form-row">
+              <div class="field"><label>Key 过期时间</label><select class="input"><option>1 小时</option><option>24 小时</option><option selected>7 天</option><option>永不过期</option></select></div>
+              <div class="field"><label>最大并发数</label><input class="input" value="10"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="settings-content-logging" class="settings-section" style="display:none">
+        <div class="card">
+          <div class="card-header"><h3>日志规则</h3><button class="btn btn-primary btn-sm">保存规则</button></div>
+          <div class="card-body">
+            <div class="form-row mb-16">
+              <div class="field"><label>系统日志保留天数</label><input class="input" value="30"></div>
+              <div class="field"><label>请求日志保留天数</label><input class="input" value="90"></div>
+            </div>
+            <label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> 启用自动清理</label>
+          </div>
+        </div>
+      </div>
+      <div id="settings-content-balancer" class="settings-section" style="display:none">
+        <div class="card">
+          <div class="card-header"><h3>全局负载均衡</h3><button class="btn btn-primary btn-sm">保存全局配置</button></div>
+          <div class="card-body">
+            <div class="form-row mb-16">
+              <div class="field"><label>默认调度策略</label><select class="input"><option>加权轮询</option><option>轮询</option><option>最少连接</option></select></div>
+              <div class="field"><label>健康检查间隔</label><input class="input" value="30s"></div>
+            </div>
+            <div class="text-sm text-muted">此设置为全局默认，模型广场中单个模型可覆盖此策略。</div>
+          </div>
+        </div>
+      </div>
+      <div id="settings-content-limits" class="settings-section" style="display:none">
+        <div class="card">
+          <div class="card-header"><h3>限流配额</h3><button class="btn btn-primary btn-sm">保存限流配置</button></div>
+          <div class="card-body form-stack">
+            <div class="form-row">
+              <div class="field"><label>每分钟请求上限</label><input class="input" value="1000"></div>
+              <div class="field"><label>每分钟 Token 上限</label><input class="input" value="500K"></div>
+            </div>
+            <div class="form-row">
+              <div class="field"><label>单用户并发数</label><input class="input" value="10"></div>
+              <div class="field"><label>超额处理</label><select class="input"><option>返回 429 错误</option><option>排队等待</option></select></div>
+            </div>
+            <label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> 启用限流</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analytics -->
+    <div class="screen" id="screen-analytics">
+      <div class="toolbar">
+        <div class="toolbar-left"><h2 style="font-size:18px;font-weight:600">用量分析</h2></div>
+        <div class="toolbar-right">
+          <button class="btn btn-secondary btn-sm">7天</button>
+          <button class="btn btn-primary btn-sm">30天</button>
+          <button class="btn btn-secondary btn-sm">90天</button>
+        </div>
+      </div>
+      <div class="stat-grid mb-16">
+        <div class="stat-card"><div class="stat-label">总 Token 消耗</div><div class="stat-value accent">18.6M</div><div class="stat-sub">↑ 23.1% 较上期</div></div>
+        <div class="stat-card"><div class="stat-label">总请求数</div><div class="stat-value">892,451</div><div class="stat-sub">↑ 15.3% 较上期</div></div>
+        <div class="stat-card"><div class="stat-label">平均响应时间</div><div class="stat-value success">1.4s</div><div class="stat-sub">↓ 0.2s 较上期</div></div>
+        <div class="stat-card"><div class="stat-label">总费用</div><div class="stat-value accent">$127.80</div><div class="stat-sub">↑ 18.7% 较上期</div></div>
+      </div>
+      <div class="card mb-16">
+        <div class="card-header"><h3>Token 消耗趋势</h3></div>
+        <div class="card-body"><div class="chart-area" style="height:260px">时序图表区域 · 30天 Token 消耗与费用趋势</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>模型用量排行</h3></div>
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap">
+            <table class="ds-table">
+              <thead><tr><th>模型</th><th>请求数</th><th>Token 消耗</th><th>平均响应</th><th>费用</th></tr></thead>
+              <tbody>
+                <tr><td><strong>gpt-4</strong></td><td class="num">342,108</td><td class="num">8.2M</td><td class="num">1.2s</td><td class="num">$49.20</td></tr>
+                <tr><td><strong>claude-3-opus</strong></td><td class="num">215,893</td><td class="num">5.1M</td><td class="num">1.8s</td><td class="num">$38.25</td></tr>
+                <tr><td><strong>gpt-4o-mini</strong></td><td class="num">189,445</td><td class="num">2.8M</td><td class="num">0.6s</td><td class="num">$8.40</td></tr>
+                <tr><td><strong>gemini-pro</strong></td><td class="num">145,005</td><td class="num">2.5M</td><td class="num">0.9s</td><td class="num">$18.75</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- API Debugger -->
+    <div class="screen" id="screen-debugger">
+      <h2 style="font-size:18px;font-weight:600;margin-bottom:20px">API 调试</h2>
+      <div class="card mb-16">
+        <div class="card-header"><h3>请求构建器</h3></div>
+        <div class="card-body form-stack">
+          <div class="form-row">
+            <div class="field" style="flex:1">
+              <label>Base URL</label>
+              <select class="input">
+                <option value="custom">自定义</option>
+                <option value="openai">https://api.openai.com/v1</option>
+                <option value="anthropic">https://api.anthropic.com/v1</option>
+                <option value="google">https://generativelanguage.googleapis.com/v1beta</option>
+                <option value="deepseek">https://api.deepseek.com/v1</option>
+                <option value="moonshot">https://api.moonshot.cn/v1</option>
+              </select>
+            </div>
+            <div class="field" style="flex:2">
+              <label>请求地址</label>
+              <input class="input" value="http://127.0.0.1:8080/v1/chat/completions" placeholder="输入完整的请求 URL">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>请求方法</label>
+              <select class="input" style="width:120px">
+                <option>GET</option>
+                <option selected>POST</option>
+                <option>PUT</option>
+                <option>DELETE</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>支持协议</label>
+              <div class="row gap-sm" style="flex-wrap:wrap">
+                <label class="row gap-sm" style="cursor:pointer"><input type="radio" name="protocol" checked> Chat</label>
+                <label class="row gap-sm" style="cursor:pointer"><input type="radio" name="protocol"> Response</label>
+                <label class="row gap-sm" style="cursor:pointer"><input type="radio" name="protocol"> Anthropic</label>
+                <label class="row gap-sm" style="cursor:pointer"><input type="radio" name="protocol"> Embeddings</label>
+              </div>
+            </div>
+          </div>
+          <hr class="rule">
+          <div>
+            <div class="row-between mb-12"><strong style="font-size:13px">请求头</strong><button class="btn btn-ghost btn-sm" onclick="addHeader()">+ 添加</button></div>
+            <div id="headers">
+              <div class="kv-row mb-12"><input class="input" value="Authorization"><input class="input" value="Bearer sk-..."><button class="btn-icon">×</button></div>
+              <div class="kv-row mb-12"><input class="input" value="Content-Type"><input class="input" value="application/json"><button class="btn-icon">×</button></div>
+            </div>
+          </div>
+          <div>
+            <strong style="font-size:13px">请求体</strong>
+            <textarea class="textarea mt-12" style="min-height:120px">{
+  "model": "gpt-4",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "temperature": 0.7
+}</textarea>
+          </div>
+          <button class="btn btn-primary mt-16" onclick="sendRequest()">发送请求</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>响应 <span class="badge badge-success" style="margin-left:8px">200</span> <span class="text-muted text-sm ml-12">耗时 1.2s · 2.4KB</span></h3></div>
+        <div class="card-body">
+          <textarea class="textarea" style="min-height:160px;font-size:12px" readonly>{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1718900000,
+  "model": "gpt-4",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": "Hello! How can I help you today?"
+    },
+    "finish_reason": "stop"
+  }]
+}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monitoring -->
+    <div class="screen" id="screen-monitoring">
+      <div class="toolbar">
+        <div class="toolbar-left"><h2 style="font-size:18px;font-weight:600">实时监控</h2></div>
+        <div class="toolbar-right">
+          <button class="btn btn-secondary btn-sm">1小时</button>
+          <button class="btn btn-primary btn-sm">24小时</button>
+          <button class="btn btn-secondary btn-sm">7天</button>
+          <button class="btn btn-ghost btn-sm">↻ 刷新</button>
+        </div>
+      </div>
+      <div class="metric-row mb-16">
+        <div class="stat-card"><div class="stat-label">并发连接数</div><div class="stat-value accent">142</div><div class="stat-sub">峰值 189</div></div>
+        <div class="stat-card"><div class="stat-label">每秒请求 (QPS)</div><div class="stat-value">2,847</div><div class="stat-sub">↑ 8.2%</div></div>
+        <div class="stat-card"><div class="stat-label">P99 延迟</div><div class="stat-value success">127<span style="font-size:.5em;opacity:.7">ms</span></div><div class="stat-sub">↓ 5ms</div></div>
+      </div>
+      <div class="card mb-16">
+        <div class="card-header"><h3>请求趋势</h3></div>
+        <div class="card-body">
+          <div class="chart-area">时序图表区域 · 24小时请求量与延迟趋势</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>服务商负载分布</h3></div>
+        <div class="card-body">
+          <table class="ds-table">
+            <thead><tr><th>服务商</th><th>请求占比</th><th>当前QPS</th><th>P99 延迟</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr><td>OpenAI</td><td class="num">42%</td><td class="num">1,196</td><td class="num">98ms</td><td><span class="badge badge-success">正常</span></td></tr>
+              <tr><td>Anthropic</td><td class="num">28%</td><td class="num">797</td><td class="num">134ms</td><td><span class="badge badge-success">正常</span></td></tr>
+              <tr><td>Google</td><td class="num">18%</td><td class="num">512</td><td class="num">156ms</td><td><span class="badge badge-success">正常</span></td></tr>
+              <tr><td>DeepSeek</td><td class="num">8%</td><td class="num">228</td><td class="num">287ms</td><td><span class="badge badge-warning">降级</span></td></tr>
+              <tr><td>Moonshot</td><td class="num">4%</td><td class="num">114</td><td class="num">76ms</td><td><span class="badge badge-success">正常</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <footer class="main-footer">Silk Gateway v1.0.0 · 本地个人项目 · 127.0.0.1:8080</footer>
+</main>
+
+<!-- Add Provider Modal -->
+<div class="modal-overlay" id="addProviderModal" onclick="if(event.target===this)closeModal('addProvider')">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header"><h3>新增服务商</h3><button class="btn-icon" onclick="closeModal('addProvider')">×</button></div>
+    <div class="modal-body form-stack">
+      <div class="field"><label>服务商名称</label><input class="input" placeholder="例如：OpenAI"></div>
+      <div class="field"><label>官网地址</label><input class="input" placeholder="https://api.example.com"></div>
+      <div class="field"><label>Base URL（请求地址）</label><input class="input" placeholder="https://api.openai.com/v1"></div>
+      <div class="field"><label>支持的协议</label><div class="row gap-sm" style="flex-wrap:wrap"><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> Chat</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> Response</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Anthropic</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Embeddings</label></div></div>
+      <hr class="rule">
+      <div class="field"><label>API Key（可添加多个）</label><div id="addProviderKeys"><div class="pc-key-row mb-12"><input class="input" placeholder="sk-..." style="font-family:var(--font-mono)"><button class="btn-icon" onclick="this.parentElement.remove()">×</button></div></div><button class="btn btn-ghost btn-sm" onclick="addProviderKey()" style="align-self:flex-start">+ 添加 Key</button></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('addProvider')">取消</button><button class="btn btn-primary" onclick="closeModal('addProvider')">确认添加</button></div>
+  </div>
+</div>
+
+<!-- Edit Provider Modal -->
+<div class="modal-overlay" id="editProviderModal" onclick="if(event.target===this)closeModal('editProvider')">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header"><h3>编辑服务商</h3><button class="btn-icon" onclick="closeModal('editProvider')">×</button></div>
+    <div class="modal-body form-stack">
+      <div class="field"><label>服务商名称</label><input class="input" id="editProvName" value="OpenAI"></div>
+      <div class="field"><label>官网地址</label><input class="input" id="editProvUrl" value="api.openai.com"></div>
+      <div class="field"><label>Base URL（请求地址）</label><input class="input" id="editProvBaseUrl" value="https://api.openai.com/v1"></div>
+      <div class="field"><label>支持的协议</label><div class="row gap-sm" style="flex-wrap:wrap"><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> Chat</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> Response</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Anthropic</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Embeddings</label></div></div>
+      <div class="field"><label>连通性测试</label><div class="row gap-sm"><span id="editProvStatus" class="badge badge-success">在线</span><button class="btn btn-ghost btn-sm" onclick="testProvider(this)">重新测试</button></div></div>
+      <hr class="rule">
+      <div class="field"><div class="row-between" style="margin-bottom:8px"><label>API Key 列表</label><button class="btn btn-ghost btn-sm" onclick="editProviderKey()">+ 添加 Key</button></div><div id="editProviderKeys"><div class="pc-key-row mb-12"><input class="input" value="sk-****...7a3f" style="font-family:var(--font-mono)" readonly><button class="btn-icon" onclick="this.parentElement.remove()">×</button></div><div class="pc-key-row mb-12"><input class="input" value="sk-****...3k9x" style="font-family:var(--font-mono)" readonly><button class="btn-icon" onclick="this.parentElement.remove()">×</button></div></div></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('editProvider')">取消</button><button class="btn btn-primary" onclick="closeModal('editProvider')">保存修改</button></div>
+  </div>
+</div>
+
+<!-- Add Route Modal -->
+<div class="modal-overlay" id="addRouteModal" onclick="if(event.target===this)closeModal('addRoute')">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header"><h3>新增路由</h3><button class="btn-icon" onclick="closeModal('addRoute')">×</button></div>
+    <div class="modal-body form-stack">
+      <div class="field"><label>规则名称</label><input class="input" placeholder="例如：ChatGPT 聊天"></div>
+      <div class="form-row">
+        <div class="field"><label>匹配路径</label><input class="input" placeholder="/v1/chat/*"></div>
+        <div class="field"><label>请求方法</label><select class="input"><option>GET</option><option selected>POST</option><option>PUT</option><option>DELETE</option></select></div>
+      </div>
+      <div class="field"><label>转发目标</label><select class="input"><option>OpenAI</option><option>Anthropic</option><option>Google</option><option>LB-Group-1</option><option>LB-Group-2</option></select></div>
+      <div class="field"><label>协议转换</label><select class="input"><option>无</option><option>Protobuf→JSON</option><option>JSON→Protobuf</option></select></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('addRoute')">取消</button><button class="btn btn-primary" onclick="closeModal('addRoute')">确认添加</button></div>
+  </div>
+</div>
+
+<!-- Add Model Mapping Modal -->
+<div class="modal-overlay" id="addGroupModal" onclick="if(event.target===this)closeModal('addGroup')">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header"><h3>新增模型映射</h3><button class="btn-icon" onclick="closeModal('addGroup')">×</button></div>
+    <div class="modal-body form-stack">
+      <div class="field"><label>模型名称</label><input class="input" placeholder="例如：gpt-4、claude-3-opus"></div>
+      <div class="form-row">
+        <div class="field"><label>最大输入</label><input class="input" placeholder="128K"></div>
+        <div class="field"><label>最大上下文</label><input class="input" placeholder="128K"></div>
+        <div class="field"><label>最大输出</label><input class="input" placeholder="4K"></div>
+      </div>
+      <div class="field"><label>映射服务商</label><div class="row gap-sm" style="flex-wrap:wrap"><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> OpenAI <input class="input" style="width:60px" value="60"></label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Google <input class="input" style="width:60px" value="40"></label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Anthropic <input class="input" style="width:60px" value=""></label></div></div>
+      <hr class="rule">
+      <div class="field"><label>该模型负载策略</label><select class="input"><option>加权轮询</option><option>轮询</option><option>最少连接</option></select></div>
+      <div class="field"><label>模型能力</label><div class="row gap-sm" style="flex-wrap:wrap"><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> 思考</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> 识图</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> 文本</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> 生图</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> 代码</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> 语音</label></div></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('addGroup')">取消</button><button class="btn btn-primary" onclick="closeModal('addGroup')">确认添加</button></div>
+  </div>
+</div>
+
+<script>
+function switchScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+  document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.sidebar-nav button[data-screen="${id}"]`).classList.add('active');
+  const titles = {dashboard:'仪表盘',providers:'Provider 服务商',routes:'路由规则',loadbalancer:'模型广场',logs:'请求日志',settings:'系统设置',debugger:'API 调试',monitoring:'实时监控',analytics:'用量分析'};
+  document.getElementById('pageTitle').textContent = titles[id] || id;
+}
+document.querySelectorAll('.sidebar-nav button').forEach(btn => {
+  btn.addEventListener('click', () => switchScreen(btn.dataset.screen));
+});
+
+// Modal management
+const modalMap = { addProvider: 'addProviderModal', editProvider: 'editProviderModal', addGroup: 'addGroupModal', addRoute: 'addGroupModal' };
+function openModal(name) {
+  const el = document.getElementById(modalMap[name] || 'addGroupModal');
+  if (el) el.classList.add('open');
+}
+function closeModal(name) {
+  const el = document.getElementById(modalMap[name] || 'addGroupModal');
+  if (el) el.classList.remove('open');
+}
+
+// Provider card interactions
+function testProvider(btn) {
+  if (btn) { btn.textContent = '测试中...'; btn.disabled = true; }
+  setTimeout(() => { if (btn) { btn.textContent = '✓ 正常'; btn.style.color = 'var(--success)'; setTimeout(() => { btn.textContent = '测试'; btn.style.color = ''; btn.disabled = false; }, 2000); } }, 1500);
+}
+function addProviderKey() {
+  const div = document.createElement('div');
+  div.className = 'pc-key-row';
+  div.innerHTML = '<input class="input" placeholder="sk-..." style="font-family:var(--font-mono)"><button class="btn-icon" onclick="this.parentElement.remove()">×</button>';
+  document.getElementById('addProviderKeys').appendChild(div);
+}
+function editProviderKey() {
+  const div = document.createElement('div');
+  div.className = 'pc-key-row';
+  div.innerHTML = '<input class="input" placeholder="sk-..." style="font-family:var(--font-mono)"><button class="btn-icon" onclick="this.parentElement.remove()">×</button>';
+  document.getElementById('editProviderKeys').appendChild(div);
+}
+function addSettingsKey() {
+  const div = document.createElement('div');
+  div.className = 'pc-key-row';
+  div.innerHTML = '<input class="input key-name" placeholder="名称" style="width:120px;flex-shrink:0"><input class="input key-value" placeholder="sk-..." style="font-family:var(--font-mono);flex:1" type="password"><button class="btn btn-ghost btn-sm" onclick="toggleKeyVisibility(this)">显示</button><button class="btn btn-secondary btn-sm">复制</button><button class="btn-icon" onclick="this.parentElement.remove()">×</button>';
+  document.getElementById('settingsKeys').appendChild(div);
+}
+function toggleKeyVisibility(btn) {
+  const row = btn.closest('.pc-key-row');
+  const input = row.querySelector('.key-value');
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.textContent = '隐藏';
+  } else {
+    input.type = 'password';
+    btn.textContent = '显示';
+  }
+}
+
+function restartGateway() { if (confirm('确定要重启网关吗？')) { document.querySelector('.status-text').textContent = '重启中...'; setTimeout(() => { document.querySelector('.status-text').textContent = '运行中 · 127.0.0.1:8080'; }, 2000); } }
+function stopGateway() { if (confirm('确定要停止网关吗？所有请求将中断。')) { document.querySelector('.status-text').textContent = '已停止'; document.querySelector('.status-dot').style.background = 'var(--danger)'; } }
+
+// Theme Toggle
+function toggleTheme() {
+  document.body.classList.toggle('dark');
+  const isDark = document.body.classList.contains('dark');
+  document.querySelectorAll('.topbar').forEach(t => {
+    t.style.background = isDark ? 'rgba(15,15,20,.85)' : 'rgba(255,255,255,.85)';
+  });
+}
+
+// Settings Tabs
+document.querySelectorAll('.settings-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.settings;
+    document.querySelectorAll('.settings-section').forEach(s => s.style.display = 'none');
+    const section = document.getElementById(`settings-content-${target}`);
+    if (section) section.style.display = 'block';
+  });
+});
+
+// Toast
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+  toast.innerHTML = `<span>${icons[type] || icons.info}</span><span>${message}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => { toast.style.animation = 'toastOut .3s ease forwards'; setTimeout(() => toast.remove(), 300); }, 3000);
+}
+
+// Nav Progress
+const navProgress = document.getElementById('navProgress');
+const navProgressbar = navProgress?.querySelector('.nav-progress-bar');
+function showNavProgress() {
+  if (!navProgress) return;
+  navProgress.style.opacity = '1';
+  navProgressBar.style.width = '30%';
+  setTimeout(() => { navProgressBar.style.width = '70%'; }, 200);
+  setTimeout(() => { navProgressBar.style.width = '100%'; }, 400);
+  setTimeout(() => { navProgress.style.opacity = '0'; navProgressBar.style.width = '0%'; }, 700);
+}
+function addHeader() { const div = document.createElement('div'); div.className = 'kv-row mb-16'; div.innerHTML = '<input class="input" placeholder="Key"><input class="input" placeholder="Value"><button class="btn-icon" onclick="this.parentElement.remove()">×</button>'; document.getElementById('headers').appendChild(div); }
+function sendRequest() { const btn = document.querySelector('.req-builder .btn-primary'); btn.textContent = '发送中...'; btn.disabled = true; setTimeout(() => { btn.textContent = '发送请求'; btn.disabled = false; }, 1500); }
+</script>
+</body>
+</html>
