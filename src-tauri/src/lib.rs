@@ -1,3 +1,4 @@
+pub mod application;
 pub mod commands;
 pub mod crypto;
 pub mod error;
