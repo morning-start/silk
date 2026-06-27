@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, h } from "vue";
+import { ref, computed, onMounted, h } from "vue";
 import {
   NButton,
   NDataTable,
@@ -10,7 +10,9 @@ import {
   NInputNumber,
   NSelect,
   NSwitch,
+  NTag,
   NText,
+  NCard,
   useMessage,
   useDialog,
   type DataTableColumns,
@@ -20,14 +22,26 @@ import { storeToRefs } from "pinia";
 import type { Provider } from "../api";
 
 const providersStore = useProvidersStore();
-const { providers, loading } = storeToRefs(providersStore);
+const { providers, loading, error } = storeToRefs(providersStore);
 const message = useMessage();
 const dialog = useDialog();
+
+const searchQuery = ref("");
+
+const filteredProviders = computed(() => {
+  const q = searchQuery.value.toLowerCase().trim();
+  if (!q) return providers.value;
+  return providers.value.filter(
+    (p) =>
+      p.name.toLowerCase().includes(q) ||
+      p.api_base_url.toLowerCase().includes(q) ||
+      p.provider_type.toLowerCase().includes(q)
+  );
+});
 
 const showModal = ref(false);
 const editingId = ref<string | null>(null);
 
-const formRef = ref<any>(null);
 const formValue = ref({
   name: "",
   provider_type: "openai",
@@ -37,7 +51,7 @@ const formValue = ref({
   proxy_url: "",
   timeout_seconds: 30,
   max_retries: 3,
-  status: "enabled",
+  status: "enabled" as string,
 });
 
 const typeOptions = [
@@ -49,46 +63,54 @@ const typeOptions = [
 
 const columns: DataTableColumns<Provider> = [
   { title: "名称", key: "name", width: 120 },
-  { title: "类型", key: "provider_type", width: 100 },
-  { title: "模型", key: "model_name", width: 140 },
+  {
+    title: "类型",
+    key: "provider_type",
+    width: 100,
+    render(row) {
+      const colors: Record<string, string> = {
+        openai: "blue",
+        anthropic: "orange",
+        azure: "azure",
+        custom: "default",
+      };
+      return h(NTag, { size: "small", type: (colors[row.provider_type] || "default") as any }, {
+        default: () => row.provider_type,
+      });
+    },
+  },
+  { title: "Base URL", key: "api_base_url", ellipsis: { tooltip: true } },
   {
     title: "状态",
     key: "status",
     width: 80,
     render(row) {
-      return h(
-        NText,
-        { type: row.status === "enabled" ? "success" : "warning" },
-        { default: () => (row.status === "enabled" ? "启用" : "禁用") }
-      );
+      const enabled = row.status === "enabled";
+      return h(NTag, { size: "small", type: enabled ? "success" : "warning" }, {
+        default: () => enabled ? "启用" : "禁用",
+      });
     },
   },
   { title: "超时(s)", key: "timeout_seconds", width: 80 },
   { title: "重试", key: "max_retries", width: 70 },
+  { title: "健康状态", key: "health_status", width: 100,
+    render(row) {
+      if (!row.health_status) return h(NText, { depth: 3 }, { default: () => "未检测" });
+      const ok = row.health_status === "healthy";
+      return h(NTag, { size: "small", type: ok ? "success" : "error" }, {
+        default: () => ok ? "正常" : "异常",
+      });
+    },
+  },
   {
     title: "操作",
     key: "actions",
-    width: 180,
+    width: 160,
     render(row) {
       return [
-        h(
-          NButton,
-          {
-            size: "small",
-            onClick: () => handleEdit(row),
-          },
-          { default: () => "编辑" }
-        ),
+        h(NButton, { size: "small", quaternary: true, onClick: () => handleEdit(row) }, { default: () => "编辑" }),
         " ",
-        h(
-          NButton,
-          {
-            size: "small",
-            type: "error",
-            onClick: () => handleDelete(row),
-          },
-          { default: () => "删除" }
-        ),
+        h(NButton, { size: "small", quaternary: true, type: "error" as any, onClick: () => handleDelete(row) }, { default: () => "删除" }),
       ];
     },
   },
@@ -166,59 +188,175 @@ onMounted(() => {
 </script>
 
 <template>
-  <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
-      <n-text style="font-size: 18px; font-weight: 600">Provider 管理</n-text>
-      <n-button type="primary" @click="handleAdd">添加 Provider</n-button>
+  <div class="providers-page">
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <h2 class="page-title">Provider 服务商</h2>
+        <NTag size="small" type="info">{{ providers.length }} 个服务商</NTag>
+      </div>
+      <div class="toolbar-right">
+        <NInput
+          v-model:value="searchQuery"
+          placeholder="搜索服务商..."
+          clearable
+          style="width: 200px"
+          size="small"
+        >
+          <template #prefix>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-top:2px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </template>
+        </NInput>
+        <NButton type="primary" @click="handleAdd">+ 新增服务商</NButton>
+      </div>
     </div>
 
-    <n-data-table
-      :columns="columns"
-      :data="providers"
-      :loading="loading"
-      :bordered="false"
-      striped
-    />
-
-    <n-modal
-      v-model:show="showModal"
-      preset="dialog"
-      :title="editingId ? '编辑 Provider' : '添加 Provider'"
-      style="width: 600px"
-    >
-      <n-form ref="formRef" :model="formValue" label-placement="left" label-width="100">
-        <n-form-item label="名称" required>
-          <n-input v-model:value="formValue.name" placeholder="如：OpenAI 官方" />
-        </n-form-item>
-        <n-form-item label="类型" required>
-          <n-select v-model:value="formValue.provider_type" :options="typeOptions" />
-        </n-form-item>
-        <n-form-item label="API 地址" required>
-          <n-input v-model:value="formValue.api_base_url" placeholder="https://api.openai.com/v1" />
-        </n-form-item>
-        <n-form-item :label="editingId ? 'API Key (留空不修改)' : 'API Key'" :required="!editingId">
-          <n-input v-model:value="formValue.api_key" type="password" placeholder="sk-..." show-password-on="click" />
-        </n-form-item>
-        <n-form-item label="默认模型">
-          <n-input v-model:value="formValue.model_name" placeholder="gpt-4o" />
-        </n-form-item>
-        <n-form-item label="代理地址">
-          <n-input v-model:value="formValue.proxy_url" placeholder="可选" />
-        </n-form-item>
-        <n-form-item label="超时(秒)">
-          <n-input-number v-model:value="formValue.timeout_seconds" :min="5" :max="300" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="最大重试">
-          <n-input-number v-model:value="formValue.max_retries" :min="0" :max="10" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="启用">
-          <n-switch v-model:value="formValue.status" checked-value="enabled" unchecked-value="disabled" />
-        </n-form-item>
-      </n-form>
-      <template #action>
-        <n-button @click="showModal = false">取消</n-button>
-        <n-button type="primary" @click="handleSubmit">确定</n-button>
+    <NCard :bordered="false" class="table-card" size="small">
+      <!-- Error State -->
+      <template v-if="error">
+        <div class="error-state">
+          <div class="error-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <h3 class="error-title">数据加载失败</h3>
+          <p class="error-desc">{{ error }}</p>
+          <NButton type="primary" @click="providersStore.fetchAll()">重新加载</NButton>
+        </div>
       </template>
-    </n-modal>
+      <!-- Empty State -->
+      <template v-else-if="!loading && filteredProviders.length === 0">
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </div>
+          <h3 class="empty-title" v-if="searchQuery">未找到匹配的服务商</h3>
+          <h3 class="empty-title" v-else>暂无服务商</h3>
+          <p class="empty-desc" v-if="!searchQuery">添加第一个 AI 服务商，开始配置您的 API 网关</p>
+          <NButton v-if="!searchQuery" type="primary" @click="handleAdd">+ 新增服务商</NButton>
+        </div>
+      </template>
+      <!-- Data Table -->
+      <NDataTable
+        v-else
+        :columns="columns"
+        :data="filteredProviders"
+        :loading="loading"
+        :bordered="false"
+        :single-line="false"
+        striped
+      />
+    </NCard>
+
+    <NModal
+      v-model:show="showModal"
+      preset="card"
+      :title="editingId ? '编辑 Provider' : '添加 Provider'"
+      style="max-width: 600px"
+      :bordered="false"
+      :segmented="{ footer: true }"
+    >
+      <NForm ref="formRef" :model="formValue" label-placement="left" label-width="100">
+        <NFormItem label="名称" required>
+          <NInput v-model:value="formValue.name" placeholder="如：OpenAI 官方" />
+        </NFormItem>
+        <NFormItem label="类型" required>
+          <NSelect v-model:value="formValue.provider_type" :options="typeOptions" />
+        </NFormItem>
+        <NFormItem label="API 地址" required>
+          <NInput v-model:value="formValue.api_base_url" placeholder="https://api.openai.com/v1" />
+        </NFormItem>
+        <NFormItem :label="editingId ? 'API Key (留空不修改)' : 'API Key'" :required="!editingId">
+          <NInput v-model:value="formValue.api_key" type="password" placeholder="sk-..." show-password-on="click" />
+        </NFormItem>
+        <NFormItem label="默认模型">
+          <NInput v-model:value="formValue.model_name" placeholder="gpt-4o" />
+        </NFormItem>
+        <NFormItem label="代理地址">
+          <NInput v-model:value="formValue.proxy_url" placeholder="可选" />
+        </NFormItem>
+        <div class="form-row">
+          <NFormItem label="超时(秒)" style="flex: 1">
+            <NInputNumber v-model:value="formValue.timeout_seconds" :min="5" :max="300" style="width: 100%" />
+          </NFormItem>
+          <NFormItem label="最大重试" style="flex: 1">
+            <NInputNumber v-model:value="formValue.max_retries" :min="0" :max="10" style="width: 100%" />
+          </NFormItem>
+        </div>
+        <NFormItem label="启用">
+          <NSwitch v-model:value="formValue.status" checked-value="enabled" unchecked-value="disabled" />
+        </NFormItem>
+      </NForm>
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 8px">
+          <NButton @click="showModal = false">取消</NButton>
+          <NButton type="primary" @click="handleSubmit">{{ editingId ? '保存修改' : '确认添加' }}</NButton>
+        </div>
+      </template>
+    </NModal>
   </div>
 </template>
+
+<style scoped>
+.providers-page {
+  max-width: 1200px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+}
+
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.table-card {
+  border-radius: 12px;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.error-icon {
+  margin-bottom: 16px;
+}
+
+.error-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-color, #1e293b);
+  margin: 0 0 8px;
+}
+
+.error-desc {
+  font-size: 13px;
+  color: var(--text-color-3, #94a3b8);
+  margin: 0 0 20px;
+  max-width: 400px;
+}
+</style>

@@ -23,7 +23,7 @@ import type { ProviderGroup } from "../api";
 
 const groupsStore = useGroupsStore();
 const providersStore = useProvidersStore();
-const { groups, loading } = storeToRefs(groupsStore);
+const { groups, loading, error } = storeToRefs(groupsStore);
 const { providers } = storeToRefs(providersStore);
 const message = useMessage();
 const dialog = useDialog();
@@ -207,7 +207,27 @@ onMounted(() => {
       <n-button type="primary" @click="handleAdd">创建分组</n-button>
     </div>
 
-    <n-data-table :columns="columns" :data="groups" :loading="loading" :bordered="false" striped />
+    <template v-if="error">
+      <div class="error-state" style="margin-top: 32px">
+        <div class="error-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <h3 class="error-title">数据加载失败</h3>
+        <p class="error-desc">{{ error }}</p>
+        <n-button type="primary" @click="groupsStore.fetchAll()">重新加载</n-button>
+      </div>
+    </template>
+    <template v-else-if="!loading && groups.length === 0">
+      <div class="empty-state" style="margin-top: 32px">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <h3 class="empty-title">暂无负载均衡分组</h3>
+        <p class="empty-desc">将多个 Provider 组合为一个分组，实现高可用和负载均衡</p>
+        <n-button type="primary" @click="handleAdd">创建分组</n-button>
+      </div>
+    </template>
+    <n-data-table v-else :columns="columns" :data="groups" :loading="loading" :bordered="false" striped />
 
     <!-- 创建/编辑分组 -->
     <n-modal
