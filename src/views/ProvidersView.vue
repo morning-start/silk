@@ -403,7 +403,7 @@ onMounted(() => {
 
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
 }
 
@@ -411,6 +411,7 @@ onMounted(() => {
   border-radius: 12px;
   transition: box-shadow 0.2s;
   cursor: pointer;
+  background: var(--card-color, #ffffff);
 }
 
 .provider-card:hover {
