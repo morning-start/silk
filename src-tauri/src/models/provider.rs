@@ -5,20 +5,14 @@ use sqlx::FromRow;
 pub struct Provider {
     pub id: String,
     pub name: String,
-    /// 旧类型字段，保留用于向后兼容（不再在前端展示）
     pub provider_type: String,
     /// 支持的接口协议列表（JSON 数组），如 ["chat","response","message"]
     pub protocols: String,
     /// 模型列表（JSON 数组），如 ["gpt-4o","gpt-3.5-turbo"]
     pub models: String,
-    /// 额外 API Key 列表（JSON 数组），格式 [{"name":"主密钥","enabled":true}]
-    /// value 字段在存储时加密，返回时不暴露
+    /// API Key 列表（JSON 数组），格式 [{"name":"主密钥","value":"<encrypted>","enabled":true}]
     pub keys: String,
     pub api_base_url: String,
-    /// 加密的 API Key（AES-GCM 密文，hex 编码存储）
-    pub api_key: String,
-    /// 已废弃：默认模型名，由 models 替代
-    pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: i64,
     pub max_retries: i64,
@@ -34,14 +28,11 @@ pub struct Provider {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewProvider {
     pub name: String,
-    /// 支持的接口协议，如 ["chat", "response", "message"]
     pub protocols: Vec<String>,
     pub api_base_url: String,
-    /// 明文 API Key，存储时由调用方加密
-    pub api_key: String,
     /// 模型列表
     pub models: Vec<String>,
-    /// 额外 Key 列表（创建时明文，存储时加密）
+    /// API Key 列表（创建时明文，存储时加密）
     pub keys: Vec<ProviderKeyEntry>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
@@ -58,8 +49,6 @@ pub struct UpdateProvider {
     pub name: Option<String>,
     pub protocols: Option<Vec<String>>,
     pub api_base_url: Option<String>,
-    /// 明文 API Key，存储时由调用方加密
-    pub api_key: Option<String>,
     pub models: Option<Vec<String>>,
     pub keys: Option<Vec<ProviderKeyEntry>>,
     pub proxy_url: Option<String>,
@@ -81,12 +70,18 @@ pub struct ProviderKeyEntry {
 }
 
 impl Provider {
-    /// 获取解密后的 API Key（需要传入 master_key）
+    /// 获取解密后的第一个可用 API Key（需要传入 master_key）
     pub fn decrypted_api_key(
         &self,
         master_key: &[u8; 32],
     ) -> Result<String, crate::crypto::CryptoError> {
-        crate::crypto::decrypt_api_key(&self.api_key, master_key)
+        let entries: Vec<ProviderKeyEntry> = serde_json::from_str(&self.keys).unwrap_or_default();
+        for entry in &entries {
+            if entry.enabled && !entry.value.is_empty() {
+                return crate::crypto::decrypt_api_key(&entry.value, master_key);
+            }
+        }
+        Err(crate::crypto::CryptoError::InvalidFormat)
     }
 
     /// 获取超时时间（秒）

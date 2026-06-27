@@ -105,8 +105,6 @@ pub async fn create(
 
     let master_key = derive_key_from_password("silk-master-key", b"salt")
         .map_err(|e| format!("密钥派生失败: {e}"))?;
-    let encrypted_key = encrypt_api_key(&payload.api_key, &master_key)
-        .map_err(|e| format!("加密 API Key 失败: {e}"))?;
 
     let new = NewProvider {
         name: payload.name,
@@ -114,7 +112,6 @@ pub async fn create(
         models: payload.models,
         keys: encrypt_keys(payload.keys, &master_key),
         api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
-        api_key: payload.api_key,
         proxy_url: payload.proxy_url,
         timeout_seconds: payload.timeout_seconds,
         max_retries: payload.max_retries,
@@ -124,7 +121,7 @@ pub async fn create(
         metadata_json: payload.metadata_json,
     };
 
-    let provider = ProviderRepo::create(pool, &new, &encrypted_key)
+    let provider = ProviderRepo::create(pool, &new)
         .await
         .map_err(|e| format!("创建 Provider 失败: {e}"))?;
 
@@ -141,15 +138,6 @@ pub async fn update(
     let master_key = derive_key_from_password("silk-master-key", b"salt")
         .map_err(|e| format!("密钥派生失败: {e}"))?;
 
-    let encrypted_key = if let Some(ref api_key) = payload.api_key {
-        Some(
-            encrypt_api_key(api_key, &master_key)
-                .map_err(|e| format!("加密 API Key 失败: {e}"))?,
-        )
-    } else {
-        None
-    };
-
     let update = UpdateProvider {
         name: payload.name,
         protocols: payload.protocols,
@@ -158,7 +146,6 @@ pub async fn update(
         api_base_url: payload
             .api_base_url
             .map(|u| crate::models::Provider::normalize_api_base_url(&u)),
-        api_key: payload.api_key,
         proxy_url: payload.proxy_url,
         timeout_seconds: payload.timeout_seconds,
         max_retries: payload.max_retries,
@@ -168,7 +155,7 @@ pub async fn update(
         metadata_json: payload.metadata_json,
     };
 
-    let provider = ProviderRepo::update(pool, &id, &update, encrypted_key.as_deref())
+    let provider = ProviderRepo::update(pool, &id, &update)
         .await
         .map_err(|e| format!("更新 Provider 失败: {e}"))?
         .ok_or("Provider 不存在")?;

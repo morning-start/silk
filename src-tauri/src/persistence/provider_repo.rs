@@ -9,17 +9,16 @@ impl ProviderRepo {
     pub async fn create(
         pool: &SqlitePool,
         new: &NewProvider,
-        encrypted_key: &str,
     ) -> Result<Provider, sqlx::Error> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().naive_utc();
 
         sqlx::query_as::<_, Provider>(
             r#"
-            INSERT INTO providers (id, name, provider_type, protocols, models, keys, api_base_url, api_key,
+            INSERT INTO providers (id, name, provider_type, protocols, models, keys, api_base_url,
                                    proxy_url, timeout_seconds, max_retries, status, health_status,
                                    last_health_check_at, metadata_json, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING *
             "#,
         )
@@ -30,7 +29,6 @@ impl ProviderRepo {
         .bind(serde_json::to_string(&new.models).unwrap_or_default())
         .bind(serde_json::to_string(&new.keys).unwrap_or_default())
         .bind(new.api_base_url.as_str())
-        .bind(encrypted_key)
         .bind(new.proxy_url.as_deref())
         .bind(new.timeout_seconds.unwrap_or(30))
         .bind(new.max_retries.unwrap_or(3))
@@ -73,7 +71,6 @@ impl ProviderRepo {
         pool: &SqlitePool,
         id: &str,
         update: &UpdateProvider,
-        encrypted_key: Option<&str>,
     ) -> Result<Option<Provider>, sqlx::Error> {
         let now = chrono::Utc::now().naive_utc();
 
@@ -94,15 +91,14 @@ impl ProviderRepo {
                 models = COALESCE($5, models),
                 keys = COALESCE($6, keys),
                 api_base_url = COALESCE($7, api_base_url),
-                api_key = COALESCE($8, api_key),
-                proxy_url = COALESCE($9, proxy_url),
-                timeout_seconds = COALESCE($10, timeout_seconds),
-                max_retries = COALESCE($11, max_retries),
-                status = COALESCE($12, status),
-                health_status = COALESCE($13, health_status),
-                last_health_check_at = COALESCE($14, last_health_check_at),
-                metadata_json = COALESCE($15, metadata_json),
-                updated_at = $16
+                proxy_url = COALESCE($8, proxy_url),
+                timeout_seconds = COALESCE($9, timeout_seconds),
+                max_retries = COALESCE($10, max_retries),
+                status = COALESCE($11, status),
+                health_status = COALESCE($12, health_status),
+                last_health_check_at = COALESCE($13, last_health_check_at),
+                metadata_json = COALESCE($14, metadata_json),
+                updated_at = $15
             WHERE id = $1
             RETURNING *
             "#,
@@ -114,7 +110,6 @@ impl ProviderRepo {
         .bind(update.models.as_ref().map(|m| serde_json::to_string(m).unwrap_or_default()))
         .bind(update.keys.as_ref().map(|k| serde_json::to_string(k).unwrap_or_default()))
         .bind(update.api_base_url.as_deref())
-        .bind(encrypted_key)
         .bind(update.proxy_url.as_deref())
         .bind(update.timeout_seconds)
         .bind(update.max_retries)
