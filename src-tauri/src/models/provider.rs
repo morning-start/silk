@@ -85,4 +85,14 @@ impl Provider {
     pub fn health_status_label(&self) -> &str {
         self.health_status.as_deref().unwrap_or("unknown")
     }
+
+    /// 规范化 API Base URL：去除尾部 /v1 或 /v1/
+    pub fn normalize_api_base_url(url: &str) -> String {
+        let trimmed = url.trim_end_matches('/');
+        if trimmed.ends_with("/v1") {
+            trimmed[..trimmed.len() - 3].trim_end_matches('/').to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
 }

@@ -50,7 +50,7 @@ impl ProviderAdapter for OpenAIResponseAdapter {
         }
 
         Ok(UpstreamRequest {
-            url: format!("{}/responses", provider.api_base_url),
+            url: format!("{}/v1/responses", provider.api_base_url),
             headers,
             body,
         })
@@ -206,7 +206,7 @@ mod tests {
             id: "test".to_string(),
             name: "Test".to_string(),
             provider_type: "openai".to_string(),
-            api_base_url: "https://api.openai.com/v1".to_string(),
+            api_base_url: "https://api.openai.com".to_string(),
             api_key: "encrypted".to_string(),
             model_name: Some("gpt-4o".to_string()),
             proxy_url: None,

@@ -55,7 +55,7 @@ pub async fn create_provider(
     let new = NewProvider {
         name: payload.name,
         provider_type: payload.provider_type,
-        api_base_url: payload.api_base_url,
+        api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
         api_key: payload.api_key, // 明文，Repo 会加密
         model_name: payload.model_name,
         proxy_url: payload.proxy_url,
@@ -96,7 +96,7 @@ pub async fn update_provider(
     let update = UpdateProvider {
         name: payload.name,
         provider_type: payload.provider_type,
-        api_base_url: payload.api_base_url,
+        api_base_url: payload.api_base_url.map(|u| crate::models::Provider::normalize_api_base_url(&u)),
         api_key: payload.api_key,
         model_name: payload.model_name,
         proxy_url: payload.proxy_url,
@@ -133,7 +133,8 @@ pub async fn test_provider(
         .ok_or("Provider 不存在")?;
 
     // 构建测试请求：GET /v1/models（轻量级探测）
-    let test_url = format!("{}/v1/models", provider.api_base_url.trim_end_matches('/'));
+    let base_url = crate::models::Provider::normalize_api_base_url(&provider.api_base_url);
+    let test_url = format!("{}/v1/models", base_url);
     let timeout_secs = provider.timeout_seconds.min(10).max(1) as u64;
 
     let client = reqwest::Client::builder()
@@ -225,7 +226,8 @@ pub async fn fetch_provider_models(
     _state: State<'_, AppState>,
     payload: FetchModelsPayload,
 ) -> Result<Vec<String>, String> {
-    let test_url = format!("{}/v1/models", payload.api_base_url.trim_end_matches('/'));
+    let base_url = crate::models::Provider::normalize_api_base_url(&payload.api_base_url);
+    let test_url = format!("{}/v1/models", base_url);
     let timeout_secs = payload.timeout_seconds.unwrap_or(10).min(30).max(1) as u64;
 
     let client = reqwest::Client::builder()

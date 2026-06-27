@@ -17,10 +17,10 @@ const message = useMessage();
 
 const baseUrlOptions = [
   { label: "自定义", value: "custom" },
-  { label: "https://api.openai.com/v1", value: "openai" },
-  { label: "https://api.anthropic.com/v1", value: "anthropic" },
-  { label: "https://api.deepseek.com/v1", value: "deepseek" },
-  { label: "https://api.moonshot.cn/v1", value: "moonshot" },
+  { label: "https://api.openai.com", value: "openai" },
+  { label: "https://api.anthropic.com", value: "anthropic" },
+  { label: "https://api.deepseek.com", value: "deepseek" },
+  { label: "https://api.moonshot.cn", value: "moonshot" },
 ];
 
 const baseUrl = ref("custom");

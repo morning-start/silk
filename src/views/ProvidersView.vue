@@ -143,6 +143,8 @@ async function fetchModels() {
     message.warning("请先填写 API 地址和 API Key");
     return;
   }
+  // 发送前确保 URL 已清洗
+  normalizeUrl();
   fetchingModels.value = true;
   modelOptions.value = [];
   try {
@@ -162,6 +164,14 @@ async function fetchModels() {
   } finally {
     fetchingModels.value = false;
   }
+}
+
+/** 自动清洗 API 地址：去除尾部 /v1 或 /v1/ */
+function normalizeUrl() {
+  const url = formValue.value.api_base_url.trim();
+  formValue.value.api_base_url = url
+    .replace(/\/v1\/?$/, '')
+    .replace(/\/+$/, '');
 }
 
 function handleEdit(row: Provider) {
@@ -294,7 +304,7 @@ onMounted(() => {
           <NSelect v-model:value="formValue.provider_type" :options="typeOptions" />
         </NFormItem>
         <NFormItem label="API 地址" required>
-          <NInput v-model:value="formValue.api_base_url" placeholder="https://api.openai.com/v1" />
+          <NInput v-model:value="formValue.api_base_url" placeholder="https://api.openai.com" @blur="normalizeUrl" />
         </NFormItem>
         <NFormItem :label="editingId ? 'API Key (留空不修改)' : 'API Key'" :required="!editingId">
           <NInput v-model:value="formValue.api_key" type="password" placeholder="sk-..." show-password-on="click" />
