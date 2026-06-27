@@ -270,6 +270,51 @@ onMounted(() => {
   margin-top: 4px;
 }
 
+/* 侧边栏深色背景 - 菜单字体颜色 */
+.sidebar-menu :deep(.n-menu-item-content) {
+  color: #cbd5e1;
+}
+
+.sidebar-menu :deep(.n-menu-item-content--selected) {
+  color: #ffffff;
+  background: rgba(99, 102, 241, 0.15) !important;
+}
+
+.sidebar-menu :deep(.n-menu-item-content--selected) .n-menu-item-content__icon {
+  color: #818cf8;
+}
+
+.sidebar-menu :deep(.n-menu-item-content:hover) {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.sidebar-menu :deep(.n-menu-item-content__icon) {
+  color: #64748b;
+}
+
+.sidebar-menu :deep(.n-menu-item-content--selected .n-menu-item-content__arrow) {
+  color: #818cf8;
+}
+
+.sidebar-menu :deep(.n-menu-item-content__arrow) {
+  color: #475569;
+}
+
+/* 分组标题 */
+.sidebar-menu :deep(.n-menu-item-group-header) {
+  color: #475569 !important;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 16px 4px;
+}
+
+/* 分割线 */
+.sidebar-menu :deep(.n-menu-divider) {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
 .sidebar-footer {
   padding: 12px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
