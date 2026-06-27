@@ -31,6 +31,7 @@ pub struct CreateProviderPayload {
     pub api_base_url: String,
     pub api_key: String,
     pub models: Vec<String>,
+    pub keys: Vec<crate::models::ProviderKeyEntry>,
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
@@ -54,6 +55,7 @@ pub struct UpdateProviderPayload {
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,
     pub models: Option<Vec<String>>,
+    pub keys: Option<Vec<crate::models::ProviderKeyEntry>>,
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
@@ -113,6 +115,7 @@ pub async fn create(
         name: payload.name,
         protocols: payload.protocols,
         models: payload.models,
+        keys: encrypt_keys(payload.keys, &master_key),
         api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
         api_key: payload.api_key,
         model_name: payload.model_name,
@@ -139,9 +142,10 @@ pub async fn update(
 ) -> Result<ProviderResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
+    let master_key = derive_key_from_password("silk-master-key", b"salt")
+        .map_err(|e| format!("密钥派生失败: {e}"))?;
+
     let encrypted_key = if let Some(ref api_key) = payload.api_key {
-        let master_key = derive_key_from_password("silk-master-key", b"salt")
-            .map_err(|e| format!("密钥派生失败: {e}"))?;
         Some(
             encrypt_api_key(api_key, &master_key)
                 .map_err(|e| format!("加密 API Key 失败: {e}"))?,
@@ -154,6 +158,7 @@ pub async fn update(
         name: payload.name,
         protocols: payload.protocols,
         models: payload.models,
+        keys: payload.keys.map(|k| encrypt_keys(k, &master_key)),
         api_base_url: payload
             .api_base_url
             .map(|u| crate::models::Provider::normalize_api_base_url(&u)),
@@ -394,5 +399,19 @@ impl From<Provider> for ProviderResponse {
             updated_at: p.updated_at.to_string(),
         }
     }
+}
+
+/// 加密额外 Key 列表中的每个 value（value 是明文，加密后替换为密文）
+fn encrypt_keys(keys: Vec<crate::models::ProviderKeyEntry>, master_key: &[u8; 32]) -> Vec<crate::models::ProviderKeyEntry> {
+    keys.into_iter()
+        .map(|mut k| {
+            if !k.value.is_empty() {
+                if let Ok(encrypted) = encrypt_api_key(&k.value, master_key) {
+                    k.value = encrypted;
+                }
+            }
+            k
+        })
+        .collect()
 }
 
