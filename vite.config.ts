@@ -9,10 +9,10 @@ export default defineConfig(async () => ({
 
   clearScreen: false,
   server: {
-    host: host || false,
-    hmr: host
-      ? { protocol: "ws", host, port: 1421 }
-      : undefined,
+    host: host || "127.0.0.1",
+    port: 1420,
+    strictPort: true,
+    hmr: host ? { protocol: "ws", host, port: 1420 } : undefined,
     watch: {
       ignored: ["**/src-tauri/**"],
     },

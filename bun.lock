@@ -7,6 +7,7 @@
       "dependencies": {
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-opener": "^2",
+        "@types/node": "^26.0.1",
         "@vicons/ionicons5": "^0.13.0",
         "naive-ui": "^2.44.1",
         "pinia": "^3.0.4",
@@ -217,6 +218,8 @@
 
     "@types/lodash-es": ["@types/lodash-es@4.17.12", "https://mirrors.tencent.com/npm/@types/lodash-es/-/lodash-es-4.17.12.tgz", { "dependencies": { "@types/lodash": "*" } }, "sha512-0NgftHUcV4v34VhXm8QBSftKVXtbkBG3ViCjs6+eJ5a6y6Mi/jiFGPc1sC7QK+9BFhWrURE3EOggmWaSxL9OzQ=="],
 
+    "@types/node": ["@types/node@26.0.1", "https://mirrors.tencent.com/npm/@types/node/-/node-26.0.1.tgz", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-fc3KiUoBt6kie0N9bIW3E47vZsuaMf0PM2AaUpLCLT0s/LvX1nxAim6Fc049cNxODPpGm6qRAuUOB86SkRuPQw=="],
+
     "@vicons/ionicons5": ["@vicons/ionicons5@0.13.0", "https://mirrors.tencent.com/npm/@vicons/ionicons5/-/ionicons5-0.13.0.tgz", {}, "sha512-zvZKBPjEXKN7AXNo2Na2uy+nvuv6SP4KAMQxpKL2vfHMj0fSvuw7JZcOPCjQC3e7ayssKnaoFVAhbYcW6v41qQ=="],
 
     "@vitejs/plugin-vue": ["@vitejs/plugin-vue@5.2.4", "https://mirrors.tencent.com/npm/@vitejs/plugin-vue/-/plugin-vue-5.2.4.tgz", { "peerDependencies": { "vite": "^5.0.0 || ^6.0.0", "vue": "^3.2.25" } }, "sha512-7Yx/SXSOcQq5HiiV3orevHUFn+pmMB4cgbEkDYgnkUWb0WfeQ/wa2yFv6D5ICiCQOVpjA7vYDXrC7AGO8yjDHA=="],
@@ -378,6 +381,8 @@
     "treemate": ["treemate@0.3.11", "https://mirrors.tencent.com/npm/treemate/-/treemate-0.3.11.tgz", {}, "sha512-M8RGFoKtZ8dF+iwJfAJTOH/SM4KluKOKRJpjCMhI8bG3qB74zrFoArKZ62ll0Fr3mqkMJiQOmWYkdYgDeITYQg=="],
 
     "typescript": ["typescript@5.6.3", "https://mirrors.tencent.com/npm/typescript/-/typescript-5.6.3.tgz", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
+
+    "undici-types": ["undici-types@8.3.0", "https://mirrors.tencent.com/npm/undici-types/-/undici-types-8.3.0.tgz", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
 
     "vdirs": ["vdirs@0.1.8", "https://mirrors.tencent.com/npm/vdirs/-/vdirs-0.1.8.tgz", { "dependencies": { "evtd": "^0.2.2" }, "peerDependencies": { "vue": "^3.0.11" } }, "sha512-H9V1zGRLQZg9b+GdMk8MXDN2Lva0zx72MPahDKc30v+DtwKjfyOSXWRIX4t2mhDubM1H09gPhWeth/BJWPHGUw=="],
 

@@ -5,16 +5,17 @@
   "identifier": "morning-start.silk",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "silk",
-        "width": 800,
-        "height": 600
+        "title": "Silk Gateway 管理系统",
+        "width": 1280,
+        "height": 800,
+        "resizable": true
       }
     ],
     "security": {
