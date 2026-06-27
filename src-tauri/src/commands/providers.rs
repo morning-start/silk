@@ -13,7 +13,7 @@ use crate::AppState;
 /// 获取所有 Provider
 #[tauri::command]
 pub async fn list_providers(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<Vec<ProviderResponse>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let providers = ProviderRepo::find_all(pool)
@@ -26,7 +26,7 @@ pub async fn list_providers(
 /// 获取单个 Provider
 #[tauri::command]
 pub async fn get_provider(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     id: String,
 ) -> Result<ProviderResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -41,7 +41,7 @@ pub async fn get_provider(
 /// 创建 Provider
 #[tauri::command]
 pub async fn create_provider(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     payload: CreateProviderPayload,
 ) -> Result<ProviderResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -114,9 +114,91 @@ pub async fn update_provider(
         .ok_or("Provider 不存在")?;
 
     // 清除缓存
-    state.gateway.provider_cache.invalidate(&id).await;
+    state.gateway.read().await.provider_cache.invalidate(&id).await;
 
     Ok(ProviderResponse::from(provider))
+}
+
+/// 测试 Provider 连通性
+#[tauri::command]
+pub async fn test_provider(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ProviderTestResponse, String> {
+    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+
+    let provider = ProviderRepo::find_by_id(pool, &id)
+        .await
+        .map_err(|e| format!("查询 Provider 失败: {e}"))?
+        .ok_or("Provider 不存在")?;
+
+    // 构建测试请求：GET /v1/models（轻量级探测）
+    let test_url = format!("{}/v1/models", provider.api_base_url.trim_end_matches('/'));
+    let timeout_secs = provider.timeout_seconds.min(10).max(1) as u64;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
+
+    let start = std::time::Instant::now();
+
+    // 尝试发送请求，使用 decrypted_api_key 获取明文 key
+    let master_key = derive_key_from_password("silk-master-key", b"salt")
+        .map_err(|e| format!("密钥派生失败: {e}"))?;
+    let api_key = provider
+        .decrypted_api_key(&master_key)
+        .map_err(|e| format!("解密 API Key 失败: {e}"))?;
+
+    let result = client
+        .get(&test_url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .send()
+        .await;
+
+    let elapsed = start.elapsed();
+    let elapsed_ms = elapsed.as_millis() as i64;
+
+    let (status_code, error_msg) = match result {
+        Ok(resp) => {
+            let code = resp.status().as_u16();
+            if resp.status().is_success() {
+                (code, None)
+            } else {
+                let body = resp.text().await.unwrap_or_default();
+                let err = if body.len() > 200 {
+                    format!("{}: {}", code, &body[..200])
+                } else {
+                    format!("{}: {}", code, body)
+                };
+                (code, Some(err))
+            }
+        }
+        Err(e) => (0, Some(e.to_string())),
+    };
+
+    // 更新健康状态
+    let health_status = if error_msg.is_none() && (200..300).contains(&status_code) {
+        "healthy"
+    } else {
+        "unhealthy"
+    };
+
+    let now = chrono::Utc::now().naive_utc();
+    ProviderRepo::update_health_status(pool, &id, health_status, now)
+        .await
+        .map_err(|e| format!("更新健康状态失败: {e}"))?;
+
+    // 清除缓存
+    state.gateway.read().await.provider_cache.invalidate(&id).await;
+
+    Ok(ProviderTestResponse {
+        status_code,
+        response_time_ms: elapsed_ms,
+        health_status: health_status.to_string(),
+        error: error_msg,
+    })
 }
 
 /// 删除 Provider
@@ -131,7 +213,7 @@ pub async fn delete_provider(
         .map_err(|e| format!("删除 Provider 失败: {e}"))?;
 
     if deleted {
-        state.gateway.provider_cache.invalidate(&id).await;
+        state.gateway.read().await.provider_cache.invalidate(&id).await;
     }
 
     Ok(deleted)
@@ -188,6 +270,14 @@ pub struct CreateProviderPayload {
     pub max_retries: Option<i64>,
     pub status: Option<String>,
     pub metadata_json: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ProviderTestResponse {
+    pub status_code: u16,
+    pub response_time_ms: i64,
+    pub health_status: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

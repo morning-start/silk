@@ -96,6 +96,15 @@ fn generate_nonce() -> [u8; 12] {
     nonce
 }
 
+/// 哈希 API Key（用于存储和查找，不可逆）
+pub fn hash_api_key(api_key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(api_key.as_bytes());
+    let result = hasher.finalize();
+    base64::prelude::BASE64_STANDARD.encode(result)
+}
+
 /// 从密码派生 256 位密钥（使用 PBKDF2）
 pub fn derive_key_from_password(password: &str, salt: &[u8]) -> Result<[u8; 32], CryptoError> {
     use pbkdf2::pbkdf2_hmac;
