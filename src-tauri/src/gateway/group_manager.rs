@@ -158,7 +158,7 @@ mod tests {
         for strategy in &strategies {
             let s = strategy.as_str();
             let parsed = LoadBalanceStrategy::from_str(s);
-            assert_eq!(parsed, Some(*strategy));
+            assert_eq!(parsed, *strategy);
         }
     }
 
@@ -166,10 +166,6 @@ mod tests {
     fn test_load_balance_strategy_default() {
         assert_eq!(
             LoadBalanceStrategy::from_str("unknown"),
-            None
-        );
-        assert_eq!(
-            LoadBalanceStrategy::from_str("unknown").unwrap_or(LoadBalanceStrategy::RoundRobin),
             LoadBalanceStrategy::RoundRobin
         );
     }
