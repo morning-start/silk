@@ -27,6 +27,9 @@ pub async fn gateway_status(
         log_retention_days: settings.log_retention_days,
         default_provider_id: settings.default_provider_id.clone(),
         default_route_id: settings.default_route_id.clone(),
+        rate_limit_enabled: settings.rate_limit_enabled != 0,
+        rate_limit_max_requests_per_minute: settings.rate_limit_max_requests_per_minute,
+        rate_limit_max_tokens_per_minute: settings.rate_limit_max_tokens_per_minute,
         created_at: settings.created_at.to_string(),
         updated_at: settings.updated_at.to_string(),
     };
@@ -167,6 +170,9 @@ pub struct GatewaySettingsInfo {
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
+    pub rate_limit_enabled: bool,
+    pub rate_limit_max_requests_per_minute: i64,
+    pub rate_limit_max_tokens_per_minute: i64,
     pub created_at: String,
     pub updated_at: String,
 }
