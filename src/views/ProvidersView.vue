@@ -45,12 +45,11 @@ const formValue = ref({
   protocols: [] as string[],
   models: [] as string[],
   api_base_url: "",
-  api_key: "",
   proxy_url: "",
   timeout_seconds: 30,
   max_retries: 3,
   status: "enabled" as string,
-  extraKeys: [] as { name: string; value: string; enabled: boolean }[],
+  keys: [] as { name: string; value: string; enabled: boolean }[],
 });
 
 // 模型获取
@@ -69,33 +68,26 @@ function handleAdd() {
     protocols: [],
     models: [],
     api_base_url: "",
-    api_key: "",
     proxy_url: "",
     timeout_seconds: 30,
     max_retries: 3,
     status: "enabled",
-    extraKeys: [{ name: "默认", value: "", enabled: true }],
+    keys: [{ name: "默认", value: "", enabled: true }],
   };
   showModal.value = true;
 }
 
-function addExtraKey() {
-  formValue.value.extraKeys.push({ name: "", value: "", enabled: true });
+function addKey() {
+  formValue.value.keys.push({ name: "", value: "", enabled: true });
 }
 
-function removeExtraKey(index: number) {
-  formValue.value.extraKeys.splice(index, 1);
+function removeKey(index: number) {
+  formValue.value.keys.splice(index, 1);
 }
 
 async function fetchModels() {
-  // 确定要使用的 API Key：优先主 Key，否则取第一个启用的额外密钥
-  let apiKey = formValue.value.api_key;
-  if (!apiKey) {
-    const firstEnabled = formValue.value.extraKeys.find((k) => k.enabled && k.value);
-    if (firstEnabled) {
-      apiKey = firstEnabled.value;
-    }
-  }
+  // 确定要使用的 API Key：取第一个启用的密钥
+  let apiKey = formValue.value.keys.find((k) => k.enabled && k.value)?.value || "";
   if (!formValue.value.api_base_url || !apiKey) {
     message.warning("请先填写 API 地址和 API Key");
     return;
@@ -136,12 +128,11 @@ function handleEdit(row: Provider) {
     protocols: row.protocols || [],
     models: row.models || [],
     api_base_url: row.api_base_url,
-    api_key: "",
     proxy_url: row.proxy_url || "",
     timeout_seconds: row.timeout_seconds,
     max_retries: row.max_retries,
     status: row.status,
-    extraKeys: [{ name: "默认", value: "", enabled: true }],
+    keys: [{ name: "默认", value: "", enabled: true }],
   };
   showModal.value = true;
 }
@@ -167,15 +158,14 @@ async function handleSubmit() {
   try {
     if (editingId.value) {
       const data: any = { ...formValue.value };
-      if (!data.api_key) delete data.api_key;
-      data.keys = data.extraKeys || [];
-      delete data.extraKeys;
+      data.keys = data.keys || [];
+      delete data.api_key;
       await providersStore.update(editingId.value, data);
       message.success("更新成功");
     } else {
       const data: any = { ...formValue.value };
-      data.keys = data.extraKeys || [];
-      delete data.extraKeys;
+      data.keys = data.keys || [];
+      delete data.api_key;
       await providersStore.create(data);
       message.success("创建成功");
     }
@@ -307,13 +297,13 @@ onMounted(() => {
         <!-- API 密钥 -->
         <NFormItem label="密钥">
           <div style="width: 100%">
-            <div v-for="(k, i) in formValue.extraKeys" :key="i" style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+            <div v-for="(k, i) in formValue.keys" :key="i" style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
               <NInput v-model:value="k.name" placeholder="名称" size="small" style="flex:0 0 80px" />
               <NInput v-model:value="k.value" type="password" placeholder="sk-..." size="small" style="flex:1" show-password-on="click" />
               <NSwitch v-model:value="k.enabled" size="small" />
-              <NButton quaternary size="tiny" type="error" @click="removeExtraKey(i)">×</NButton>
+              <NButton quaternary size="tiny" type="error" @click="removeKey(i)">×</NButton>
             </div>
-            <NButton size="tiny" quaternary @click="addExtraKey">+ 添加密钥</NButton>
+            <NButton size="tiny" quaternary @click="addKey">+ 添加密钥</NButton>
           </div>
         </NFormItem>
         <NFormItem label="模型">
@@ -334,7 +324,7 @@ onMounted(() => {
               size="small"
               @click="fetchModels"
               :loading="fetchingModels"
-              :disabled="!formValue.api_base_url || formValue.extraKeys.length === 0"
+              :disabled="!formValue.api_base_url || formValue.keys.length === 0"
             >
               获取模型
             </NButton>
