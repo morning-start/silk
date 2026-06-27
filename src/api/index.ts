@@ -79,6 +79,7 @@ export interface RequestLog {
   inbound_protocol: string | null;
   outbound_protocol: string | null;
   response_status: number | null;
+  status_code: number | null;
   duration_ms: number | null;
   provider_id: string | null;
   error_message: string | null;
@@ -108,6 +109,64 @@ export interface GatewayStatus {
   running: boolean;
   address: string;
   settings: GatewaySettings;
+}
+
+export interface DashboardStats {
+  today_requests: number;
+  today_success: number;
+  today_avg_duration_ms: number;
+  today_tokens: number;
+  active_providers: number;
+  total_requests: number;
+  yesterday_requests: number;
+}
+
+export interface ProviderStats {
+  provider_name: string | null;
+  request_count: number;
+  avg_duration_ms: number;
+  total_tokens: number;
+}
+
+export interface HourlyStats {
+  hour: string;
+  request_count: number;
+  avg_duration_ms: number;
+  total_tokens: number;
+}
+
+export interface ProviderTestResponse {
+  status_code: number;
+  response_time_ms: number;
+  health_status: string;
+  error: string | null;
+}
+
+export interface ModelMapping {
+  id: string;
+  model_name: string;
+  provider_group_id: string | null;
+  max_input_tokens: number | null;
+  max_context_tokens: number | null;
+  max_output_tokens: number | null;
+  input_price_per_1m: number | null;
+  output_price_per_1m: number | null;
+  capabilities: string[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GatewayKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  enabled: boolean;
+  expires_at: string | null;
+  max_concurrent: number;
+  is_expired: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +227,36 @@ export const api = {
   countLogs: () => invoke<number>("count_logs"),
   cleanupLogs: (beforeDays: number) => invoke<number>("cleanup_logs", { payload: { beforeDays } }),
   clearAllLogs: () => invoke<number>("clear_all_logs"),
+
+  // Dashboard Stats
+  dashboardStats: () => invoke<DashboardStats>("dashboard_stats"),
+  recentRequests: (limit = 20) => invoke<RequestLog[]>("recent_requests", { limit }),
+  statsByProvider: (limit = 10) => invoke<ProviderStats[]>("stats_by_provider", { limit }),
+  hourlyStats: (hours = 24) => invoke<HourlyStats[]>("hourly_stats", { hours }),
+
+  // Provider Test
+  testProvider: (id: string) => invoke<ProviderTestResponse>("test_provider", { id }),
+
+  // Model Mappings
+  listModelMappings: () => invoke<ModelMapping[]>("list_model_mappings"),
+  getMappingModel: (id: string) => invoke<ModelMapping>("get_model_mapping", { id }),
+  createModelMapping: (data: Partial<ModelMapping>) =>
+    invoke<ModelMapping>("create_model_mapping", { payload: data }),
+  updateModelMapping: (id: string, data: Partial<ModelMapping>) =>
+    invoke<ModelMapping>("update_model_mapping", { id, payload: data }),
+  deleteModelMapping: (id: string) => invoke<boolean>("delete_model_mapping", { id }),
+
+  // Gateway Keys
+  listGatewayKeys: () => invoke<GatewayKey[]>("list_gateway_keys"),
+  createGatewayKey: (data: { name: string; key_value: string; enabled?: boolean; max_concurrent?: number }) =>
+    invoke<{ key: GatewayKey; plain_key: string }>("create_gateway_key", { payload: data }),
+  updateGatewayKey: (id: string, data: { name?: string; enabled?: boolean; max_concurrent?: number }) =>
+    invoke<GatewayKey>("update_gateway_key", { id, payload: data }),
+  deleteGatewayKey: (id: string) => invoke<boolean>("delete_gateway_key", { id }),
+
+  // Logs CSV Export
+  exportLogsCsv: (data: { provider_id?: string; limit?: number; file_path?: string }) =>
+    invoke<{ file_path: string; exported_count: number }>("export_logs_csv", { payload: data }),
 
   // Settings
   getGatewaySettings: () => invoke<GatewaySettings>("get_gateway_settings"),
