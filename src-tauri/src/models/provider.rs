@@ -43,7 +43,6 @@ pub struct NewProvider {
     pub models: Vec<String>,
     /// 额外 Key 列表（创建时明文，存储时加密）
     pub keys: Vec<ProviderKeyEntry>,
-    pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
     pub max_retries: Option<i64>,
@@ -63,7 +62,6 @@ pub struct UpdateProvider {
     pub api_key: Option<String>,
     pub models: Option<Vec<String>>,
     pub keys: Option<Vec<ProviderKeyEntry>>,
-    pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
     pub max_retries: Option<i64>,
