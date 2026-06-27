@@ -10,7 +10,6 @@ import {
   NSelect,
   NSwitch,
   NTag,
-  NCard,
   useMessage,
   useDialog,
 } from "naive-ui";
@@ -233,12 +232,11 @@ onMounted(() => {
       </template>
 
       <template v-else>
-        <NCard
+        <div
           v-for="item in filteredProviders"
           :key="item.id"
-          :bordered="false"
           class="provider-card"
-          size="small"
+        >
         >
           <div class="pc-header">
             <span class="pc-name">{{ item.name }}</span>
@@ -266,7 +264,7 @@ onMounted(() => {
             <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
             <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
           </div>
-        </NCard>
+        </div>
       </template>
 
     <NModal
@@ -418,9 +416,11 @@ onMounted(() => {
 
 .provider-card {
   border-radius: 12px;
+  background: var(--card-color, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  padding: 16px;
   transition: box-shadow 0.2s;
   cursor: pointer;
-  background: var(--card-color, #ffffff);
 }
 
 .provider-card:hover {
