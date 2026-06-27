@@ -12,7 +12,7 @@ use crate::AppState;
 /// 获取网关设置
 #[tauri::command]
 pub async fn get_gateway_settings(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<GatewaySettingsResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let settings = GatewaySettingsRepo::load_effective(pool)
@@ -38,6 +38,9 @@ pub async fn update_gateway_settings(
         log_retention_days: payload.log_retention_days,
         default_provider_id: payload.default_provider_id,
         default_route_id: payload.default_route_id,
+        rate_limit_enabled: payload.rate_limit_enabled,
+        rate_limit_max_requests_per_minute: payload.rate_limit_max_requests_per_minute,
+        rate_limit_max_tokens_per_minute: payload.rate_limit_max_tokens_per_minute,
     };
 
     let settings = GatewaySettingsRepo::update(pool, &update)
@@ -46,7 +49,8 @@ pub async fn update_gateway_settings(
 
     // 更新内存中的设置
     {
-        let mut current = state.gateway.settings.write().await;
+        let gateway_guard = state.gateway.read().await;
+        let mut current = gateway_guard.settings.write().await;
         *current = settings.clone();
     }
 
@@ -67,6 +71,9 @@ pub struct GatewaySettingsResponse {
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
+    pub rate_limit_enabled: bool,
+    pub rate_limit_max_requests_per_minute: i64,
+    pub rate_limit_max_tokens_per_minute: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -82,6 +89,9 @@ impl From<GatewaySettings> for GatewaySettingsResponse {
             log_retention_days: s.log_retention_days,
             default_provider_id: s.default_provider_id,
             default_route_id: s.default_route_id,
+            rate_limit_enabled: s.rate_limit_enabled != 0,
+            rate_limit_max_requests_per_minute: s.rate_limit_max_requests_per_minute,
+            rate_limit_max_tokens_per_minute: s.rate_limit_max_tokens_per_minute,
             created_at: s.created_at.to_string(),
             updated_at: s.updated_at.to_string(),
         }
@@ -97,4 +107,7 @@ pub struct UpdateSettingsPayload {
     pub log_retention_days: Option<i64>,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
+    pub rate_limit_enabled: Option<bool>,
+    pub rate_limit_max_requests_per_minute: Option<i64>,
+    pub rate_limit_max_tokens_per_minute: Option<i64>,
 }

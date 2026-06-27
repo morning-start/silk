@@ -12,7 +12,7 @@ use crate::AppState;
 /// 获取所有路由规则
 #[tauri::command]
 pub async fn list_routing_rules(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<Vec<RoutingRuleResponse>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let rules = RoutingRuleRepo::find_all(pool)
@@ -25,7 +25,7 @@ pub async fn list_routing_rules(
 /// 获取单个路由规则
 #[tauri::command]
 pub async fn get_routing_rule(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     id: String,
 ) -> Result<RoutingRuleResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -64,7 +64,7 @@ pub async fn create_routing_rule(
         .map_err(|e| format!("创建路由规则失败: {e}"))?;
 
     // 触发路由表重载
-    state.gateway.route_manager.reload(pool).await.ok();
+    state.gateway.read().await.route_manager.reload(pool).await.ok();
 
     Ok(RoutingRuleResponse::from(rule))
 }
@@ -97,7 +97,7 @@ pub async fn update_routing_rule(
         .ok_or("路由规则不存在")?;
 
     // 触发路由表重载
-    state.gateway.route_manager.reload(pool).await.ok();
+    state.gateway.read().await.route_manager.reload(pool).await.ok();
 
     Ok(RoutingRuleResponse::from(rule))
 }
@@ -114,7 +114,7 @@ pub async fn delete_routing_rule(
         .map_err(|e| format!("删除路由规则失败: {e}"))?;
 
     if deleted {
-        state.gateway.route_manager.reload(pool).await.ok();
+        state.gateway.read().await.route_manager.reload(pool).await.ok();
     }
 
     Ok(deleted)
