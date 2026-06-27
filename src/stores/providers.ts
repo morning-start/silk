@@ -13,7 +13,7 @@ export const useProvidersStore = defineStore("providers", () => {
     try {
       providers.value = await api.listProviders();
     } catch (e: any) {
-      error.value = e.message || "获取 Provider 失败";
+      error.value = e.message || "获取渠道列表失败";
     } finally {
       loading.value = false;
     }

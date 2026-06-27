@@ -1,7 +1,6 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import DashboardView from "../views/DashboardView.vue";
 import ProvidersView from "../views/ProvidersView.vue";
-import RoutingRulesView from "../views/RoutingRulesView.vue";
 import GroupsView from "../views/GroupsView.vue";
 import ModelSquareView from "../views/ModelSquareView.vue";
 import LogsView from "../views/LogsView.vue";
@@ -14,7 +13,6 @@ const routes = [
   { path: "/", redirect: "/dashboard" },
   { path: "/dashboard", name: "dashboard", component: DashboardView, meta: { title: "仪表盘" } },
   { path: "/providers", name: "providers", component: ProvidersView, meta: { title: "渠道管理" } },
-  { path: "/routing-rules", name: "routing-rules", component: RoutingRulesView, meta: { title: "路由规则" } },
   { path: "/groups", name: "groups", component: GroupsView, meta: { title: "负载均衡分组" } },
   { path: "/model-square", name: "model-square", component: ModelSquareView, meta: { title: "模型广场" } },
   { path: "/logs", name: "logs", component: LogsView, meta: { title: "请求日志" } },

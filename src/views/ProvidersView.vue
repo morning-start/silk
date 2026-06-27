@@ -46,6 +46,7 @@ const editingId = ref<string | null>(null);
 const formValue = ref({
   name: "",
   protocols: [] as string[],
+  models: [] as string[],
   api_base_url: "",
   api_key: "",
   model_name: "",
@@ -162,6 +163,7 @@ function handleAdd() {
   formValue.value = {
     name: "",
     protocols: [],
+    models: [],
     api_base_url: "",
     api_key: "",
     model_name: "",
@@ -220,6 +222,7 @@ function handleEdit(row: Provider) {
   formValue.value = {
     name: row.name,
     protocols: row.protocols || [],
+    models: row.models || [],
     api_base_url: row.api_base_url,
     api_key: "",
     model_name: row.model_name || "",
