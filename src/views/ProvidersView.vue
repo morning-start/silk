@@ -242,22 +242,20 @@ onMounted(() => {
           size="small"
         >
           <div class="pc-header">
-            <div class="pc-name-row">
-              <span class="pc-name">{{ item.name }}</span>
-              <NTag size="tiny" :type="item.status === 'enabled' ? 'success' : 'warning'">
-                {{ item.status === 'enabled' ? '启用' : '禁用' }}
-              </NTag>
+            <span class="pc-name">{{ item.name }}</span>
+            <div class="pc-header-right">
+              <span class="pc-status-dot" :class="item.status === 'enabled' ? 'online' : 'offline'"></span>
+              <span class="pc-status-text" :class="item.status === 'enabled' ? 'text-success' : ''">
+                {{ item.status === 'enabled' ? (item.health_status === 'healthy' ? '正常' : '异常') : '禁用' }}
+              </span>
             </div>
-            <NTag v-if="item.health_status" size="tiny" :type="item.health_status === 'healthy' ? 'success' : 'error'">
-              {{ item.health_status === 'healthy' ? '正常' : '异常' }}
-            </NTag>
           </div>
 
           <div class="pc-url">{{ item.api_base_url.replace(/^https?:\/\//, '') }}</div>
 
           <div class="pc-meta">
-            <span class="pc-meta-item" v-if="item.protocols?.length">
-              {{ item.protocols.map((p: string) => ({chat:'Chat',response:'Response',message:'Message'})[p] || p).join(', ') }}
+            <span class="pc-meta-item">
+              🔑 {{ item.key_count || 0 }} key{{ item.key_count !== 1 ? 's' : '' }}
             </span>
             <span class="pc-meta-item" v-if="item.models?.length">
               {{ item.models.length }} 模型
@@ -426,15 +424,40 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 
-.pc-name-row {
+.pc-header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .pc-name {
   font-size: 15px;
   font-weight: 600;
+}
+
+.pc-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.pc-status-dot.online {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+}
+
+.pc-status-dot.offline {
+  background: #94a3b8;
+}
+
+.pc-status-text {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.pc-status-text.text-success {
+  color: #22c55e;
 }
 
 .pc-url {

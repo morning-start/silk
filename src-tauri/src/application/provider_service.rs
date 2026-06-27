@@ -13,6 +13,7 @@ pub struct ProviderResponse {
     pub name: String,
     pub protocols: Vec<String>,
     pub models: Vec<String>,
+    pub key_count: i64,
     pub api_base_url: String,
     pub proxy_url: Option<String>,
     pub timeout_seconds: i64,
@@ -28,7 +29,6 @@ pub struct CreateProviderPayload {
     pub name: String,
     pub protocols: Vec<String>,
     pub api_base_url: String,
-    pub api_key: String,
     pub models: Vec<String>,
     pub keys: Vec<crate::models::ProviderKeyEntry>,
     pub key_strategy: Option<String>,
@@ -374,6 +374,12 @@ impl From<Provider> for ProviderResponse {
             name: p.name.clone(),
             protocols: p.protocols_vec(),
             models: p.models_vec(),
+            key_count: {
+                let keys_str = &p.keys;
+                serde_json::from_str::<Vec<crate::models::ProviderKeyEntry>>(keys_str)
+                    .map(|k| k.len() as i64)
+                    .unwrap_or(0)
+            },
             api_base_url: p.api_base_url.clone(),
             proxy_url: p.proxy_url.clone(),
             timeout_seconds: p.timeout_seconds,

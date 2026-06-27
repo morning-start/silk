@@ -142,6 +142,19 @@
     .pc-key-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
     .pc-key-row .key-name{width:120px;flex-shrink:0}
     .pc-key-row .key-value{flex:1;font-family:var(--font-mono)}
+    .provider-models{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-alt);overflow:hidden}
+    .provider-models-head{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+    .provider-models-head .helper{font-size:12px;color:var(--muted)}
+    .provider-models-list{max-height:260px;overflow:auto}
+    .provider-model-row{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background var(--transition)}
+    .provider-model-row:last-child{border-bottom:none}
+    .provider-model-row:hover{background:var(--surface)}
+    .provider-model-row input{margin-top:3px}
+    .provider-model-row .pm-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .provider-model-row .pm-name{font-size:13px;font-weight:600}
+    .provider-model-row .pm-desc{font-size:12px;color:var(--muted);margin-top:4px}
+    .provider-model-row .pm-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+    .provider-model-empty{padding:18px 14px;text-align:center;font-size:12px;color:var(--muted)}
     .model-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
     .model-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow-sm);transition:all var(--transition)}
     .model-card:hover{border-color:var(--accent);box-shadow:var(--shadow)}
@@ -238,24 +251,23 @@
     <p>v1.0.0 · 多模型中转网关</p>
   </div>
   <nav class="sidebar-nav">
-    <button class="active" data-screen="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>仪表盘</button>
-    <div class="sidebar-section">服务管理</div>
-    <button data-screen="providers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Provider 服务商</button>
-    <button data-screen="routes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>路由规则</button>
-    <button data-screen="loadbalancer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模型广场</button>
-    <div class="sidebar-section">监控与日志</div>
-    <button data-screen="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>请求日志</button>
-    <button data-screen="monitoring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>实时监控</button>
-    <button data-screen="analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>用量分析</button>
+    <button class="active" data-screen="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>总览</button>
+    <div class="sidebar-section">接入管理</div>
+    <button data-screen="providers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>服务商管理</button>
+    <button data-screen="loadbalancer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模型池</button>
+    <button data-screen="debugger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>接口调试</button>
+    <div class="sidebar-section">运行观测</div>
+    <button data-screen="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>调用日志</button>
+    <button data-screen="monitoring"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>运行监控</button>
+    <button data-screen="analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>统计分析</button>
     <div class="sidebar-section">系统</div>
-    <button data-screen="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>系统设置</button>
-    <button data-screen="debugger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>API 调试</button>
+    <button data-screen="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>系统配置</button>
   </nav>
   <div class="sidebar-footer">gateway.silk.io · 127.0.0.1:8080</div>
 </aside>
 <main class="main">
   <header class="topbar">
-    <span class="topbar-title" id="pageTitle">仪表盘</span>
+    <span class="topbar-title" id="pageTitle">总览</span>
     <div class="topbar-actions">
       <span class="status-dot"></span>
       <span class="status-text">运行中 · 127.0.0.1:8080</span>
@@ -328,7 +340,7 @@
     <div class="screen" id="screen-providers">
       <div class="toolbar">
         <div class="toolbar-left">
-          <h2 style="font-size:18px;font-weight:600">Provider 服务商</h2>
+          <h2 style="font-size:18px;font-weight:600">服务商管理</h2>
           <span class="badge badge-accent">15 个服务商</span>
         </div>
         <div class="toolbar-right">
@@ -348,13 +360,13 @@
           <div class="pc-url">api.openai.com</div>
           <div class="pc-meta">
             <span class="pc-keys">🔑 3 keys</span>
+            <span class="badge badge-neutral" data-model-ratio="openai" style="font-family:var(--font-mono)">模型 18/42</span>
             <span class="badge badge-success">正常</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 60</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 1.2s</span>
           </div>
           <div class="pc-actions">
             <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openModal('editProvider')">编辑</button>
-            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();testProvider(this)">测试</button>
             <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="event.stopPropagation()">删除</button>
           </div>
         </div>
@@ -366,6 +378,7 @@
           <div class="pc-url">api.anthropic.com</div>
           <div class="pc-meta">
             <span class="pc-keys">🔑 2 keys</span>
+            <span class="badge badge-neutral" data-model-ratio="anthropic" style="font-family:var(--font-mono)">模型 12/26</span>
             <span class="badge badge-success">正常</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 100</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 1.8s</span>
@@ -384,6 +397,7 @@
           <div class="pc-url">generativelanguage.googleapis.com</div>
           <div class="pc-meta">
             <span class="pc-keys">🔑 1 key</span>
+            <span class="badge badge-neutral" data-model-ratio="google" style="font-family:var(--font-mono)">模型 9/18</span>
             <span class="badge badge-success">正常</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 40</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 0.8s</span>
@@ -402,6 +416,7 @@
           <div class="pc-url">api.deepseek.com</div>
           <div class="pc-meta">
             <span class="pc-keys">🔑 2 keys</span>
+            <span class="badge badge-neutral" data-model-ratio="deepseek" style="font-family:var(--font-mono)">模型 8/22</span>
             <span class="badge badge-warning">超时</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 25</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 2.1s</span>
@@ -420,6 +435,7 @@
           <div class="pc-url">api.moonshot.cn</div>
           <div class="pc-meta">
             <span class="pc-keys">🔑 1 key</span>
+            <span class="badge badge-neutral" data-model-ratio="moonshot" style="font-family:var(--font-mono)">模型 6/14</span>
             <span class="badge badge-success">正常</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">权重 35</span>
             <span class="badge badge-neutral" style="font-family:var(--font-mono)">响应 0.9s</span>
@@ -433,71 +449,11 @@
       </div>
     </div>
 
-    <!-- Routes -->
-    <div class="screen" id="screen-routes">
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <h2 style="font-size:18px;font-weight:600">路由规则</h2>
-          <span class="badge badge-accent">8 条规则</span>
-        </div>
-        <div class="toolbar-right">
-          <button class="btn btn-primary" onclick="openModal('addRoute')">+ 新增路由</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-body" style="padding:0">
-          <div class="table-wrap">
-            <table class="ds-table">
-              <thead><tr><th>规则名称</th><th>匹配路径</th><th>方法</th><th>目标</th><th>协议转换</th><th>状态</th><th>操作</th></tr></thead>
-              <tbody>
-                <tr>
-                  <td><strong>ChatGPT 聊天</strong></td>
-                  <td class="text-mono text-sm">/v1/chat/*</td>
-                  <td><span class="method method-GET">GET</span> <span class="method method-POST">POST</span></td>
-                  <td>OpenAI</td>
-                  <td><span class="badge badge-neutral">无</span></td>
-                  <td><div class="toggle on" onclick="this.classList.toggle('on')"></div></td>
-                  <td><button class="btn btn-ghost btn-sm">编辑</button></td>
-                </tr>
-                <tr>
-                  <td><strong>Claude 消息</strong></td>
-                  <td class="text-mono text-sm">/v1/messages</td>
-                  <td><span class="method method-POST">POST</span></td>
-                  <td>Anthropic</td>
-                  <td><span class="badge badge-neutral">无</span></td>
-                  <td><div class="toggle on" onclick="this.classList.toggle('on')"></div></td>
-                  <td><button class="btn btn-ghost btn-sm">编辑</button></td>
-                </tr>
-                <tr>
-                  <td><strong>Gemini 代理</strong></td>
-                  <td class="text-mono text-sm">/v1/gemini/*</td>
-                  <td><span class="method method-GET">GET</span> <span class="method method-POST">POST</span></td>
-                  <td>LB-Group-1</td>
-                  <td><span class="badge badge-accent">Protobuf→JSON</span></td>
-                  <td><div class="toggle on" onclick="this.classList.toggle('on')"></div></td>
-                  <td><button class="btn btn-ghost btn-sm">编辑</button></td>
-                </tr>
-                <tr>
-                  <td><strong>嵌入向量</strong></td>
-                  <td class="text-mono text-sm">/v1/embeddings</td>
-                  <td><span class="method method-POST">POST</span></td>
-                  <td>OpenAI</td>
-                  <td><span class="badge badge-neutral">无</span></td>
-                  <td><div class="toggle on" onclick="this.classList.toggle('on')"></div></td>
-                  <td><button class="btn btn-ghost btn-sm">编辑</button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Model Square -->
     <div class="screen" id="screen-loadbalancer">
       <div class="toolbar">
         <div class="toolbar-left">
-          <h2 style="font-size:18px;font-weight:600">模型广场</h2>
+          <h2 style="font-size:18px;font-weight:600">模型池</h2>
           <span class="badge badge-accent">5 个模型</span>
         </div>
         <div class="toolbar-right">
@@ -625,7 +581,7 @@
     <div class="screen" id="screen-logs">
       <div class="toolbar">
         <div class="toolbar-left">
-          <h2 style="font-size:18px;font-weight:600">请求日志</h2>
+          <h2 style="font-size:18px;font-weight:600">调用日志</h2>
           <span class="badge badge-accent">共 128,492 条</span>
         </div>
         <div class="toolbar-right">
@@ -669,7 +625,7 @@
 
     <!-- Settings -->
     <div class="screen" id="screen-settings">
-      <h2 style="font-size:18px;font-weight:600;margin-bottom:20px">系统设置</h2>
+      <h2 style="font-size:18px;font-weight:600;margin-bottom:20px">系统配置</h2>
       <div class="card mb-16">
         <div class="card-body" style="padding:8px">
           <div class="settings-tabs">
@@ -749,7 +705,7 @@
               <div class="field"><label>默认调度策略</label><select class="input"><option>加权轮询</option><option>轮询</option><option>最少连接</option></select></div>
               <div class="field"><label>健康检查间隔</label><input class="input" value="30s"></div>
             </div>
-            <div class="text-sm text-muted">此设置为全局默认，模型广场中单个模型可覆盖此策略。</div>
+            <div class="text-sm text-muted">此设置为全局默认，模型池中单个模型可覆盖此策略。</div>
           </div>
         </div>
       </div>
@@ -774,7 +730,7 @@
     <!-- Analytics -->
     <div class="screen" id="screen-analytics">
       <div class="toolbar">
-        <div class="toolbar-left"><h2 style="font-size:18px;font-weight:600">用量分析</h2></div>
+        <div class="toolbar-left"><h2 style="font-size:18px;font-weight:600">统计分析</h2></div>
         <div class="toolbar-right">
           <button class="btn btn-secondary btn-sm">7天</button>
           <button class="btn btn-primary btn-sm">30天</button>
@@ -811,7 +767,7 @@
 
     <!-- API Debugger -->
     <div class="screen" id="screen-debugger">
-      <h2 style="font-size:18px;font-weight:600;margin-bottom:20px">API 调试</h2>
+      <h2 style="font-size:18px;font-weight:600;margin-bottom:20px">接口调试</h2>
       <div class="card mb-16">
         <div class="card-header"><h3>请求构建器</h3></div>
         <div class="card-body form-stack">
@@ -895,7 +851,7 @@
     <!-- Monitoring -->
     <div class="screen" id="screen-monitoring">
       <div class="toolbar">
-        <div class="toolbar-left"><h2 style="font-size:18px;font-weight:600">实时监控</h2></div>
+        <div class="toolbar-left"><h2 style="font-size:18px;font-weight:600">运行监控</h2></div>
         <div class="toolbar-right">
           <button class="btn btn-secondary btn-sm">1小时</button>
           <button class="btn btn-primary btn-sm">24小时</button>
@@ -938,14 +894,28 @@
 <div class="modal-overlay" id="addProviderModal" onclick="if(event.target===this)closeModal('addProvider')">
   <div class="modal" style="max-width:540px">
     <div class="modal-header"><h3>新增服务商</h3><button class="btn-icon" onclick="closeModal('addProvider')">×</button></div>
-    <div class="modal-body form-stack">
-      <div class="field"><label>服务商名称</label><input class="input" placeholder="例如：OpenAI"></div>
-      <div class="field"><label>官网地址</label><input class="input" placeholder="https://api.example.com"></div>
-      <div class="field"><label>Base URL（请求地址）</label><input class="input" placeholder="https://api.openai.com/v1"></div>
-      <div class="field"><label>支持的协议</label><div class="row gap-sm" style="flex-wrap:wrap"><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> Chat</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> Response</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Anthropic</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Embeddings</label></div></div>
+      <div class="modal-body form-stack">
+        <div class="field"><label>服务商名称</label><input class="input" placeholder="例如：OpenAI"></div>
+        <div class="field"><label>官网地址</label><input class="input" placeholder="https://api.example.com"></div>
+        <div class="field"><label>Base URL（请求地址）</label><input class="input" placeholder="https://api.openai.com/v1"></div>
+        <div class="field"><label>支持的协议</label><div class="row gap-sm" style="flex-wrap:wrap"><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> Chat</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox" checked> Response</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Anthropic</label><label class="row gap-sm" style="cursor:pointer"><input type="checkbox"> Embeddings</label></div></div>
+        <div class="field">
+          <div class="row-between">
+            <label>服务商模型</label>
+            <div class="row gap-sm">
+              <span id="addProviderModelCount" class="badge badge-neutral" style="font-family:var(--font-mono)">未获取</span>
+              <button class="btn btn-ghost btn-sm" id="addProviderFetchBtn" onclick="fetchProviderModels('add')">获取模型列表</button>
+            </div>
+          </div>
+          <div class="text-sm text-muted">只启用需要的模型，避免把服务商提供的全部模型直接暴露到网关。</div>
+          <div id="addProviderModelPanel" class="provider-models mt-12">
+            <div id="addProviderModelEmpty" class="provider-model-empty">点击“获取模型列表”后加载可用模型。</div>
+            <div id="addProviderModelList" class="provider-models-list" style="display:none"></div>
+          </div>
+        </div>
       <hr class="rule">
-      <div class="field"><label>API Key（可添加多个）</label><div id="addProviderKeys"><div class="pc-key-row mb-12"><input class="input" placeholder="sk-..." style="font-family:var(--font-mono)"><button class="btn-icon" onclick="this.parentElement.remove()">×</button></div></div><button class="btn btn-ghost btn-sm" onclick="addProviderKey()" style="align-self:flex-start">+ 添加 Key</button></div>
-    </div>
+        <div class="field"><label>API Key（可添加多个）</label><div id="addProviderKeys"><div class="pc-key-row mb-12"><input class="input" placeholder="sk-..." style="font-family:var(--font-mono)"><button class="btn-icon" onclick="this.parentElement.remove()">×</button></div></div><button class="btn btn-ghost btn-sm" onclick="addProviderKey()" style="align-self:flex-start">+ 添加 Key</button></div>
+      </div>
     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('addProvider')">取消</button><button class="btn btn-primary" onclick="closeModal('addProvider')">确认添加</button></div>
   </div>
 </div>
@@ -964,23 +934,6 @@
       <div class="field"><div class="row-between" style="margin-bottom:8px"><label>API Key 列表</label><button class="btn btn-ghost btn-sm" onclick="editProviderKey()">+ 添加 Key</button></div><div id="editProviderKeys"><div class="pc-key-row mb-12"><input class="input" value="sk-****...7a3f" style="font-family:var(--font-mono)" readonly><button class="btn-icon" onclick="this.parentElement.remove()">×</button></div><div class="pc-key-row mb-12"><input class="input" value="sk-****...3k9x" style="font-family:var(--font-mono)" readonly><button class="btn-icon" onclick="this.parentElement.remove()">×</button></div></div></div>
     </div>
     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('editProvider')">取消</button><button class="btn btn-primary" onclick="closeModal('editProvider')">保存修改</button></div>
-  </div>
-</div>
-
-<!-- Add Route Modal -->
-<div class="modal-overlay" id="addRouteModal" onclick="if(event.target===this)closeModal('addRoute')">
-  <div class="modal" style="max-width:540px">
-    <div class="modal-header"><h3>新增路由</h3><button class="btn-icon" onclick="closeModal('addRoute')">×</button></div>
-    <div class="modal-body form-stack">
-      <div class="field"><label>规则名称</label><input class="input" placeholder="例如：ChatGPT 聊天"></div>
-      <div class="form-row">
-        <div class="field"><label>匹配路径</label><input class="input" placeholder="/v1/chat/*"></div>
-        <div class="field"><label>请求方法</label><select class="input"><option>GET</option><option selected>POST</option><option>PUT</option><option>DELETE</option></select></div>
-      </div>
-      <div class="field"><label>转发目标</label><select class="input"><option>OpenAI</option><option>Anthropic</option><option>Google</option><option>LB-Group-1</option><option>LB-Group-2</option></select></div>
-      <div class="field"><label>协议转换</label><select class="input"><option>无</option><option>Protobuf→JSON</option><option>JSON→Protobuf</option></select></div>
-    </div>
-    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('addRoute')">取消</button><button class="btn btn-primary" onclick="closeModal('addRoute')">确认添加</button></div>
   </div>
 </div>
 
@@ -1010,7 +963,7 @@ function switchScreen(id) {
   document.getElementById('screen-' + id).classList.add('active');
   document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
   document.querySelector(`.sidebar-nav button[data-screen="${id}"]`).classList.add('active');
-  const titles = {dashboard:'仪表盘',providers:'Provider 服务商',routes:'路由规则',loadbalancer:'模型广场',logs:'请求日志',settings:'系统设置',debugger:'API 调试',monitoring:'实时监控',analytics:'用量分析'};
+  const titles = {dashboard:'总览',providers:'服务商管理',loadbalancer:'模型池',logs:'调用日志',settings:'系统配置',debugger:'接口调试',monitoring:'运行监控',analytics:'统计分析'};
   document.getElementById('pageTitle').textContent = titles[id] || id;
 }
 document.querySelectorAll('.sidebar-nav button').forEach(btn => {
@@ -1018,7 +971,7 @@ document.querySelectorAll('.sidebar-nav button').forEach(btn => {
 });
 
 // Modal management
-const modalMap = { addProvider: 'addProviderModal', editProvider: 'editProviderModal', addGroup: 'addGroupModal', addRoute: 'addGroupModal' };
+const modalMap = { addProvider: 'addProviderModal', editProvider: 'editProviderModal', addGroup: 'addGroupModal' };
 function openModal(name) {
   const el = document.getElementById(modalMap[name] || 'addGroupModal');
   if (el) el.classList.add('open');
@@ -1026,6 +979,119 @@ function openModal(name) {
 function closeModal(name) {
   const el = document.getElementById(modalMap[name] || 'addGroupModal');
   if (el) el.classList.remove('open');
+}
+
+const providerModelCatalog = {
+  openai: [
+    { id: 'gpt-5', name: 'gpt-5', context: '256K', note: '旗舰推理与通用生成', caps: ['文本', '代码'] },
+    { id: 'gpt-4.1', name: 'gpt-4.1', context: '128K', note: '平衡型主力模型', caps: ['文本', '代码'] },
+    { id: 'gpt-4o', name: 'gpt-4o', context: '128K', note: '多模态与快速响应', caps: ['文本', '识图'] },
+    { id: 'gpt-4o-mini', name: 'gpt-4o-mini', context: '128K', note: '高性价比日常调用', caps: ['文本'] },
+    { id: 'o3-mini', name: 'o3-mini', context: '128K', note: '轻量推理模型', caps: ['文本', '代码'] },
+    { id: 'o1', name: 'o1', context: '200K', note: '深度推理场景', caps: ['文本', '代码'] },
+    { id: 'text-embedding-3-large', name: 'text-embedding-3-large', context: '8K', note: '向量检索嵌入', caps: ['Embedding'] },
+    { id: 'whisper-1', name: 'whisper-1', context: '30s', note: '语音转写', caps: ['语音'] }
+  ],
+  anthropic: [
+    { id: 'claude-opus-4', name: 'claude-opus-4', context: '200K', note: '高阶推理与长文写作', caps: ['文本', '代码'] },
+    { id: 'claude-sonnet-4', name: 'claude-sonnet-4', context: '200K', note: '主力通用模型', caps: ['文本', '代码'] },
+    { id: 'claude-haiku-4', name: 'claude-haiku-4', context: '200K', note: '低延迟轻量模型', caps: ['文本'] },
+    { id: 'claude-opus-vision', name: 'claude-opus-vision', context: '200K', note: '带视觉输入', caps: ['文本', '识图'] },
+    { id: 'claude-code', name: 'claude-code', context: '200K', note: '偏工程任务', caps: ['文本', '代码'] },
+    { id: 'claude-reasoning', name: 'claude-reasoning', context: '200K', note: '复杂推理任务', caps: ['文本', '代码'] }
+  ],
+  google: [
+    { id: 'gemini-2.5-pro', name: 'gemini-2.5-pro', context: '1M', note: '长上下文旗舰', caps: ['文本', '识图'] },
+    { id: 'gemini-2.5-flash', name: 'gemini-2.5-flash', context: '1M', note: '高吞吐低延迟', caps: ['文本', '识图'] },
+    { id: 'gemini-2.0-pro', name: 'gemini-2.0-pro', context: '1M', note: '通用稳定版', caps: ['文本', '识图'] },
+    { id: 'gemini-2.0-flash', name: 'gemini-2.0-flash', context: '1M', note: '轻量快速调用', caps: ['文本'] },
+    { id: 'embedding-001', name: 'embedding-001', context: '8K', note: '向量嵌入', caps: ['Embedding'] },
+    { id: 'imagen-3', name: 'imagen-3', context: '1024', note: '图像生成', caps: ['生图'] }
+  ],
+  deepseek: [
+    { id: 'deepseek-chat', name: 'deepseek-chat', context: '128K', note: '对话主力模型', caps: ['文本', '代码'] },
+    { id: 'deepseek-reasoner', name: 'deepseek-reasoner', context: '128K', note: '强化推理', caps: ['文本', '代码'] },
+    { id: 'deepseek-coder', name: 'deepseek-coder', context: '64K', note: '代码生成与修复', caps: ['文本', '代码'] },
+    { id: 'deepseek-vl', name: 'deepseek-vl', context: '64K', note: '视觉理解', caps: ['文本', '识图'] },
+    { id: 'deepseek-embedding', name: 'deepseek-embedding', context: '8K', note: '检索向量', caps: ['Embedding'] },
+    { id: 'deepseek-audio', name: 'deepseek-audio', context: '30s', note: '语音相关能力', caps: ['语音'] }
+  ],
+  moonshot: [
+    { id: 'kimi-k2', name: 'kimi-k2', context: '128K', note: '长文理解与总结', caps: ['文本'] },
+    { id: 'kimi-l1', name: 'kimi-l1', context: '256K', note: '更长上下文处理', caps: ['文本'] },
+    { id: 'kimi-vl', name: 'kimi-vl', context: '128K', note: '多模态理解', caps: ['文本', '识图'] },
+    { id: 'moonshot-reason', name: 'moonshot-reason', context: '128K', note: '推理增强', caps: ['文本', '代码'] },
+    { id: 'moonshot-mini', name: 'moonshot-mini', context: '128K', note: '轻量模型', caps: ['文本'] }
+  ]
+};
+
+function getProviderKeyFromName(name = '') {
+  const value = String(name).toLowerCase();
+  if (value.includes('openai')) return 'openai';
+  if (value.includes('anthropic') || value.includes('claude')) return 'anthropic';
+  if (value.includes('google') || value.includes('gemini')) return 'google';
+  if (value.includes('deepseek')) return 'deepseek';
+  if (value.includes('moonshot') || value.includes('kimi')) return 'moonshot';
+  return 'openai';
+}
+
+function renderProviderCardRatios() {
+  const providerStats = {
+    openai: { enabled: 18, total: 42 },
+    anthropic: { enabled: 12, total: 26 },
+    google: { enabled: 9, total: 18 },
+    deepseek: { enabled: 8, total: 22 },
+    moonshot: { enabled: 6, total: 14 }
+  };
+  document.querySelectorAll('[data-model-ratio]').forEach(el => {
+    const key = el.dataset.modelRatio;
+    const stat = providerStats[key];
+    if (stat) el.textContent = `模型 ${stat.enabled}/${stat.total}`;
+  });
+}
+
+function updateProviderModelSummary(prefix) {
+  const list = document.getElementById(`${prefix}ProviderModelList`);
+  const empty = document.getElementById(`${prefix}ProviderModelEmpty`);
+  const badge = document.getElementById(`${prefix}ProviderModelCount`);
+  const items = list ? Array.from(list.querySelectorAll('input[type="checkbox"]')) : [];
+  const total = items.length;
+  const enabled = items.filter(input => input.checked).length;
+  if (badge) badge.textContent = total ? `已启用 ${enabled} / 共 ${total}` : '未获取';
+  if (empty) empty.style.display = total ? 'none' : 'block';
+  if (list) list.style.display = total ? 'block' : 'none';
+}
+
+function fetchProviderModels(prefix) {
+  const modal = document.getElementById(`${prefix}ProviderModal`);
+  const nameInput = modal ? modal.querySelector('input[placeholder="例如：OpenAI"]') : null;
+  const providerKey = getProviderKeyFromName(nameInput ? nameInput.value : '');
+  const models = providerModelCatalog[providerKey] || providerModelCatalog.openai;
+  const list = document.getElementById(`${prefix}ProviderModelList`);
+  const badge = document.getElementById(`${prefix}ProviderModelCount`);
+  const fetchBtn = document.getElementById(`${prefix}ProviderFetchBtn`);
+  if (!list) return;
+  const enabledCount = Math.max(2, Math.ceil(models.length * 0.45));
+  list.innerHTML = models.map((model, index) => {
+    const checked = index < enabledCount ? 'checked' : '';
+    const caps = model.caps.map(cap => `<span class="badge badge-neutral">${cap}</span>`).join('');
+    return `
+      <label class="provider-model-row">
+        <input type="checkbox" ${checked} onchange="updateProviderModelSummary('${prefix}')">
+        <div class="flex-1">
+          <div class="pm-main">
+            <span class="pm-name">${model.name}</span>
+            <span class="badge badge-accent" style="font-family:var(--font-mono)">上下文 ${model.context}</span>
+          </div>
+          <div class="pm-desc">${model.note}</div>
+          <div class="pm-meta">${caps}</div>
+        </div>
+      </label>
+    `;
+  }).join('');
+  if (badge) badge.textContent = `已启用 ${enabledCount} / 共 ${models.length}`;
+  if (fetchBtn) fetchBtn.textContent = '重新获取模型列表';
+  updateProviderModelSummary(prefix);
 }
 
 // Provider card interactions
@@ -1065,6 +1131,7 @@ function toggleKeyVisibility(btn) {
 
 function restartGateway() { if (confirm('确定要重启网关吗？')) { document.querySelector('.status-text').textContent = '重启中...'; setTimeout(() => { document.querySelector('.status-text').textContent = '运行中 · 127.0.0.1:8080'; }, 2000); } }
 function stopGateway() { if (confirm('确定要停止网关吗？所有请求将中断。')) { document.querySelector('.status-text').textContent = '已停止'; document.querySelector('.status-dot').style.background = 'var(--danger)'; } }
+renderProviderCardRatios();
 
 // Theme Toggle
 function toggleTheme() {
