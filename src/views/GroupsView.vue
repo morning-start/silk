@@ -223,7 +223,7 @@ onMounted(() => {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         </div>
         <h3 class="empty-title">暂无负载均衡分组</h3>
-        <p class="empty-desc">将多个 Provider 组合为一个分组，实现高可用和负载均衡</p>
+        <p class="empty-desc">将多个渠道组合为一个分组，实现高可用和负载均衡</p>
         <n-button type="primary" @click="handleAdd">创建分组</n-button>
       </div>
     </template>
@@ -273,7 +273,7 @@ onMounted(() => {
           <n-select
             v-model:value="memberFormValue.provider_id"
             :options="providers.map((p) => ({ label: p.name, value: p.id }))"
-            placeholder="选择 Provider"
+            placeholder="选择渠道"
             style="flex: 1"
           />
           <n-input-number v-model:value="memberFormValue.weight" :min="1" :max="100" style="width: 100px" />

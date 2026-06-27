@@ -229,7 +229,7 @@ onMounted(loadData);
 
             <div class="mc-stats">
               <span>
-                服务商 <span class="num">{{ item.provider_group_id ? 1 : 0 }}</span>
+                渠道 <span class="num">{{ item.provider_group_id ? 1 : 0 }}</span>
               </span>
             </div>
 
@@ -299,7 +299,7 @@ onMounted(loadData);
           <NSelect
             v-model:value="formValue.provider_group_id"
             :options="groupOptions"
-            placeholder="选择服务商分组"
+            placeholder="选择渠道分组"
             clearable
           />
         </NFormItem>

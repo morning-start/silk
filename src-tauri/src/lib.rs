@@ -80,6 +80,9 @@ async fn seed_default_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // Tauri 入口
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 初始化 tracing 日志（输出到终端，开发时通过 `cargo tauri dev` 查看）
+    tracing_subscriber::fmt::init();
+
     // 日志 channel：容量 1000，背压时丢弃最旧日志
     let (log_sender, log_receiver) = tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
 
@@ -137,6 +140,7 @@ pub fn run() {
             commands::update_provider,
             commands::test_provider,
             commands::delete_provider,
+            commands::fetch_provider_models,
             // 路由规则管理
             commands::list_routing_rules,
             commands::get_routing_rule,

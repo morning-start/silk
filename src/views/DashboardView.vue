@@ -84,7 +84,7 @@ const columns: DataTableColumns<RequestLog> = [
       return h("span", { class: "num" }, `${ms}ms`);
     },
   },
-  { title: "服务商", key: "provider_id", width: 90 },
+  { title: "渠道", key: "provider_id", width: 90 },
 ];
 
 async function loadData() {
@@ -174,14 +174,14 @@ onMounted(() => {
             </div>
             <NSpace>
               <NButton quaternary @click="goToLogs">查看日志</NButton>
-              <NButton type="primary" @click="goToProviders">管理 Provider</NButton>
+              <NButton type="primary" @click="goToProviders">管理渠道</NButton>
             </NSpace>
           </template>
           <template v-else>
             <div class="welcome-text">
               <h2 class="welcome-title">欢迎使用 Silk Gateway 🚀</h2>
               <p class="welcome-desc">
-                网关尚未启动，点击右侧按钮开始使用 —— 配置好 Provider 后即可启动网关转发请求
+                网关尚未启动，点击右侧按钮开始使用 —— 配置好渠道后即可启动网关转发请求
               </p>
             </div>
             <NSpace>
@@ -189,7 +189,7 @@ onMounted(() => {
                 <template #icon><NIcon><RocketOutline /></NIcon></template>
                 启动网关
               </NButton>
-              <NButton quaternary @click="goToProviders">配置 Provider</NButton>
+              <NButton quaternary @click="goToProviders">配置渠道</NButton>
             </NSpace>
           </template>
         </div>
@@ -222,7 +222,7 @@ onMounted(() => {
         </NGi>
         <NGi>
           <NCard class="stat-card" :bordered="false">
-            <div class="stat-label">活跃服务商</div>
+            <div class="stat-label">活跃渠道</div>
             <div class="stat-value">{{ stats?.active_providers || 0 }}</div>
             <div class="stat-sub">全部已配置</div>
           </NCard>

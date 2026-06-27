@@ -84,7 +84,7 @@ const columns: DataTableColumns<RequestLog> = [
     },
   },
   { title: "模型", key: "model_used", width: 110 },
-  { title: "服务商", key: "provider_id", width: 100 },
+  { title: "渠道", key: "provider_id", width: 100 },
   {
     title: "流式",
     key: "stream_enabled",
@@ -272,7 +272,7 @@ onMounted(() => {
           <span class="detail-value">{{ selectedLog.duration_ms }}ms</span>
         </div>
         <div class="detail-row" v-if="selectedLog.provider_id">
-          <span class="detail-label">服务商：</span>
+          <span class="detail-label">渠道：</span>
           <span class="detail-value">{{ selectedLog.provider_id }}</span>
         </div>
         <div class="detail-row" v-if="selectedLog.model_used">

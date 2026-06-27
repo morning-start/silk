@@ -22,7 +22,7 @@ const providerStats = ref<ProviderStats[]>([]);
 const timeRange = ref(24);
 
 const providerColumns: DataTableColumns<ProviderStats> = [
-  { title: "服务商", key: "provider_name" },
+  { title: "渠道", key: "provider_name" },
   {
     title: "请求占比",
     key: "request_count",
@@ -109,7 +109,7 @@ onMounted(() => loadData(24));
           <NCard :bordered="false" class="metric-card">
             <div class="stat-label">Token 消耗</div>
             <div class="stat-value accent">{{ (hourlyData.reduce((s, h) => s + h.total_tokens, 0) / 1000).toFixed(1) }}<span class="stat-unit">K</span></div>
-            <div class="stat-sub">所有服务商合计</div>
+            <div class="stat-sub">所有渠道合计</div>
           </NCard>
         </NGi>
       </NGrid>
@@ -124,7 +124,7 @@ onMounted(() => loadData(24));
       </NCard>
 
       <!-- Provider Load -->
-      <NCard title="服务商负载分布" :bordered="false" class="section-card" size="small">
+      <NCard title="渠道负载分布" :bordered="false" class="section-card" size="small">
         <NDataTable
           :columns="providerColumns"
           :data="providerStats"

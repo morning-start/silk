@@ -13,7 +13,7 @@ import DebuggerView from "../views/DebuggerView.vue";
 const routes = [
   { path: "/", redirect: "/dashboard" },
   { path: "/dashboard", name: "dashboard", component: DashboardView, meta: { title: "仪表盘" } },
-  { path: "/providers", name: "providers", component: ProvidersView, meta: { title: "Provider 服务商" } },
+  { path: "/providers", name: "providers", component: ProvidersView, meta: { title: "渠道管理" } },
   { path: "/routing-rules", name: "routing-rules", component: RoutingRulesView, meta: { title: "路由规则" } },
   { path: "/groups", name: "groups", component: GroupsView, meta: { title: "负载均衡分组" } },
   { path: "/model-square", name: "model-square", component: ModelSquareView, meta: { title: "模型广场" } },

@@ -41,8 +41,8 @@ const message = useMessage();
 const menuOptions = [
   { label: "仪表盘", key: "/dashboard", icon: () => h(NIcon, null, { default: () => h(GridOutline) }) },
   { type: "divider" as const, key: "d1" },
-  { label: "服务管理", key: "services", type: "group" as const, children: [
-    { label: "Provider 服务商", key: "/providers", icon: () => h(NIcon, null, { default: () => h(PeopleOutline) }) },
+  { label: "渠道管理", key: "services", type: "group" as const, children: [
+  { label: "渠道管理", key: "/providers", icon: () => h(NIcon, null, { default: () => h(PeopleOutline) }) },
     { label: "路由规则", key: "/routing-rules", icon: () => h(NIcon, null, { default: () => h(GitNetworkOutline) }) },
     { label: "模型广场", key: "/model-square", icon: () => h(NIcon, null, { default: () => h(CubeOutline) }) },
   ]},
