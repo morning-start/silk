@@ -1,13 +1,19 @@
 pub mod gateway;
+pub mod gateway_keys;
 pub mod groups;
 pub mod logs;
+pub mod model_mappings;
 pub mod providers;
 pub mod routing_rules;
 pub mod settings;
+pub mod stats;
 
 pub use gateway::*;
+pub use gateway_keys::*;
 pub use groups::*;
 pub use logs::*;
+pub use model_mappings::*;
 pub use providers::*;
 pub use routing_rules::*;
 pub use settings::*;
+pub use stats::*;

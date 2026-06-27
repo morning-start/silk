@@ -7,8 +7,9 @@ use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
 use crate::gateway::group_manager::GroupManager;
+use crate::gateway::middleware::rate_limit::RateLimitState;
 use crate::models::{GatewaySettings, Provider, RoutingRule};
-use crate::persistence::{GatewaySettingsRepo, GroupRepo, RoutingRuleRepo};
+use crate::persistence::{GatewaySettingsRepo, RoutingRuleRepo};
 use crate::protocol::AdapterRegistry;
 
 // ---------------------------------------------------------------------------
@@ -24,6 +25,7 @@ pub struct GatewayContext {
     pub log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
     pub adapter_registry: Arc<AdapterRegistry>,
     pub group_manager: Arc<GroupManager>,
+    pub rate_limit_state: Arc<RateLimitState>,
 }
 
 impl GatewayContext {
@@ -35,6 +37,7 @@ impl GatewayContext {
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
         adapter_registry: Arc<AdapterRegistry>,
         group_manager: Arc<GroupManager>,
+        rate_limit_state: Arc<RateLimitState>,
     ) -> Self {
         Self {
             pool,
@@ -44,6 +47,7 @@ impl GatewayContext {
             log_sender,
             adapter_registry,
             group_manager,
+            rate_limit_state,
         }
     }
 }
@@ -330,6 +334,13 @@ pub async fn load_gateway_context(
     let group_manager = Arc::new(GroupManager::new());
     group_manager.load(&pool).await?;
 
+    // 从设置中构建限流状态
+    let rate_limit_state = Arc::new(RateLimitState::new(
+        settings.rate_limit_enabled != 0,
+        settings.rate_limit_max_requests_per_minute as u64,
+        settings.rate_limit_max_tokens_per_minute as u64,
+    ));
+
     Ok(GatewayContext::new(
         pool,
         Arc::new(RwLock::new(settings)),
@@ -338,5 +349,6 @@ pub async fn load_gateway_context(
         log_sender,
         adapter_registry,
         group_manager,
+        rate_limit_state,
     ))
 }
