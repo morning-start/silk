@@ -240,6 +240,10 @@ export const api = {
   // Provider Test
   testProvider: (id: string) => invoke<ProviderTestResponse>("test_provider", { id }),
 
+  // Fetch Models from Provider API
+  fetchProviderModels: (data: { api_base_url: string; api_key: string; proxy_url?: string; timeout_seconds?: number }) =>
+    invoke<string[]>("fetch_provider_models", { payload: data }),
+
   // Model Mappings
   listModelMappings: () => invoke<ModelMapping[]>("list_model_mappings"),
   getMappingModel: (id: string) => invoke<ModelMapping>("get_model_mapping", { id }),
