@@ -15,7 +15,6 @@ import {
 import {
   GridOutline,
   PeopleOutline,
-  GitNetworkOutline,
   CubeOutline,
   DocumentTextOutline,
   SettingsOutline,
@@ -43,9 +42,8 @@ const menuOptions = [
   { type: "divider" as const, key: "d1" },
   { label: "渠道管理", key: "services", type: "group" as const, children: [
   { label: "渠道管理", key: "/providers", icon: () => h(NIcon, null, { default: () => h(PeopleOutline) }) },
-    { label: "路由规则", key: "/routing-rules", icon: () => h(NIcon, null, { default: () => h(GitNetworkOutline) }) },
-    { label: "模型广场", key: "/model-square", icon: () => h(NIcon, null, { default: () => h(CubeOutline) }) },
-  ]},
+  { label: "模型广场", key: "/model-square", icon: () => h(NIcon, null, { default: () => h(CubeOutline) }) },
+]},
   { type: "divider" as const, key: "d2" },
   { label: "监控与日志", key: "monitoring", type: "group" as const, children: [
     { label: "请求日志", key: "/logs", icon: () => h(NIcon, null, { default: () => h(DocumentTextOutline) }) },
