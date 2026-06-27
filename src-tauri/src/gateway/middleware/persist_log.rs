@@ -44,7 +44,12 @@ pub async fn run(
         error_code: ctx.error_code.clone(),
         model_used: route
             .and_then(|route| route.model_name_override.clone())
-            .or_else(|| provider.and_then(|provider| provider.model_name.clone())),
+            .or_else(|| {
+                provider.and_then(|p| {
+                    let models = p.models_vec();
+                    models.first().cloned()
+                })
+            }),
         retry_count: Some(0),
         stream_enabled: Some(is_streaming),
         cache_hit: Some(false),

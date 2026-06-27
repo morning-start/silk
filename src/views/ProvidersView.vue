@@ -45,7 +45,6 @@ const formValue = ref({
   protocols: [] as string[],
   models: [] as string[],
   api_base_url: "",
-  api_key: "",
   proxy_url: "",
   timeout_seconds: 30,
   max_retries: 3,
@@ -69,12 +68,11 @@ function handleAdd() {
     protocols: [],
     models: [],
     api_base_url: "",
-    api_key: "",
     proxy_url: "",
     timeout_seconds: 30,
     max_retries: 3,
     status: "enabled",
-    extraKeys: [],
+    extraKeys: [{ name: "默认", value: "", enabled: true }],
   };
   showModal.value = true;
 }
@@ -128,12 +126,11 @@ function handleEdit(row: Provider) {
     protocols: row.protocols || [],
     models: row.models || [],
     api_base_url: row.api_base_url,
-    api_key: "",
     proxy_url: row.proxy_url || "",
     timeout_seconds: row.timeout_seconds,
     max_retries: row.max_retries,
     status: row.status,
-    extraKeys: [],
+    extraKeys: [{ name: "默认", value: "", enabled: true }],
   };
   showModal.value = true;
 }
@@ -295,12 +292,9 @@ onMounted(() => {
         <NFormItem label="API 地址" required>
           <NInput v-model:value="formValue.api_base_url" placeholder="https://api.openai.com" @blur="normalizeUrl" />
         </NFormItem>
-        <NFormItem :label="editingId ? 'API Key (留空不修改)' : 'API Key'" :required="!editingId">
-          <NInput v-model:value="formValue.api_key" type="password" placeholder="sk-..." show-password-on="click" />
-        </NFormItem>
 
-        <!-- 额外 API Key -->
-        <NFormItem label="额外密钥">
+        <!-- API 密钥 -->
+        <NFormItem label="密钥">
           <div style="width: 100%">
             <div v-for="(k, i) in formValue.extraKeys" :key="i" style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
               <NInput v-model:value="k.name" placeholder="名称" size="small" style="flex:0 0 80px" />
@@ -329,7 +323,7 @@ onMounted(() => {
               size="small"
               @click="fetchModels"
               :loading="fetchingModels"
-              :disabled="!formValue.api_base_url || !formValue.api_key"
+              :disabled="!formValue.api_base_url || formValue.extraKeys.length === 0"
             >
               获取模型
             </NButton>
