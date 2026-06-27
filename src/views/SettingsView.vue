@@ -277,7 +277,7 @@ onMounted(() => {
           </NFormItem>
         </div>
         <NText depth="3" style="font-size: 13px; display: block; margin-top: 8px">
-          此设置为全局默认，可在<strong>模型广场</strong>中为单个模型覆盖调度策略和健康检查配置。
+          此设置为全局默认，可在<strong>模型池</strong>中为单个模型覆盖调度策略和健康检查配置。
         </NText>
       </NForm>
     </NCard>

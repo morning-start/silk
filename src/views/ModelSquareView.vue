@@ -186,7 +186,7 @@ onMounted(loadData);
   <div class="model-square">
     <div class="toolbar">
       <div class="toolbar-left">
-        <h2 class="page-title">模型广场</h2>
+        <h2 class="page-title">模型池</h2>
         <NTag size="small" type="info">{{ mappings.length }} 个模型</NTag>
       </div>
       <div class="toolbar-right">
