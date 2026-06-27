@@ -20,6 +20,7 @@ import {
 import { useProvidersStore } from "../stores/providers";
 import { storeToRefs } from "pinia";
 import type { Provider } from "../api";
+import { api } from "../api";
 
 const providersStore = useProvidersStore();
 const { providers, loading, error } = storeToRefs(providersStore);
@@ -53,6 +54,10 @@ const formValue = ref({
   max_retries: 3,
   status: "enabled" as string,
 });
+
+// 模型获取
+const modelOptions = ref<{ label: string; value: string }[]>([]);
+const fetchingModels = ref(false);
 
 const typeOptions = [
   { label: "OpenAI", value: "openai" },
@@ -129,7 +134,34 @@ function handleAdd() {
     max_retries: 3,
     status: "enabled",
   };
+  modelOptions.value = [];
   showModal.value = true;
+}
+
+async function fetchModels() {
+  if (!formValue.value.api_base_url || !formValue.value.api_key) {
+    message.warning("请先填写 API 地址和 API Key");
+    return;
+  }
+  fetchingModels.value = true;
+  modelOptions.value = [];
+  try {
+    const models = await api.fetchProviderModels({
+      api_base_url: formValue.value.api_base_url,
+      api_key: formValue.value.api_key,
+      proxy_url: formValue.value.proxy_url || undefined,
+      timeout_seconds: formValue.value.timeout_seconds,
+    });
+    modelOptions.value = models.map((m) => ({ label: m, value: m }));
+    if (models.length > 0 && !formValue.value.model_name) {
+      formValue.value.model_name = models[0];
+    }
+    message.success(`获取到 ${models.length} 个模型`);
+  } catch (e: any) {
+    message.error(e.message || "获取模型列表失败");
+  } finally {
+    fetchingModels.value = false;
+  }
 }
 
 function handleEdit(row: Provider) {
@@ -268,7 +300,27 @@ onMounted(() => {
           <NInput v-model:value="formValue.api_key" type="password" placeholder="sk-..." show-password-on="click" />
         </NFormItem>
         <NFormItem label="默认模型">
-          <NInput v-model:value="formValue.model_name" placeholder="gpt-4o" />
+          <div style="display: flex; gap: 8px; width: 100%; align-items: flex-start">
+            <NSelect
+              v-model:value="formValue.model_name"
+              :options="modelOptions"
+              :placeholder="modelOptions.length > 0 ? '选择模型' : 'gpt-4o'"
+              :allow-clear="true"
+              :filterable="true"
+              :tag="true"
+              style="flex: 1"
+              :disabled="fetchingModels"
+            />
+            <NButton
+              secondary
+              size="small"
+              @click="fetchModels"
+              :loading="fetchingModels"
+              :disabled="!formValue.api_base_url || !formValue.api_key"
+            >
+              获取模型
+            </NButton>
+          </div>
         </NFormItem>
         <NFormItem label="代理地址">
           <NInput v-model:value="formValue.proxy_url" placeholder="可选" />

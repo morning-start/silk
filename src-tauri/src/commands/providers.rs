@@ -219,6 +219,75 @@ pub async fn delete_provider(
     Ok(deleted)
 }
 
+/// 获取 Provider 的模型列表（调用 /v1/models 接口）
+#[tauri::command]
+pub async fn fetch_provider_models(
+    _state: State<'_, AppState>,
+    payload: FetchModelsPayload,
+) -> Result<Vec<String>, String> {
+    let test_url = format!("{}/v1/models", payload.api_base_url.trim_end_matches('/'));
+    let timeout_secs = payload.timeout_seconds.unwrap_or(10).min(30).max(1) as u64;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
+
+    let mut req = client
+        .get(&test_url)
+        .header("Authorization", format!("Bearer {}", payload.api_key))
+        .header("Content-Type", "application/json");
+
+    if let Some(ref proxy) = payload.proxy_url {
+        if !proxy.is_empty() {
+            req = req.header("X-Proxy-Url", proxy);
+        }
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("请求模型列表失败: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        let msg = if body.len() > 200 {
+            format!("{}: {}", status, &body[..200])
+        } else {
+            format!("{}: {}", status, body)
+        };
+        return Err(msg);
+    }
+
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {e}"))?;
+
+    // 解析 OpenAI 兼容的 /v1/models 响应
+    let json: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("解析响应 JSON 失败: {e}"))?;
+
+    let models = json["data"]
+        .as_array()
+        .ok_or("响应中未找到模型列表 (data 字段)")?;
+
+    let mut model_names: Vec<String> = Vec::new();
+    for item in models {
+        if let Some(name) = item["id"].as_str() {
+            model_names.push(name.to_string());
+        }
+    }
+
+    if model_names.is_empty() {
+        return Err("未获取到任何模型".to_string());
+    }
+
+    model_names.sort();
+    Ok(model_names)
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -292,4 +361,12 @@ pub struct UpdateProviderPayload {
     pub max_retries: Option<i64>,
     pub status: Option<String>,
     pub metadata_json: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FetchModelsPayload {
+    pub api_base_url: String,
+    pub api_key: String,
+    pub proxy_url: Option<String>,
+    pub timeout_seconds: Option<i64>,
 }
