@@ -15,6 +15,7 @@ export interface Provider {
   name: string;
   protocols: string[];
   models: string[];
+  key_count: number;
   api_base_url: string;
   model_name: string | null;
   proxy_url: string | null;
