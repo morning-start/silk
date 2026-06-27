@@ -86,7 +86,7 @@ impl GroupManager {
                 }
 
                 // 基于权重随机选择
-                let mut rng = rand::random::<u64>();
+                let rng = rand::random::<u64>();
                 let mut cumulative = 0i64;
                 let target = (rng as i64).abs() % total_weight;
 

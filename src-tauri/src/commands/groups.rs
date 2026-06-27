@@ -14,7 +14,7 @@ use crate::AppState;
 
 /// 获取所有分组
 #[tauri::command]
-pub async fn list_groups(state: State<'_, AppState>) -> Result<Vec<ProviderGroup>, String> {
+pub async fn list_groups(_state: State<'_, AppState>) -> Result<Vec<ProviderGroup>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     GroupRepo::find_all_groups(pool)
         .await
@@ -24,7 +24,7 @@ pub async fn list_groups(state: State<'_, AppState>) -> Result<Vec<ProviderGroup
 /// 根据模型名查找分组
 #[tauri::command]
 pub async fn find_groups_by_model(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     model_name: String,
 ) -> Result<Vec<ProviderGroup>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -36,7 +36,7 @@ pub async fn find_groups_by_model(
 /// 获取单个分组（含成员）
 #[tauri::command]
 pub async fn get_group(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     id: String,
 ) -> Result<GroupWithMembersResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -76,8 +76,8 @@ pub async fn create_group(
         .map_err(|e| format!("创建分组失败: {e}"))?;
 
     // 重新加载分组
-    state
-        .gateway
+    let gateway_guard = state.gateway.read().await;
+    gateway_guard
         .group_manager
         .reload_group(pool, &group.id)
         .await
@@ -108,8 +108,8 @@ pub async fn update_group(
         .ok_or("分组不存在")?;
 
     // 重新加载分组
-    state
-        .gateway
+    let gateway_guard = state.gateway.read().await;
+    gateway_guard
         .group_manager
         .reload_group(pool, &id)
         .await
@@ -127,7 +127,7 @@ pub async fn delete_group(state: State<'_, AppState>, id: String) -> Result<bool
         .map_err(|e| format!("删除分组失败: {e}"))?;
 
     if deleted {
-        state.gateway.group_manager.reload_all(pool).await.ok();
+        state.gateway.read().await.group_manager.reload_all(pool).await.ok();
     }
 
     Ok(deleted)
@@ -153,8 +153,8 @@ pub async fn add_group_member(
         .map_err(|e| format!("添加成员失败: {e}"))?;
 
     // 重新加载分组
-    state
-        .gateway
+    let gateway_guard = state.gateway.read().await;
+    gateway_guard
         .group_manager
         .reload_group(pool, &member.group_id)
         .await
@@ -183,8 +183,8 @@ pub async fn update_group_member(
         .ok_or("成员不存在")?;
 
     // 重新加载分组
-    state
-        .gateway
+    let gateway_guard = state.gateway.read().await;
+    gateway_guard
         .group_manager
         .reload_group(pool, &member.group_id)
         .await
@@ -215,7 +215,7 @@ pub async fn remove_group_member(state: State<'_, AppState>, id: String) -> Resu
 
     if deleted {
         if let Some(gid) = group_id {
-            state.gateway.group_manager.reload_group(pool, &gid).await.ok();
+            state.gateway.read().await.group_manager.reload_group(pool, &gid).await.ok();
         }
     }
 

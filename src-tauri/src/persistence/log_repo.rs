@@ -1,3 +1,4 @@
+use sqlx::Row;
 use sqlx::SqlitePool;
 
 use crate::models::{NewRequestLog, RequestLog};
@@ -177,10 +178,10 @@ impl LogRepo {
 
     /// 查询日志总数
     pub async fn count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query!(r#"SELECT COUNT(*) as count FROM request_logs"#)
+        let row = sqlx::query(r#"SELECT COUNT(*) as count FROM request_logs"#)
             .fetch_one(pool)
             .await?;
-        Ok(row.count)
+        Ok(row.get::<i64, _>("count"))
     }
 
     /// 删除指定时间之前的日志（用于定期清理）
@@ -188,7 +189,8 @@ impl LogRepo {
         pool: &SqlitePool,
         before: chrono::NaiveDateTime,
     ) -> Result<u64, sqlx::Error> {
-        let result = sqlx::query!(r#"DELETE FROM request_logs WHERE timestamp < $1"#, before)
+        let result = sqlx::query(r#"DELETE FROM request_logs WHERE timestamp < $1"#)
+            .bind(before)
             .execute(pool)
             .await?;
 
@@ -197,7 +199,7 @@ impl LogRepo {
 
     /// 删除所有日志
     pub async fn delete_all(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
-        let result = sqlx::query!(r#"DELETE FROM request_logs"#)
+        let result = sqlx::query(r#"DELETE FROM request_logs"#)
             .execute(pool)
             .await?;
 

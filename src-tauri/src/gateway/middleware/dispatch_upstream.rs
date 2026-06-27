@@ -17,7 +17,7 @@ use super::{build_upstream_url, should_forward_header};
 
 /// 请求转发入口：自动判断流式/非流式
 pub async fn run(
-    runtime: &GatewayContext,
+    _runtime: &GatewayContext,
     ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
@@ -81,7 +81,7 @@ pub async fn run(
 
         match request_clone.body(ctx.body.clone()).send().await {
             Ok(response) => {
-                let status = response.status();
+                let _status = response.status();
                 let headers = response.headers().clone();
 
                 if is_sse_response(&headers) {
@@ -176,7 +176,6 @@ async fn handle_sse_response(
                                 }
 
                                 if event.is_end() {
-                                    stream_state.ended = true;
                                     let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
                                     return;
                                 }

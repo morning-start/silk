@@ -1,7 +1,7 @@
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
-use crate::protocol::{CanonicalResponse, ProtocolError, UpstreamResponse};
+use crate::protocol::UpstreamResponse;
 
 /// 响应转换中间件
 ///
@@ -67,7 +67,6 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_placeholder() {
