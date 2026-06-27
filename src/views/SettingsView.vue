@@ -12,10 +12,8 @@ import {
   NCard,
   NSpace,
   NSelect,
-  useMessage,
-  NTab,
-  NTabs,
   NDivider,
+  useMessage,
 } from "naive-ui";
 import { useGatewayStore } from "../stores/gateway";
 import { storeToRefs } from "pinia";
@@ -24,8 +22,6 @@ import { api, type GatewayKey } from "../api";
 const gatewayStore = useGatewayStore();
 const { status, loading } = storeToRefs(gatewayStore);
 const message = useMessage();
-
-const activeTab = ref("basic");
 
 const formRef = ref<any>(null);
 const formValue = ref({
@@ -137,23 +133,13 @@ onMounted(() => {
 
 <template>
   <div class="settings-page">
-    <h2 class="page-title">系统设置</h2>
-
-    <NCard :bordered="false" class="settings-tabs-card" size="small">
-      <NTabs v-model:value="activeTab" type="line" animated>
-        <NTab name="basic" tab="网关基础"></NTab>
-        <NTab name="keys" tab="Key 管理"></NTab>
-        <NTab name="logging" tab="日志规则"></NTab>
-        <NTab name="balancer" tab="全局负载均衡"></NTab>
-        <NTab name="limits" tab="限流配额"></NTab>
-      </NTabs>
-    </NCard>
+    <div class="settings-header">
+      <h2 class="page-title">系统设置</h2>
+      <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存更改</NButton>
+    </div>
 
     <!-- 网关基础 -->
-    <NCard v-show="activeTab === 'basic'" :bordered="false" class="settings-card" size="small" title="网关基础配置">
-      <template #header-extra>
-        <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存更改</NButton>
-      </template>
+    <NCard :bordered="false" class="settings-card" size="small" title="网关基础">
       <NForm ref="formRef" :model="formValue" label-placement="left" label-width="130">
         <div class="form-row">
           <NFormItem label="监听地址" style="flex: 1">
@@ -182,19 +168,40 @@ onMounted(() => {
       </NForm>
     </NCard>
 
+    <NDivider class="section-divider" />
+
+    <!-- 限流配额 -->
+    <NCard :bordered="false" class="settings-card" size="small" title="限流配额">
+      <NForm :model="formValue" label-placement="left" label-width="130">
+        <div class="form-row">
+          <NFormItem label="每分钟请求上限" style="flex: 1">
+            <NInputNumber v-model:value="formValue.rate_limit_max_requests_per_minute" :min="1" :max="100000" style="width: 100%" />
+          </NFormItem>
+          <NFormItem label="每分钟 Token 上限" style="flex: 1">
+            <NInputNumber v-model:value="formValue.rate_limit_max_tokens_per_minute" :min="1" :max="100000000" style="width: 100%" />
+          </NFormItem>
+        </div>
+        <NFormItem label="启用限流">
+          <NSwitch v-model:value="formValue.rate_limit_enabled" />
+        </NFormItem>
+      </NForm>
+    </NCard>
+
+    <NDivider class="section-divider" />
+
     <!-- Key 管理 -->
-    <NCard v-show="activeTab === 'keys'" :bordered="false" class="settings-card" size="small" title="Key 管理">
+    <NCard :bordered="false" class="settings-card" size="small" title="Key 管理">
       <template #header-extra>
         <NButton size="small" @click="showAddKey = !showAddKey">+ 添加 Key</NButton>
       </template>
 
       <div v-if="showAddKey" class="add-key-box">
-        <div class="form-row" style="margin-bottom: 12px">
+        <div class="form-row" style="margin-bottom: 8px">
           <NInput v-model:value="newKeyName" placeholder="名称" style="flex: 1" />
           <NInput v-model:value="newKeyValue" placeholder="Key 值 (sk-...)" style="flex: 2" />
           <NInputNumber v-model:value="newKeyMaxConcurrent" :min="1" :max="1000" placeholder="并发数" style="flex: 0 0 100px" />
-          <NButton type="primary" @click="addKey">确定</NButton>
-          <NButton @click="showAddKey = false">取消</NButton>
+          <NButton type="primary" size="small" @click="addKey">确定</NButton>
+          <NButton size="small" @click="showAddKey = false">取消</NButton>
         </div>
       </div>
 
@@ -218,48 +225,43 @@ onMounted(() => {
           </NSpace>
         </div>
         <NText v-if="keys.length === 0" depth="3" style="display: block; text-align: center; padding: 24px">
-          暂无 Key，点击 "+ 添加 Key" 创建
+          暂无 Key，点击上方"+ 添加 Key"创建
         </NText>
       </div>
     </NCard>
 
+    <NDivider class="section-divider" />
+
     <!-- 日志规则 -->
-    <NCard v-show="activeTab === 'logging'" :bordered="false" class="settings-card" size="small" title="日志规则">
-      <template #header-extra>
-        <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存规则</NButton>
-      </template>
-      <NForm :model="formValue" label-placement="left" label-width="140">
-        <div class="form-row">
-          <NFormItem label="日志保留天数" style="flex: 1">
-            <NInputNumber v-model:value="formValue.log_retention_days" :min="1" :max="3650" style="width: 100%" />
-          </NFormItem>
-        </div>
-        <NFormItem label="启用自动清理">
+    <NCard :bordered="false" class="settings-card" size="small" title="日志规则">
+      <NForm :model="formValue" label-placement="left" label-width="130">
+        <NFormItem label="日志保留天数" style="max-width: 280px">
+          <NInputNumber v-model:value="formValue.log_retention_days" :min="1" :max="3650" style="width: 100%" />
+        </NFormItem>
+        <NFormItem label="自动清理">
           <NSwitch :value="true" />
           <span style="margin-left: 8px; font-size: 13px; color: var(--text-color-3, #94a3b8)">自动清理超过保留天数的日志</span>
         </NFormItem>
       </NForm>
     </NCard>
 
+    <NDivider class="section-divider" />
+
     <!-- 全局负载均衡 -->
-    <NCard v-show="activeTab === 'balancer'" :bordered="false" class="settings-card" size="small" title="全局负载均衡">
-      <template #header-extra>
-        <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存全局配置</NButton>
-      </template>
+    <NCard :bordered="false" class="settings-card" size="small" title="全局负载均衡">
       <NForm :model="formValue" label-placement="left" label-width="130">
         <div class="form-row">
           <NFormItem label="默认调度策略" style="flex: 1">
             <NSelect
               :value="'weighted_round_robin'"
               :options="[
-                { label: '加权轮询 (Weighted Round Robin)', value: 'weighted_round_robin' },
-                { label: '轮询 (Round Robin)', value: 'round_robin' },
-                { label: '最少连接 (Least Connections)', value: 'least_conn' },
-                { label: '随机 (Random)', value: 'random' },
+                { label: '加权轮询', value: 'weighted_round_robin' },
+                { label: '轮询', value: 'round_robin' },
+                { label: '最少连接', value: 'least_conn' },
               ]"
             />
           </NFormItem>
-          <NFormItem label="健康检查间隔" style="flex: 0 0 180px">
+          <NFormItem label="健康检查间隔" style="flex: 0 0 160px">
             <NSelect
               :value="'30s'"
               :options="[
@@ -267,7 +269,6 @@ onMounted(() => {
                 { label: '30 秒', value: '30s' },
                 { label: '1 分钟', value: '1m' },
                 { label: '5 分钟', value: '5m' },
-                { label: '不启用', value: 'off' },
               ]"
             />
           </NFormItem>
@@ -276,34 +277,13 @@ onMounted(() => {
           <NFormItem label="失败切换阈值" style="flex: 1">
             <NInputNumber :value="3" :min="1" :max="20" style="width: 100%" />
           </NFormItem>
-          <NFormItem label="恢复检测次数" style="flex: 0 0 180px">
+          <NFormItem label="恢复检测次数" style="flex: 0 0 160px">
             <NInputNumber :value="2" :min="1" :max="20" style="width: 100%" />
           </NFormItem>
         </div>
-        <NDivider style="margin: 4px 0 16px" />
-        <NText depth="3" style="font-size: 13px">
+        <NText depth="3" style="font-size: 13px; display: block; margin-top: 8px">
           此设置为全局默认，可在<strong>模型广场</strong>中为单个模型覆盖调度策略和健康检查配置。
         </NText>
-      </NForm>
-    </NCard>
-
-    <!-- 限流配额 -->
-    <NCard v-show="activeTab === 'limits'" :bordered="false" class="settings-card" size="small" title="限流配额">
-      <template #header-extra>
-        <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存限流配置</NButton>
-      </template>
-      <NForm :model="formValue" label-placement="left" label-width="130">
-        <div class="form-row">
-          <NFormItem label="每分钟请求上限" style="flex: 1">
-            <NInputNumber v-model:value="formValue.rate_limit_max_requests_per_minute" :min="1" :max="100000" style="width: 100%" />
-          </NFormItem>
-          <NFormItem label="每分钟 Token 上限" style="flex: 1">
-            <NInputNumber v-model:value="formValue.rate_limit_max_tokens_per_minute" :min="1" :max="100000000" style="width: 100%" />
-          </NFormItem>
-        </div>
-        <NFormItem label="启用限流">
-          <NSwitch v-model:value="formValue.rate_limit_enabled" />
-        </NFormItem>
       </NForm>
     </NCard>
   </div>
@@ -311,22 +291,29 @@ onMounted(() => {
 
 <style scoped>
 .settings-page {
-  max-width: 800px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
 }
 
 .page-title {
   font-size: 18px;
   font-weight: 600;
-  margin: 0 0 20px;
-}
-
-.settings-tabs-card {
-  border-radius: 12px;
-  margin-bottom: 16px;
+  margin: 0;
 }
 
 .settings-card {
   border-radius: 12px;
+}
+
+.section-divider {
+  margin: 24px 0;
 }
 
 .form-row {
