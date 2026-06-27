@@ -16,14 +16,19 @@ pub async fn gateway_status(
     let server = state.gateway_server.read().await;
     let running = server.is_some();
 
-    let settings = state.gateway.settings.read().await;
+    let gateway_guard = state.gateway.read().await;
+    let settings = gateway_guard.settings.read().await;
     let gateway_settings = GatewaySettingsInfo {
+        id: settings.id.clone(),
         bind_host: settings.bind_host.clone(),
         bind_port: settings.bind_port,
         allow_remote: settings.allow_remote != 0,
+        auth_token_hash: settings.auth_token_hash.clone(),
         log_retention_days: settings.log_retention_days,
         default_provider_id: settings.default_provider_id.clone(),
         default_route_id: settings.default_route_id.clone(),
+        created_at: settings.created_at.to_string(),
+        updated_at: settings.updated_at.to_string(),
     };
 
     Ok(GatewayStatusResponse {
@@ -50,12 +55,11 @@ pub async fn gateway_start(
         }
     }
 
-    // 加载网关上下文
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let (log_sender, log_receiver) = tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
 
     // 启动后台日志写入任务
-    let log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
+    let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
 
     // 加载网关上下文并启动服务
     let gateway = load_gateway_context(pool.clone(), log_sender)
@@ -65,16 +69,24 @@ pub async fn gateway_start(
         .await
         .map_err(|e| format!("启动网关失败: {e}"))?;
 
-    // 更新状态
+    // 同步更新状态 —— 替换内存中的上下文和新服务句柄
     {
+        let mut state_gateway = state.gateway.write().await;
+        *state_gateway = gateway.clone();
         let mut server = state.gateway_server.write().await;
         *server = Some(gateway_server);
     }
 
-    let settings = gateway.settings.read().await;
+    let settings = &gateway.settings;
+    tracing::info!("网关已启动");
+
     Ok(GatewayStartResponse {
         success: true,
-        address: format!("{}:{}", settings.bind_host, settings.bind_port),
+        address: format!(
+            "{}:{}",
+            settings.read().await.bind_host,
+            settings.read().await.bind_port
+        ),
     })
 }
 
@@ -113,7 +125,7 @@ pub async fn gateway_restart(
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let (log_sender, log_receiver) = tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
 
-    let log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
+    let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
 
     let gateway = load_gateway_context(pool.clone(), log_sender)
         .await
@@ -147,12 +159,16 @@ pub struct GatewayStatusResponse {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GatewaySettingsInfo {
+    pub id: String,
     pub bind_host: String,
     pub bind_port: i64,
     pub allow_remote: bool,
+    pub auth_token_hash: Option<String>,
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Serialize)]

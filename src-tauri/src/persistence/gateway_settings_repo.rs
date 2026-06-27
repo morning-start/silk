@@ -16,6 +16,9 @@ impl GatewaySettingsRepo {
             log_retention_days: 30,
             default_provider_id: None,
             default_route_id: None,
+            rate_limit_enabled: 0,
+            rate_limit_max_requests_per_minute: 1000,
+            rate_limit_max_tokens_per_minute: 500000,
             created_at: now,
             updated_at: now,
         }
@@ -49,15 +52,19 @@ impl GatewaySettingsRepo {
 
         let mut tx = pool.begin().await?;
 
-        sqlx::query!(
+        let rate_limit_enabled = update.rate_limit_enabled.map(|v| if v { 1 } else { 0 });
+
+        sqlx::query(
             r#"
             INSERT OR IGNORE INTO gateway_settings (
-                id, bind_host, bind_port, allow_remote, log_retention_days, created_at, updated_at
+                id, bind_host, bind_port, allow_remote, log_retention_days,
+                rate_limit_enabled, rate_limit_max_requests_per_minute, rate_limit_max_tokens_per_minute,
+                created_at, updated_at
             )
-            VALUES ('default', '127.0.0.1', 2013, 0, 30, $1, $1)
+            VALUES ('default', '127.0.0.1', 2013, 0, 30, 0, 1000, 500000, $1, $1)
             "#,
-            now,
         )
+        .bind(now)
         .execute(&mut *tx)
         .await?;
 
@@ -71,7 +78,10 @@ impl GatewaySettingsRepo {
                 log_retention_days = COALESCE($6, log_retention_days),
                 default_provider_id = COALESCE($7, default_provider_id),
                 default_route_id = COALESCE($8, default_route_id),
-                updated_at = $9
+                rate_limit_enabled = COALESCE($9, rate_limit_enabled),
+                rate_limit_max_requests_per_minute = COALESCE($10, rate_limit_max_requests_per_minute),
+                rate_limit_max_tokens_per_minute = COALESCE($11, rate_limit_max_tokens_per_minute),
+                updated_at = $12
             WHERE id = $1
             RETURNING *
             "#,
@@ -84,6 +94,9 @@ impl GatewaySettingsRepo {
         .bind(update.log_retention_days)
         .bind(update.default_provider_id.as_deref())
         .bind(update.default_route_id.as_deref())
+        .bind(rate_limit_enabled)
+        .bind(update.rate_limit_max_requests_per_minute)
+        .bind(update.rate_limit_max_tokens_per_minute)
         .bind(now)
         .fetch_one(&mut *tx)
         .await?;
