@@ -232,8 +232,7 @@ onMounted(() => {
         </div>
       </template>
 
-      <!-- Card Grid -->
-      <div v-else class="provider-grid">
+      <template v-else>
         <NCard
           v-for="item in filteredProviders"
           :key="item.id"
@@ -268,8 +267,7 @@ onMounted(() => {
             <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
           </div>
         </NCard>
-      </div>
-    </NCard>
+      </template>
 
     <NModal
       v-model:show="showModal"
@@ -373,6 +371,10 @@ onMounted(() => {
   max-width: 1200px;
 }
 
+.providers-page > .provider-card {
+  margin-bottom: 0;
+}
+
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -397,14 +399,21 @@ onMounted(() => {
   margin: 0;
 }
 
-.table-card {
-  border-radius: 12px;
-}
-
-.provider-grid {
+.providers-page {
+  max-width: 1200px;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
+  align-content: start;
+}
+
+.providers-page > .toolbar {
+  grid-column: 1 / -1;
+}
+
+.providers-page > .error-state,
+.providers-page > .empty-state {
+  grid-column: 1 / -1;
 }
 
 .provider-card {
