@@ -54,6 +54,7 @@ const formValue = ref({
   timeout_seconds: 30,
   max_retries: 3,
   status: "enabled" as string,
+  extraKeys: [] as { name: string; value: string; enabled: boolean }[],
 });
 
 // 模型获取
@@ -171,9 +172,18 @@ function handleAdd() {
     timeout_seconds: 30,
     max_retries: 3,
     status: "enabled",
+    extraKeys: [],
   };
   modelOptions.value = [];
   showModal.value = true;
+}
+
+function addExtraKey() {
+  formValue.value.extraKeys.push({ name: "", value: "", enabled: true });
+}
+
+function removeExtraKey(index: number) {
+  formValue.value.extraKeys.splice(index, 1);
 }
 
 async function fetchModels() {
@@ -230,6 +240,7 @@ function handleEdit(row: Provider) {
     timeout_seconds: row.timeout_seconds,
     max_retries: row.max_retries,
     status: row.status,
+    extraKeys: [],
   };
   // 编辑时从已有的 models 填充下拉选项
   if (row.models && row.models.length > 0) {
@@ -265,10 +276,15 @@ async function handleSubmit() {
     if (editingId.value) {
       const data: any = { ...formValue.value };
       if (!data.api_key) delete data.api_key;
+      data.keys = data.extraKeys || [];
+      delete data.extraKeys;
       await providersStore.update(editingId.value, data);
       message.success("更新成功");
     } else {
-      await providersStore.create(formValue.value);
+      const data: any = { ...formValue.value };
+      data.keys = data.extraKeys || [];
+      delete data.extraKeys;
+      await providersStore.create(data);
       message.success("创建成功");
     }
     showModal.value = false;
@@ -366,6 +382,19 @@ onMounted(() => {
         </NFormItem>
         <NFormItem :label="editingId ? 'API Key (留空不修改)' : 'API Key'" :required="!editingId">
           <NInput v-model:value="formValue.api_key" type="password" placeholder="sk-..." show-password-on="click" />
+        </NFormItem>
+
+        <!-- 额外 API Key -->
+        <NFormItem label="额外密钥">
+          <div style="width: 100%">
+            <div v-for="(k, i) in formValue.extraKeys" :key="i" style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+              <NInput v-model:value="k.name" placeholder="名称" size="small" style="flex:0 0 80px" />
+              <NInput v-model:value="k.value" type="password" placeholder="sk-..." size="small" style="flex:1" show-password-on="click" />
+              <NSwitch v-model:value="k.enabled" size="small" />
+              <NButton quaternary size="tiny" type="error" @click="removeExtraKey(i)">×</NButton>
+            </div>
+            <NButton size="tiny" quaternary @click="addExtraKey">+ 添加密钥</NButton>
+          </div>
         </NFormItem>
         <NFormItem label="默认模型">
           <div style="display: flex; gap: 8px; width: 100%; align-items: flex-start">
