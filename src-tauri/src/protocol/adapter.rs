@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use axum::http::HeaderMap;
 use thiserror::Error;
 
-use crate::protocol::canonical::{CanonicalRequest, CanonicalResponse};
 use crate::models::Provider;
 
 // ---------------------------------------------------------------------------
@@ -25,6 +24,9 @@ pub enum ProtocolError {
 
     #[error("不支持的 content 类型: {0}")]
     UnsupportedContentType(String),
+
+    #[error("转换错误: {0}")]
+    Transform(String),
 }
 
 impl From<ProtocolError> for crate::error::AppError {
@@ -66,27 +68,22 @@ pub trait ProviderAdapter: Send + Sync {
     /// 适配器类型标识（如 "openai_chat", "claude_messages", "openai_response"）
     fn provider_type(&self) -> &'static str;
 
-    /// 将 Canonical Request 转为上游请求
+    /// 将原始请求体（JSON）转为上游请求
     ///
-    # [allow(dead_code)]
-    async fn canonicalize_request(
+    /// req_body 是客户端发送的原始 JSON 字节
+    async fn transform_request(
         &self,
-        req: &CanonicalRequest,
-        _provider: &Provider,
-    ) -> Result<UpstreamRequest, ProtocolError> {
-        let _ = (req, _provider);
-        Err(ProtocolError::UnsupportedFormat(self.provider_type().to_string()))
-    }
+        req_body: &[u8],
+        provider: &Provider,
+    ) -> Result<UpstreamRequest, ProtocolError>;
 
-    /// 将上游响应转为 Canonical Response
+    /// 将上游响应转为客户端期望的格式（JSON）
     ///
-    # [allow(dead_code)]
-    async fn parse_response(
+    /// resp 是上游返回的原始响应
+    async fn transform_response(
         &self,
-        _resp: &UpstreamResponse,
-    ) -> Result<CanonicalResponse, ProtocolError> {
-        Err(ProtocolError::UnsupportedFormat(self.provider_type().to_string()))
-    }
+        resp: &UpstreamResponse,
+    ) -> Result<serde_json::Value, ProtocolError>;
 }
 
 #[cfg(test)]

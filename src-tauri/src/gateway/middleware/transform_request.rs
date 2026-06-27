@@ -1,13 +1,11 @@
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
-use crate::protocol::CanonicalRequest;
 
 /// 请求转换中间件
 ///
 /// 根据路由规则的 inbound_protocol 选择适配器，
-/// 将原始请求体（JSON）解析为 CanonicalRequest，
-/// 然后转为上游请求格式，更新 ctx.body。
+/// 将原始请求体（JSON）转为上游请求格式，更新 ctx.body。
 pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> {
     // 获取入站协议
     let inbound_protocol = ctx
@@ -27,15 +25,6 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
             )
         })?;
 
-    // 尝试解析请求体为 CanonicalRequest
-    let canonical: CanonicalRequest = match serde_json::from_slice(&ctx.body) {
-        Ok(c) => c,
-        Err(_) => {
-            // 不是标准 Canonical 格式，直接透传
-            return Ok(ctx);
-        }
-    };
-
     // 获取 Provider
     let provider = ctx.provider.as_ref().ok_or_else(|| {
         StageError::new(
@@ -46,7 +35,7 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
     // 调用适配器转换
     let upstream_req = adapter
-        .canonicalize_request(&canonical, provider)
+        .transform_request(&ctx.body, provider)
         .await
         .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e.to_string())))?;
 
