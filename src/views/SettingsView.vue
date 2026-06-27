@@ -36,6 +36,9 @@ const formValue = ref({
   log_retention_days: 30,
   default_provider_id: "",
   default_route_id: "",
+  rate_limit_enabled: true,
+  rate_limit_max_requests_per_minute: 1000,
+  rate_limit_max_tokens_per_minute: 10000000,
 });
 
 // Gateway Keys
@@ -117,6 +120,9 @@ watch(
         log_retention_days: s.log_retention_days,
         default_provider_id: s.default_provider_id || "",
         default_route_id: s.default_route_id || "",
+        rate_limit_enabled: s.rate_limit_enabled,
+        rate_limit_max_requests_per_minute: s.rate_limit_max_requests_per_minute,
+        rate_limit_max_tokens_per_minute: s.rate_limit_max_tokens_per_minute,
       };
     }
   },
@@ -284,30 +290,19 @@ onMounted(() => {
     <!-- 限流配额 -->
     <NCard v-show="activeTab === 'limits'" :bordered="false" class="settings-card" size="small" title="限流配额">
       <template #header-extra>
-        <NButton type="primary" size="small" :loading="loading">保存限流配置</NButton>
+        <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存限流配置</NButton>
       </template>
       <NForm :model="formValue" label-placement="left" label-width="130">
         <div class="form-row">
           <NFormItem label="每分钟请求上限" style="flex: 1">
-            <NInputNumber :value="1000" :min="1" :max="100000" style="width: 100%" />
+            <NInputNumber v-model:value="formValue.rate_limit_max_requests_per_minute" :min="1" :max="100000" style="width: 100%" />
           </NFormItem>
-          <NFormItem label="单用户并发数" style="flex: 1">
-            <NInputNumber :value="10" :min="1" :max="1000" style="width: 100%" />
-          </NFormItem>
-        </div>
-        <div class="form-row">
-          <NFormItem label="超额处理" style="flex: 1">
-            <NSelect
-              :value="'429'"
-              :options="[
-                { label: '返回 429 错误', value: '429' },
-                { label: '排队等待', value: 'queue' },
-              ]"
-            />
+          <NFormItem label="每分钟 Token 上限" style="flex: 1">
+            <NInputNumber v-model:value="formValue.rate_limit_max_tokens_per_minute" :min="1" :max="100000000" style="width: 100%" />
           </NFormItem>
         </div>
         <NFormItem label="启用限流">
-          <NSwitch :value="true" />
+          <NSwitch v-model:value="formValue.rate_limit_enabled" />
         </NFormItem>
       </NForm>
     </NCard>

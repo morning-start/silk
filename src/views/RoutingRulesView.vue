@@ -143,6 +143,7 @@ function handleAdd() {
 function handleEdit(row: RoutingRule) {
   editingId.value = row.id;
   formValue.value = { ...row };
+  targetType.value = row.target_group_id ? "group" : "provider";
   showModal.value = true;
 }
 

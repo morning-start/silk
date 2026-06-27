@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tauri::State;
 
+use crate::commands::logs::LogResponse;
 use crate::persistence::StatsRepo;
 use crate::AppState;
 
@@ -53,13 +54,15 @@ pub async fn dashboard_stats(
 pub async fn recent_requests(
     _state: State<'_, AppState>,
     limit: Option<i64>,
-) -> Result<Vec<crate::models::RequestLog>, String> {
+) -> Result<Vec<LogResponse>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let limit = limit.unwrap_or(20);
 
-    StatsRepo::recent_requests(pool, limit)
+    let logs = StatsRepo::recent_requests(pool, limit)
         .await
-        .map_err(|e| format!("查询最近请求失败: {e}"))
+        .map_err(|e| format!("查询最近请求失败: {e}"))?;
+
+    Ok(logs.into_iter().map(LogResponse::from).collect())
 }
 
 /// 获取按 Provider 分组的统计
