@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::models::{GroupMember, LoadBalanceStrategy, ProviderGroup};
+use crate::load_balancer::{LoadBalanceStrategy, LoadBalancer};
+use crate::models::{GroupMember, ProviderGroup};
 use crate::persistence::GroupRepo;
 use sqlx::SqlitePool;
 
@@ -19,9 +19,7 @@ struct GroupManagerInner {
 
 struct GroupState {
     group: ProviderGroup,
-    members: Vec<GroupMember>,
-    strategy: LoadBalanceStrategy,
-    round_robin_counter: AtomicU64,
+    balancer: LoadBalancer<GroupMember>,
 }
 
 impl GroupManager {
@@ -52,14 +50,11 @@ impl GroupManager {
                 continue;
             }
 
-            let strategy = LoadBalanceStrategy::from_str(&group.strategy)
-                .unwrap_or(LoadBalanceStrategy::RoundRobin);
+            let strategy = LoadBalanceStrategy::from_str(&group.strategy);
 
             let state = GroupState {
                 group,
-                members: enabled_members,
-                strategy,
-                round_robin_counter: AtomicU64::new(0),
+                balancer: LoadBalancer::new(enabled_members, strategy),
             };
 
             inner.groups.insert(state.group.id.clone(), state);
@@ -72,41 +67,7 @@ impl GroupManager {
     pub async fn select_provider(&self, group_id: &str) -> Option<GroupMember> {
         let inner = self.inner.read().await;
         let state = inner.groups.get(group_id)?;
-
-        match state.strategy {
-            LoadBalanceStrategy::RoundRobin => {
-                let idx = state.round_robin_counter.fetch_add(1, Ordering::Relaxed);
-                let member_idx = (idx as usize) % state.members.len();
-                Some(state.members[member_idx].clone())
-            }
-            LoadBalanceStrategy::Weighted => {
-                let total_weight: i64 = state.members.iter().map(|m| m.weight).sum();
-                if total_weight == 0 {
-                    return state.members.first().cloned();
-                }
-
-                // 基于权重随机选择
-                let rng = rand::random::<u64>();
-                let mut cumulative = 0i64;
-                let target = (rng as i64).abs() % total_weight;
-
-                for member in &state.members {
-                    cumulative += member.weight;
-                    if cumulative > target {
-                        return Some(member.clone());
-                    }
-                }
-
-                state.members.last().cloned()
-            }
-            LoadBalanceStrategy::LeastConn => {
-                // TODO: 实现最少连接策略（需要连接追踪）
-                // 暂时 fallback 到 round-robin
-                let idx = state.round_robin_counter.fetch_add(1, Ordering::Relaxed);
-                let member_idx = (idx as usize) % state.members.len();
-                Some(state.members[member_idx].clone())
-            }
-        }
+        state.balancer.select().cloned()
     }
 
     /// 获取分组信息
@@ -127,7 +88,7 @@ impl GroupManager {
         inner
             .groups
             .get(group_id)
-            .map(|s| s.members.clone())
+            .map(|s| s.balancer.items())
             .unwrap_or_default()
     }
 
@@ -159,14 +120,11 @@ impl GroupManager {
             return Ok(());
         }
 
-        let strategy = LoadBalanceStrategy::from_str(&group.strategy)
-            .unwrap_or(LoadBalanceStrategy::RoundRobin);
+        let strategy = LoadBalanceStrategy::from_str(&group.strategy);
 
         let state = GroupState {
             group,
-            members: enabled_members,
-            strategy,
-            round_robin_counter: AtomicU64::new(0),
+            balancer: LoadBalancer::new(enabled_members, strategy),
         };
 
         inner.groups.insert(group_id.to_string(), state);
