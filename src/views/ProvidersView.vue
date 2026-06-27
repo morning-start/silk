@@ -237,7 +237,6 @@ onMounted(() => {
           :key="item.id"
           class="provider-card"
         >
-        >
           <div class="pc-header">
             <span class="pc-name">{{ item.name }}</span>
             <div class="pc-header-right">
@@ -266,6 +265,7 @@ onMounted(() => {
           </div>
         </div>
       </template>
+    </NCard>
 
     <NModal
       v-model:show="showModal"

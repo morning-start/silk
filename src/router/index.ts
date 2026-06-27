@@ -14,7 +14,7 @@ const routes = [
   { path: "/dashboard", name: "dashboard", component: DashboardView, meta: { title: "仪表盘" } },
   { path: "/providers", name: "providers", component: ProvidersView, meta: { title: "渠道管理" } },
   { path: "/groups", name: "groups", component: GroupsView, meta: { title: "负载均衡分组" } },
-  { path: "/model-square", name: "model-square", component: ModelSquareView, meta: { title: "模型广场" } },
+  { path: "/model-square", name: "model-square", component: ModelSquareView, meta: { title: "模型池" } },
   { path: "/logs", name: "logs", component: LogsView, meta: { title: "请求日志" } },
   { path: "/monitoring", name: "monitoring", component: MonitoringView, meta: { title: "实时监控" } },
   { path: "/analytics", name: "analytics", component: AnalyticsView, meta: { title: "用量分析" } },
