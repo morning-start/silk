@@ -30,3 +30,5 @@ src-tauri/*.db-shm
 src-tauri/*.db-wal
 src-tauri/sqlx_temp/
 docs/superpowers/
+.mimocode
+.plans

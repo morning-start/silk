@@ -1,7 +1,15 @@
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
+use crate::models::Provider;
 use crate::persistence::{ModelMappingRepo, ProviderRepo};
+
+/// Provider 协议 → 适配器名称映射
+const PROTOCOL_ADAPTER_MAP: &[(&str, &str)] = &[
+    ("chat", "openai_chat"),
+    ("response", "openai_response"),
+    ("message", "claude_messages"),
+];
 
 pub async fn run(
     runtime: &GatewayContext,
@@ -45,9 +53,11 @@ pub async fn run(
                                     ));
                                 };
 
+                                // 根据 Provider 支持的协议设置 inbound/outbound 适配器
+                                let adapter = resolve_protocol_adapter(&provider);
                                 ctx.provider = Some(provider);
-                                ctx.inbound_protocol = Some("openai_chat".to_string());
-                                ctx.outbound_protocol = Some("openai_response".to_string());
+                                ctx.inbound_protocol = Some(adapter.clone());
+                                ctx.outbound_protocol = Some(adapter);
                                 ctx.adapter_registry = runtime.adapter_registry.clone();
                                 return Ok(ctx);
                             }
@@ -95,6 +105,26 @@ pub async fn run(
     ctx.adapter_registry = runtime.adapter_registry.clone();
 
     Ok(ctx)
+}
+
+/// 根据 Provider 的 protocols 字段解析对应的适配器名称
+///
+/// 取第一个支持的协议映射到 adapter，例如：
+/// - ["chat"] → "openai_chat"
+/// - ["response"] → "openai_response"
+/// - ["message"] → "claude_messages"
+/// - 不支持任何协议或未知协议 → 默认 "openai_chat"
+fn resolve_protocol_adapter(provider: &Provider) -> String {
+    let protocols = provider.protocols_vec();
+    for protocol in &protocols {
+        for &(key, adapter) in PROTOCOL_ADAPTER_MAP {
+            if protocol == key {
+                return adapter.to_string();
+            }
+        }
+    }
+    // 默认使用 openai_chat
+    "openai_chat".to_string()
 }
 
 /// 从缓存加载 Provider，miss 或过期则从 DB 加载并回填缓存
