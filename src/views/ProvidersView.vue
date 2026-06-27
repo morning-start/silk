@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, h } from "vue";
 import {
   NButton,
-  NDataTable,
   NModal,
   NForm,
   NFormItem,
@@ -11,11 +10,9 @@ import {
   NSelect,
   NSwitch,
   NTag,
-  NText,
   NCard,
   useMessage,
   useDialog,
-  type DataTableColumns,
 } from "naive-ui";
 import { useProvidersStore } from "../stores/providers";
 import { storeToRefs } from "pinia";
@@ -82,81 +79,6 @@ const protocolOptions = [
   { label: "Chat", value: "chat" },
   { label: "Response", value: "response" },
   { label: "Message", value: "message" },
-];
-
-const columns: DataTableColumns<Provider> = [
-  { title: "名称", key: "name", width: 120 },
-  {
-    title: "接口协议",
-    key: "protocols",
-    width: 160,
-    render(row) {
-      const labels: Record<string, string> = {
-        chat: "Chat",
-        response: "Response",
-        message: "Message",
-      };
-      const colors: Record<string, string> = {
-        chat: "info",
-        response: "success",
-        message: "warning",
-      };
-      if (!row.protocols || row.protocols.length === 0) return h(NText, { depth: 3 }, { default: () => "未配置" });
-      return h("span", { style: "display:flex;gap:4px;flex-wrap:wrap" },
-        row.protocols.map((p: string) =>
-          h(NTag, { size: "small", type: (colors[p] || "default") as any }, { default: () => labels[p] || p })
-        )
-      );
-    },
-  },
-  { title: "Base URL", key: "api_base_url", ellipsis: { tooltip: true } },
-  {
-    title: "状态",
-    key: "status",
-    width: 80,
-    render(row) {
-      const enabled = row.status === "enabled";
-      return h(NTag, { size: "small", type: enabled ? "success" : "warning" }, {
-        default: () => enabled ? "启用" : "禁用",
-      });
-    },
-  },
-  { title: "超时(s)", key: "timeout_seconds", width: 80 },
-  { title: "重试", key: "max_retries", width: 70 },
-  {
-    title: "模型",
-    key: "models",
-    width: 160,
-    render(row) {
-      if (!row.models || row.models.length === 0) return h(NText, { depth: 3 }, { default: () => "未配置" });
-      return h("span", { style: "display:flex;gap:4px;flex-wrap:wrap" },
-        row.models.slice(0, 4).map((m: string) =>
-          h(NTag, { size: "small", type: "info" as any }, { default: () => m })
-        ).concat(row.models.length > 4 ? [h(NTag, { size: "small" }, { default: () => `+${row.models.length - 4}` })] : [])
-      );
-    },
-  },
-  { title: "健康状态", key: "health_status", width: 100,
-    render(row) {
-      if (!row.health_status) return h(NText, { depth: 3 }, { default: () => "未检测" });
-      const ok = row.health_status === "healthy";
-      return h(NTag, { size: "small", type: ok ? "success" : "error" }, {
-        default: () => ok ? "正常" : "异常",
-      });
-    },
-  },
-  {
-    title: "操作",
-    key: "actions",
-    width: 160,
-    render(row) {
-      return [
-        h(NButton, { size: "small", quaternary: true, onClick: () => handleEdit(row) }, { default: () => "编辑" }),
-        " ",
-        h(NButton, { size: "small", quaternary: true, type: "error" as any, onClick: () => handleDelete(row) }, { default: () => "删除" }),
-      ];
-    },
-  },
 ];
 
 function handleAdd() {
@@ -333,6 +255,7 @@ onMounted(() => {
           <NButton type="primary" @click="providersStore.fetchAll()">重新加载</NButton>
         </div>
       </template>
+
       <!-- Empty State -->
       <template v-else-if="!loading && filteredProviders.length === 0">
         <div class="empty-state">
@@ -345,16 +268,46 @@ onMounted(() => {
           <NButton v-if="!searchQuery" type="primary" @click="handleAdd">+ 新增渠道</NButton>
         </div>
       </template>
-      <!-- Data Table -->
-      <NDataTable
-        v-else
-        :columns="columns"
-        :data="filteredProviders"
-        :loading="loading"
-        :bordered="false"
-        :single-line="false"
-        striped
-      />
+
+      <!-- Card Grid -->
+      <div v-else class="provider-grid">
+        <NCard
+          v-for="item in filteredProviders"
+          :key="item.id"
+          :bordered="false"
+          class="provider-card"
+          size="small"
+        >
+          <div class="pc-header">
+            <div class="pc-name-row">
+              <span class="pc-name">{{ item.name }}</span>
+              <NTag size="tiny" :type="item.status === 'enabled' ? 'success' : 'warning'">
+                {{ item.status === 'enabled' ? '启用' : '禁用' }}
+              </NTag>
+            </div>
+            <NTag v-if="item.health_status" size="tiny" :type="item.health_status === 'healthy' ? 'success' : 'error'">
+              {{ item.health_status === 'healthy' ? '正常' : '异常' }}
+            </NTag>
+          </div>
+
+          <div class="pc-url">{{ item.api_base_url.replace(/^https?:\/\//, '') }}</div>
+
+          <div class="pc-meta">
+            <span class="pc-meta-item" v-if="item.protocols?.length">
+              {{ item.protocols.map((p: string) => ({chat:'Chat',response:'Response',message:'Message'})[p] || p).join(', ') }}
+            </span>
+            <span class="pc-meta-item" v-if="item.models?.length">
+              {{ item.models.length }} 模型
+            </span>
+            <span class="pc-meta-item">超时 {{ item.timeout_seconds }}s</span>
+          </div>
+
+          <div class="pc-actions">
+            <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
+            <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
+          </div>
+        </NCard>
+      </div>
     </NCard>
 
     <NModal
@@ -476,6 +429,72 @@ onMounted(() => {
 
 .table-card {
   border-radius: 12px;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.provider-card {
+  border-radius: 12px;
+  transition: box-shadow 0.2s;
+  cursor: pointer;
+}
+
+.provider-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.pc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.pc-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pc-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pc-url {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  margin-bottom: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.pc-meta-item {
+  font-size: 12px;
+  color: var(--text-color-2, #64748b);
+  background: var(--tag-bg, #f1f5f9);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.pc-actions {
+  display: flex;
+  gap: 4px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+  padding-top: 10px;
 }
 
 .form-row {
