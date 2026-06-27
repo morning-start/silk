@@ -56,13 +56,30 @@ const formValue = ref({
 });
 
 // 模型获取
-const modelOptions = ref<{ label: string; value: string }[]>([]);
+const modelOptions = ref<{ label: string; value: string; owned_by?: string | null; endpoints?: string[] }[]>([]);
 const fetchingModels = ref(false);
 
+// 自定义模型选择器标签渲染
+function renderModelLabel(option: { label: string; value: string; owned_by?: string | null; endpoints?: string[] }) {
+  const chips: any[] = [];
+  if (option.owned_by) {
+    chips.push(h(NTag, { size: 'tiny', round: true, style: 'margin-left: 8px' }, { default: () => option.owned_by }));
+  }
+  if (option.endpoints && option.endpoints.length > 0) {
+    option.endpoints.forEach((ept: string) => {
+      chips.push(h(NTag, { size: 'tiny', round: true, type: 'info', style: 'margin-left: 4px' }, { default: () => ept }));
+    });
+  }
+  return h('div', { style: 'display: flex; align-items: center;' }, [
+    h('span', option.label),
+    ...chips,
+  ]);
+}
+
 const protocolOptions = [
-  { label: "Chat 对话", value: "chat" },
-  { label: "Response 响应", value: "response" },
-  { label: "Message 消息(Anthropic)", value: "message" },
+  { label: "Chat", value: "chat" },
+  { label: "Response", value: "response" },
+  { label: "Message", value: "message" },
 ];
 
 const columns: DataTableColumns<Provider> = [
@@ -104,6 +121,19 @@ const columns: DataTableColumns<Provider> = [
   },
   { title: "超时(s)", key: "timeout_seconds", width: 80 },
   { title: "重试", key: "max_retries", width: 70 },
+  {
+    title: "模型",
+    key: "models",
+    width: 160,
+    render(row) {
+      if (!row.models || row.models.length === 0) return h(NText, { depth: 3 }, { default: () => "未配置" });
+      return h("span", { style: "display:flex;gap:4px;flex-wrap:wrap" },
+        row.models.slice(0, 4).map((m: string) =>
+          h(NTag, { size: "small", type: "info" as any }, { default: () => m })
+        ).concat(row.models.length > 4 ? [h(NTag, { size: "small" }, { default: () => `+${row.models.length - 4}` })] : [])
+      );
+    },
+  },
   { title: "健康状态", key: "health_status", width: 100,
     render(row) {
       if (!row.health_status) return h(NText, { depth: 3 }, { default: () => "未检测" });
@@ -160,9 +190,14 @@ async function fetchModels() {
       proxy_url: formValue.value.proxy_url || undefined,
       timeout_seconds: formValue.value.timeout_seconds,
     });
-    modelOptions.value = models.map((m) => ({ label: m, value: m }));
+    modelOptions.value = models.map((m) => ({
+      label: m.id,
+      value: m.id,
+      owned_by: m.owned_by,
+      endpoints: m.supported_endpoint_types,
+    }));
     if (models.length > 0 && !formValue.value.model_name) {
-      formValue.value.model_name = models[0];
+      formValue.value.model_name = models[0].id;
     }
     message.success(`获取到 ${models.length} 个模型`);
   } catch (e: any) {
@@ -199,7 +234,7 @@ function handleEdit(row: Provider) {
 function handleDelete(row: Provider) {
   dialog.warning({
     title: "确认删除",
-    content: `确定要删除 Provider "${row.name}" 吗？`,
+    content: `确定要删除渠道 "${row.name}" 吗？`,
     positiveText: "删除",
     negativeText: "取消",
     onPositiveClick: async () => {
@@ -239,13 +274,13 @@ onMounted(() => {
   <div class="providers-page">
     <div class="toolbar">
       <div class="toolbar-left">
-        <h2 class="page-title">Provider 服务商</h2>
-        <NTag size="small" type="info">{{ providers.length }} 个服务商</NTag>
+        <h2 class="page-title">渠道管理</h2>
+        <NTag size="small" type="info">{{ providers.length }} 个渠道</NTag>
       </div>
       <div class="toolbar-right">
         <NInput
           v-model:value="searchQuery"
-          placeholder="搜索服务商..."
+          placeholder="搜索渠道..."
           clearable
           style="width: 200px"
           size="small"
@@ -254,7 +289,7 @@ onMounted(() => {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-top:2px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           </template>
         </NInput>
-        <NButton type="primary" @click="handleAdd">+ 新增服务商</NButton>
+        <NButton type="primary" @click="handleAdd">+ 新增渠道</NButton>
       </div>
     </div>
 
@@ -276,10 +311,10 @@ onMounted(() => {
           <div class="empty-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           </div>
-          <h3 class="empty-title" v-if="searchQuery">未找到匹配的服务商</h3>
-          <h3 class="empty-title" v-else>暂无服务商</h3>
-          <p class="empty-desc" v-if="!searchQuery">添加第一个 AI 服务商，开始配置您的 API 网关</p>
-          <NButton v-if="!searchQuery" type="primary" @click="handleAdd">+ 新增服务商</NButton>
+          <h3 class="empty-title" v-if="searchQuery">未找到匹配的渠道</h3>
+          <h3 class="empty-title" v-else>暂无渠道</h3>
+          <p class="empty-desc" v-if="!searchQuery">添加第一个 AI 渠道，开始配置您的 API 网关</p>
+          <NButton v-if="!searchQuery" type="primary" @click="handleAdd">+ 新增渠道</NButton>
         </div>
       </template>
       <!-- Data Table -->
@@ -297,7 +332,7 @@ onMounted(() => {
     <NModal
       v-model:show="showModal"
       preset="card"
-      :title="editingId ? '编辑 Provider' : '添加 Provider'"
+      :title="editingId ? '编辑渠道' : '新增渠道'"
       style="max-width: 600px"
       :bordered="false"
       :segmented="{ footer: true }"
@@ -331,6 +366,7 @@ onMounted(() => {
               :tag="true"
               style="flex: 1"
               :disabled="fetchingModels"
+              :render-label="renderModelLabel"
             />
             <NButton
               secondary

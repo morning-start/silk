@@ -8,6 +8,7 @@ export interface Provider {
   id: string;
   name: string;
   protocols: string[];
+  models: string[];
   api_base_url: string;
   model_name: string | null;
   proxy_url: string | null;
@@ -145,6 +146,15 @@ export interface ProviderTestResponse {
   error: string | null;
 }
 
+/** 从上游 API 获取的模型元信息 */
+export interface ProviderModelInfo {
+  id: string;
+  object: string | null;
+  created: number | null;
+  owned_by: string | null;
+  supported_endpoint_types: string[];
+}
+
 export interface ModelMapping {
   id: string;
   model_name: string;
@@ -242,7 +252,7 @@ export const api = {
 
   // Fetch Models from Provider API
   fetchProviderModels: (data: { api_base_url: string; api_key: string; proxy_url?: string; timeout_seconds?: number }) =>
-    invoke<string[]>("fetch_provider_models", { payload: data }),
+    invoke<ProviderModelInfo[]>("fetch_provider_models", { payload: data }),
 
   // Model Mappings
   listModelMappings: () => invoke<ModelMapping[]>("list_model_mappings"),

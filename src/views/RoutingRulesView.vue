@@ -228,7 +228,7 @@ onMounted(() => {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           </div>
           <h3 class="empty-title">暂无路由规则</h3>
-          <p class="empty-desc">添加路由规则来匹配 API 请求，将其转发到对应的 Provider</p>
+          <p class="empty-desc">添加路由规则来匹配 API 请求，将其转发到对应的渠道</p>
           <NButton type="primary" @click="handleAdd">+ 新增路由</NButton>
         </div>
       </template>
@@ -276,16 +276,16 @@ onMounted(() => {
               else { formValue.target_group_id = null; }
             }"
             :options="[
-              { label: '单个 Provider', value: 'provider' },
+              { label: '单个渠道', value: 'provider' },
               { label: '负载均衡分组', value: 'group' },
             ]"
           />
         </NFormItem>
-        <NFormItem v-if="!formValue.target_group_id" label="目标 Provider">
+        <NFormItem v-if="!formValue.target_group_id" label="目标渠道">
           <NSelect
             v-model:value="formValue.target_provider_id"
             :options="providers.map((p) => ({ label: p.name, value: p.id }))"
-            placeholder="选择 Provider"
+            placeholder="选择渠道"
             clearable
           />
         </NFormItem>

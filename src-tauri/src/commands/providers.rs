@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tracing::{error, info, warn};
 
 use crate::crypto::{encrypt_api_key, derive_key_from_password};
 use crate::models::{NewProvider, Provider, UpdateProvider};
@@ -55,6 +56,7 @@ pub async fn create_provider(
     let new = NewProvider {
         name: payload.name,
         protocols: payload.protocols,
+        models: payload.models,
         api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
         api_key: payload.api_key, // 明文，Repo 会加密
         model_name: payload.model_name,
@@ -96,6 +98,7 @@ pub async fn update_provider(
     let update = UpdateProvider {
         name: payload.name,
         protocols: payload.protocols,
+        models: payload.models,
         api_base_url: payload.api_base_url.map(|u| crate::models::Provider::normalize_api_base_url(&u)),
         api_key: payload.api_key,
         model_name: payload.model_name,
@@ -221,19 +224,27 @@ pub async fn delete_provider(
 }
 
 /// 获取 Provider 的模型列表（调用 /v1/models 接口）
+///
+/// 返回丰富的模型元数据（id、object、created、owned_by、supported_endpoint_types 等），
+/// 同时兼容仅返回 id 字符串的简版 API。
 #[tauri::command]
 pub async fn fetch_provider_models(
     _state: State<'_, AppState>,
     payload: FetchModelsPayload,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<ProviderModelInfo>, String> {
     let base_url = crate::models::Provider::normalize_api_base_url(&payload.api_base_url);
     let test_url = format!("{}/v1/models", base_url);
     let timeout_secs = payload.timeout_seconds.unwrap_or(10).min(30).max(1) as u64;
 
+    info!("[fetch_provider_models] 请求URL: {test_url}, 超时: {timeout_secs}s");
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
-        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
+        .map_err(|e| {
+            error!("[fetch_provider_models] 构建客户端失败: {e}");
+            format!("构建 HTTP 客户端失败: {e}")
+        })?;
 
     let mut req = client
         .get(&test_url)
@@ -242,6 +253,7 @@ pub async fn fetch_provider_models(
 
     if let Some(ref proxy) = payload.proxy_url {
         if !proxy.is_empty() {
+            info!("[fetch_provider_models] 使用代理: {proxy}");
             req = req.header("X-Proxy-Url", proxy);
         }
     }
@@ -249,7 +261,10 @@ pub async fn fetch_provider_models(
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("请求模型列表失败: {e}"))?;
+        .map_err(|e| {
+            error!("[fetch_provider_models] 网络请求失败: {e}");
+            format!("请求模型列表失败: {e}")
+        })?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -259,35 +274,91 @@ pub async fn fetch_provider_models(
         } else {
             format!("{}: {}", status, body)
         };
+        warn!("[fetch_provider_models] HTTP {status} 非成功状态码: {msg}");
         return Err(msg);
     }
 
     let text = resp
         .text()
         .await
-        .map_err(|e| format!("读取响应失败: {e}"))?;
+        .map_err(|e| {
+            error!("[fetch_provider_models] 读取响应体失败: {e}");
+            format!("读取响应失败: {e}")
+        })?;
+
+    info!("[fetch_provider_models] 响应体长度: {} bytes", text.len());
 
     // 解析 OpenAI 兼容的 /v1/models 响应
     let json: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("解析响应 JSON 失败: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| {
+            error!("[fetch_provider_models] JSON 解析失败: {e}, 原始响应前200字符: {}", &text[..text.len().min(200)]);
+            format!("解析响应 JSON 失败: {e}")
+        })?;
 
-    let models = json["data"]
-        .as_array()
-        .ok_or("响应中未找到模型列表 (data 字段)")?;
-
-    let mut model_names: Vec<String> = Vec::new();
-    for item in models {
-        if let Some(name) = item["id"].as_str() {
-            model_names.push(name.to_string());
+    // 部分 API 在 HTTP 200 下返回 success: false（如 Agines Hub）
+    if let Some(success) = json.get("success").and_then(|v| v.as_bool()) {
+        if !success {
+            let msg = json["message"].as_str().unwrap_or("未知错误");
+            warn!("[fetch_provider_models] API 返回 success: false, message: {msg}");
+            return Err(msg.to_string());
         }
     }
 
-    if model_names.is_empty() {
+    let models = json["data"]
+        .as_array()
+        .ok_or_else(|| {
+            let msg = "响应中未找到模型列表 (data 字段)".to_string();
+            error!("[fetch_provider_models] {msg}, 完整响应体: {}", serde_json::to_string_pretty(&json).unwrap_or_default());
+            msg
+        })?;
+
+    let mut result: Vec<ProviderModelInfo> = Vec::new();
+    for item in models {
+        if let Some(model_id) = item["id"].as_str() {
+            result.push(ProviderModelInfo {
+                id: model_id.to_string(),
+                object: item["object"].as_str().map(|s| s.to_string()),
+                created: item["created"].as_i64(),
+                owned_by: item["owned_by"].as_str().map(|s| s.to_string()),
+                supported_endpoint_types: item["supported_endpoint_types"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            });
+        }
+    }
+
+    if result.is_empty() {
+        warn!("[fetch_provider_models] data 数组存在但未解析到任何模型 id");
         return Err("未获取到任何模型".to_string());
     }
 
-    model_names.sort();
-    Ok(model_names)
+    result.sort_by(|a, b| a.id.cmp(&b.id));
+    info!("[fetch_provider_models] 成功获取 {} 个模型", result.len());
+    Ok(result)
+}
+
+// ---------------------------------------------------------------------------
+// Types: 模型列表信息
+// ---------------------------------------------------------------------------
+
+/// 从上游 API 获取的模型元信息
+#[derive(Debug, Serialize, Clone)]
+pub struct ProviderModelInfo {
+    /// 模型 ID（唯一标识）
+    pub id: String,
+    /// 对象类型（如 "model"）
+    pub object: Option<String>,
+    /// 创建时间（Unix 时间戳）
+    pub created: Option<i64>,
+    /// 模型所属方
+    pub owned_by: Option<String>,
+    /// 支持的终端类型（如 ["openai", "claude"]）
+    pub supported_endpoint_types: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +370,7 @@ pub struct ProviderResponse {
     pub id: String,
     pub name: String,
     pub protocols: Vec<String>,
+    pub models: Vec<String>,
     pub api_base_url: String,
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
@@ -316,6 +388,7 @@ impl From<Provider> for ProviderResponse {
             id: p.id.clone(),
             name: p.name.clone(),
             protocols: p.protocols_vec(),
+            models: p.models_vec(),
             api_base_url: p.api_base_url.clone(),
             model_name: p.model_name.clone(),
             proxy_url: p.proxy_url.clone(),
@@ -335,6 +408,7 @@ pub struct CreateProviderPayload {
     pub protocols: Vec<String>,
     pub api_base_url: String,
     pub api_key: String,
+    pub models: Vec<String>,
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
@@ -357,6 +431,7 @@ pub struct UpdateProviderPayload {
     pub protocols: Option<Vec<String>>,
     pub api_base_url: Option<String>,
     pub api_key: Option<String>,
+    pub models: Option<Vec<String>>,
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,

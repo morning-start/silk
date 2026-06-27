@@ -9,9 +9,12 @@ pub struct Provider {
     pub provider_type: String,
     /// 支持的接口协议列表（JSON 数组），如 ["chat","response","message"]
     pub protocols: String,
+    /// 模型列表（JSON 数组），如 ["gpt-4o","gpt-3.5-turbo"]
+    pub models: String,
     pub api_base_url: String,
     /// 加密的 API Key（AES-GCM 密文，hex 编码存储）
     pub api_key: String,
+    /// 已废弃：默认模型名，由 models 替代
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: i64,
@@ -33,6 +36,8 @@ pub struct NewProvider {
     pub api_base_url: String,
     /// 明文 API Key，存储时由调用方加密
     pub api_key: String,
+    /// 模型列表
+    pub models: Vec<String>,
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
@@ -51,6 +56,7 @@ pub struct UpdateProvider {
     pub api_base_url: Option<String>,
     /// 明文 API Key，存储时由调用方加密
     pub api_key: Option<String>,
+    pub models: Option<Vec<String>>,
     pub model_name: Option<String>,
     pub proxy_url: Option<String>,
     pub timeout_seconds: Option<i64>,
@@ -93,6 +99,11 @@ impl Provider {
     /// 解析 protocols JSON 字段为 Vec<String>
     pub fn protocols_vec(&self) -> Vec<String> {
         serde_json::from_str(&self.protocols).unwrap_or_default()
+    }
+
+    /// 解析 models JSON 字段为 Vec<String>
+    pub fn models_vec(&self) -> Vec<String> {
+        serde_json::from_str(&self.models).unwrap_or_default()
     }
 
     /// 规范化 API Base URL：去除尾部 /v1 或 /v1/
