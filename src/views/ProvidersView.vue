@@ -45,6 +45,7 @@ const formValue = ref({
   protocols: [] as string[],
   models: [] as string[],
   api_base_url: "",
+  api_key: "",
   proxy_url: "",
   timeout_seconds: 30,
   max_retries: 3,
@@ -68,6 +69,7 @@ function handleAdd() {
     protocols: [],
     models: [],
     api_base_url: "",
+    api_key: "",
     proxy_url: "",
     timeout_seconds: 30,
     max_retries: 3,
@@ -86,7 +88,15 @@ function removeExtraKey(index: number) {
 }
 
 async function fetchModels() {
-  if (!formValue.value.api_base_url || !formValue.value.api_key) {
+  // 确定要使用的 API Key：优先主 Key，否则取第一个启用的额外密钥
+  let apiKey = formValue.value.api_key;
+  if (!apiKey) {
+    const firstEnabled = formValue.value.extraKeys.find((k) => k.enabled && k.value);
+    if (firstEnabled) {
+      apiKey = firstEnabled.value;
+    }
+  }
+  if (!formValue.value.api_base_url || !apiKey) {
     message.warning("请先填写 API 地址和 API Key");
     return;
   }
@@ -96,7 +106,7 @@ async function fetchModels() {
   try {
     const models = await api.fetchProviderModels({
       api_base_url: formValue.value.api_base_url,
-      api_key: formValue.value.api_key,
+      api_key: apiKey,
       proxy_url: formValue.value.proxy_url || undefined,
       timeout_seconds: formValue.value.timeout_seconds,
     });
@@ -126,6 +136,7 @@ function handleEdit(row: Provider) {
     protocols: row.protocols || [],
     models: row.models || [],
     api_base_url: row.api_base_url,
+    api_key: "",
     proxy_url: row.proxy_url || "",
     timeout_seconds: row.timeout_seconds,
     max_retries: row.max_retries,
