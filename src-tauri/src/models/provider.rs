@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::load_balancer::LoadBalancedItem;
+use crate::load_balancer::{LoadBalanceStrategy, LoadBalancedItem, LoadBalancer};
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Provider {
@@ -86,18 +86,21 @@ impl LoadBalancedItem for ProviderKeyEntry {
 fn default_weight() -> i64 { 1 }
 
 impl Provider {
-    /// 获取解密后的第一个可用 API Key（需要传入 master_key）
+    /// 按负载均衡策略选择一个 API Key 并解密
     pub fn decrypted_api_key(
         &self,
         master_key: &[u8; 32],
     ) -> Result<String, crate::crypto::CryptoError> {
         let entries: Vec<ProviderKeyEntry> = serde_json::from_str(&self.keys).unwrap_or_default();
-        for entry in &entries {
-            if entry.enabled && !entry.value.is_empty() {
-                return crate::crypto::decrypt_api_key(&entry.value, master_key);
-            }
+        let strategy = LoadBalanceStrategy::from_str(&self.key_strategy);
+        let balancer = LoadBalancer::new(entries, strategy);
+        let selected = balancer.select().ok_or(crate::crypto::CryptoError::InvalidFormat)?;
+
+        if selected.enabled && !selected.value.is_empty() {
+            crate::crypto::decrypt_api_key(&selected.value, master_key)
+        } else {
+            Err(crate::crypto::CryptoError::InvalidFormat)
         }
-        Err(crate::crypto::CryptoError::InvalidFormat)
     }
 
     /// 获取超时时间（秒）
