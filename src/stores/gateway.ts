@@ -19,6 +19,15 @@ export const useGatewayStore = defineStore("gateway", () => {
     }
   }
 
+  /** 带自动重试的初始化（最多尝试 3 次，间隔 1s） */
+  async function initStatus(maxRetries = 3) {
+    for (let i = 0; i < maxRetries; i++) {
+      await fetchStatus();
+      if (status.value !== null) return;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+
   async function start() {
     loading.value = true;
     error.value = null;
@@ -75,5 +84,5 @@ export const useGatewayStore = defineStore("gateway", () => {
     }
   }
 
-  return { status, loading, error, fetchStatus, start, stop, restart, updateSettings };
+  return { status, loading, error, fetchStatus, initStatus, start, stop, restart, updateSettings };
 });

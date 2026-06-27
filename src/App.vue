@@ -1,37 +1,59 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
-import { useRouter } from "vue-router";
+import { ref } from "vue";
+import { darkTheme, NConfigProvider, NMessageProvider, NDialogProvider, GlobalThemeOverrides } from "naive-ui";
+import AppContent from "./AppContent.vue";
 
-const router = useRouter();
-const message = ref("Silk 丝路 加载中...");
-const status = ref<any>(null);
+const isDark = ref(false);
 
-onMounted(async () => {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    status.value = await invoke("gateway_status");
-    message.value = "网关状态: " + (status.value?.running ? "运行中" : "已停止");
-  } catch (e: any) {
-    message.value = "错误: " + (e.message || "无法连接");
-  }
-});
+const themeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: "#6366f1",
+    primaryColorHover: "#818cf8",
+    primaryColorPressed: "#4f46e5",
+    bodyColor: "#f8fafc",
+    cardColor: "#ffffff",
+    modalColor: "#ffffff",
+  },
+};
 
-function goTo(path: string) {
-  router.push(path);
-}
+const darkOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: "#818cf8",
+    primaryColorHover: "#a5b4fc",
+    primaryColorPressed: "#6366f1",
+    bodyColor: "#0f172a",
+    cardColor: "#1e293b",
+    modalColor: "#1e293b",
+    borderColor: "#334155",
+    dividerColor: "#334155",
+    textColor1: "#f1f5f9",
+    textColor2: "#cbd5e1",
+    textColor3: "#64748b",
+    placeholderColor: "#475569",
+    popoverColor: "#1e293b",
+    hoverColor: "#334155",
+  },
+};
 </script>
 
 <template>
-  <div style="padding: 20px; font-family: sans-serif">
-    <h1>Silk 丝路</h1>
-    <p>{{ message }}</p>
-    <div style="margin: 20px 0">
-      <button @click="goTo('/providers')">Provider 管理</button>
-      <button @click="goTo('/groups')">分组</button>
-      <button @click="goTo('/routing-rules')">路由规则</button>
-      <button @click="goTo('/logs')">日志</button>
-      <button @click="goTo('/settings')">设置</button>
-    </div>
-    <router-view />
-  </div>
+  <NConfigProvider
+    :theme="isDark ? darkTheme : null"
+    :theme-overrides="isDark ? darkOverrides : themeOverrides"
+    :inline-theme-disabled="false"
+  >
+    <NMessageProvider>
+      <NDialogProvider>
+        <AppContent :is-dark="isDark" @toggle-theme="isDark = !isDark" />
+      </NDialogProvider>
+    </NMessageProvider>
+  </NConfigProvider>
 </template>
+
+<style>
+html, body, #app {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+</style>
