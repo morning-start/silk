@@ -1,30 +1,29 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { api, type RequestLog } from "../api";
+import { useAsyncOperation } from "../composables/useAsyncOperation";
 
 export const useLogsStore = defineStore("logs", () => {
   const logs = ref<RequestLog[]>([]);
   const total = ref(0);
   const limit = ref(50);
   const offset = ref(0);
-  const loading = ref(false);
-  const error = ref<string | null>(null);
+  const fetchOp = useAsyncOperation();
+  const actionOp = useAsyncOperation();
 
   const page = computed(() => Math.floor(offset.value / limit.value) + 1);
   const totalPages = computed(() => Math.ceil(total.value / limit.value));
 
   async function fetchPage(pageNum: number) {
-    loading.value = true;
-    error.value = null;
-    offset.value = (pageNum - 1) * limit.value;
-    try {
-      const result = await api.listLogs(limit.value, offset.value);
+    const newOffset = (pageNum - 1) * limit.value;
+    const result = await fetchOp.run(
+      () => api.listLogs(limit.value, newOffset),
+      "获取日志失败"
+    );
+    if (result) {
       logs.value = result.logs;
       total.value = result.total;
-    } catch (e: any) {
-      error.value = e.message || "获取日志失败";
-    } finally {
-      loading.value = false;
+      offset.value = newOffset;
     }
   }
 
@@ -45,33 +44,20 @@ export const useLogsStore = defineStore("logs", () => {
   }
 
   async function cleanup(beforeDays: number) {
-    loading.value = true;
-    error.value = null;
-    try {
-      await api.cleanupLogs(beforeDays);
-      await fetchAll();
-    } catch (e: any) {
-      error.value = e.message || "清理失败";
-      throw e;
-    } finally {
-      loading.value = false;
-    }
+    await actionOp.runOrThrow(() => api.cleanupLogs(beforeDays), "清理失败");
+    await fetchAll();
   }
 
   async function clearAll() {
-    loading.value = true;
-    error.value = null;
-    try {
-      await api.clearAllLogs();
-      logs.value = [];
-      total.value = 0;
-    } catch (e: any) {
-      error.value = e.message || "清空失败";
-      throw e;
-    } finally {
-      loading.value = false;
-    }
+    await actionOp.runOrThrow(() => api.clearAllLogs(), "清空失败");
+    logs.value = [];
+    total.value = 0;
   }
 
-  return { logs, total, limit, offset, page, totalPages, loading, error, fetchAll, fetchPage, nextPage, prevPage, cleanup, clearAll };
+  return {
+    logs, total, limit, offset, page, totalPages,
+    loading: fetchOp.loading, error: fetchOp.error,
+    actionLoading: actionOp.loading, actionError: actionOp.error,
+    fetchAll, fetchPage, nextPage, prevPage, cleanup, clearAll,
+  };
 });

@@ -1,109 +1,63 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { api, type ProviderGroup, type GroupWithMembers } from "../api";
+import { useAsyncOperation } from "../composables/useAsyncOperation";
 
 export const useGroupsStore = defineStore("groups", () => {
   const groups = ref<ProviderGroup[]>([]);
   const currentGroup = ref<GroupWithMembers | null>(null);
-  const loading = ref(false);
-  const error = ref<string | null>(null);
+  const fetchOp = useAsyncOperation();
+  const crudOp = useAsyncOperation();
 
   async function fetchAll() {
-    loading.value = true;
-    error.value = null;
-    try {
-      groups.value = await api.listGroups();
-    } catch (e: any) {
-      error.value = e.message || "获取分组失败";
-    } finally {
-      loading.value = false;
-    }
+    const result = await fetchOp.run(() => api.listGroups(), "获取分组失败");
+    if (result) groups.value = result;
   }
 
   async function fetchById(id: string) {
-    loading.value = true;
-    error.value = null;
-    try {
-      currentGroup.value = await api.getGroup(id);
-    } catch (e: any) {
-      error.value = e.message || "获取分组失败";
-    } finally {
-      loading.value = false;
-    }
+    const result = await fetchOp.run(() => api.getGroup(id), "获取分组失败");
+    if (result) currentGroup.value = result;
   }
 
   async function create(data: { name: string; model_name: string; strategy?: string }) {
-    loading.value = true;
-    error.value = null;
-    try {
-      const created = await api.createGroup(data);
-      groups.value.unshift(created);
-      return created;
-    } catch (e: any) {
-      error.value = e.message || "创建失败";
-      throw e;
-    } finally {
-      loading.value = false;
+    const result = await crudOp.runOrThrow(() => api.createGroup(data), "创建失败");
+    if (result) {
+      groups.value.unshift(result);
     }
+    return result;
   }
 
   async function update(id: string, data: Partial<ProviderGroup>) {
-    loading.value = true;
-    error.value = null;
-    try {
-      const updated = await api.updateGroup(id, data);
+    const result = await crudOp.runOrThrow(() => api.updateGroup(id, data), "更新失败");
+    if (result) {
       const idx = groups.value.findIndex((g) => g.id === id);
-      if (idx >= 0) groups.value[idx] = updated;
-      return updated;
-    } catch (e: any) {
-      error.value = e.message || "更新失败";
-      throw e;
-    } finally {
-      loading.value = false;
+      if (idx >= 0) groups.value[idx] = result;
     }
+    return result;
   }
 
   async function remove(id: string) {
-    loading.value = true;
-    error.value = null;
-    try {
-      await api.deleteGroup(id);
-      groups.value = groups.value.filter((g) => g.id !== id);
-    } catch (e: any) {
-      error.value = e.message || "删除失败";
-      throw e;
-    } finally {
-      loading.value = false;
-    }
+    await crudOp.runOrThrow(() => api.deleteGroup(id), "删除失败");
+    groups.value = groups.value.filter((g) => g.id !== id);
   }
 
   async function addMember(groupId: string, providerId: string, weight?: number) {
-    loading.value = true;
-    error.value = null;
-    try {
-      await api.addGroupMember(groupId, { provider_id: providerId, weight });
-      await fetchById(groupId);
-    } catch (e: any) {
-      error.value = e.message || "添加成员失败";
-      throw e;
-    } finally {
-      loading.value = false;
-    }
+    await crudOp.runOrThrow(
+      () => api.addGroupMember(groupId, { provider_id: providerId, weight }),
+      "添加成员失败"
+    );
+    await fetchById(groupId);
   }
 
   async function removeMember(id: string, groupId: string) {
-    loading.value = true;
-    error.value = null;
-    try {
-      await api.removeGroupMember(id);
-      await fetchById(groupId);
-    } catch (e: any) {
-      error.value = e.message || "移除成员失败";
-      throw e;
-    } finally {
-      loading.value = false;
-    }
+    await crudOp.runOrThrow(() => api.removeGroupMember(id), "移除成员失败");
+    await fetchById(groupId);
   }
 
-  return { groups, currentGroup, loading, error, fetchAll, fetchById, create, update, remove, addMember, removeMember };
+  return {
+    groups, currentGroup,
+    loading: fetchOp.loading, error: fetchOp.error,
+    crudLoading: crudOp.loading, crudError: crudOp.error,
+    fetchAll, fetchById, create, update, remove, addMember, removeMember,
+  };
 });
