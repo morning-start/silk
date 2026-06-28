@@ -1,68 +1,44 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { api, type Provider } from "../api";
+import { useAsyncOperation } from "../composables/useAsyncOperation";
 
 export const useProvidersStore = defineStore("providers", () => {
   const providers = ref<Provider[]>([]);
-  const loading = ref(false);
-  const error = ref<string | null>(null);
+  const fetchOp = useAsyncOperation();
+  const crudOp = useAsyncOperation();
 
   async function fetchAll() {
-    loading.value = true;
-    error.value = null;
-    try {
-      providers.value = await api.listProviders();
-    } catch (e: any) {
-      error.value = e.message || "获取渠道列表失败";
-    } finally {
-      loading.value = false;
-    }
+    const result = await fetchOp.run(() => api.listProviders(), "获取渠道失败");
+    if (result) providers.value = result;
   }
 
-  async function create(data: Partial<Provider> & { api_key: string }) {
-    loading.value = true;
-    error.value = null;
-    try {
-      const created = await api.createProvider(data);
-      providers.value.unshift(created);
-      return created;
-    } catch (e: any) {
-      error.value = e.message || "创建失败";
-      throw e;
-    } finally {
-      loading.value = false;
+  async function create(data: any) {
+    const result = await crudOp.runOrThrow(() => api.createProvider(data), "创建失败");
+    if (result) {
+      providers.value.unshift(result);
     }
+    return result;
   }
 
   async function update(id: string, data: Partial<Provider>) {
-    loading.value = true;
-    error.value = null;
-    try {
-      const updated = await api.updateProvider(id, data);
+    const result = await crudOp.runOrThrow(() => api.updateProvider(id, data), "更新失败");
+    if (result) {
       const idx = providers.value.findIndex((p) => p.id === id);
-      if (idx >= 0) providers.value[idx] = updated;
-      return updated;
-    } catch (e: any) {
-      error.value = e.message || "更新失败";
-      throw e;
-    } finally {
-      loading.value = false;
+      if (idx >= 0) providers.value[idx] = result;
     }
+    return result;
   }
 
   async function remove(id: string) {
-    loading.value = true;
-    error.value = null;
-    try {
-      await api.deleteProvider(id);
-      providers.value = providers.value.filter((p) => p.id !== id);
-    } catch (e: any) {
-      error.value = e.message || "删除失败";
-      throw e;
-    } finally {
-      loading.value = false;
-    }
+    await crudOp.runOrThrow(() => api.deleteProvider(id), "删除失败");
+    providers.value = providers.value.filter((p) => p.id !== id);
   }
 
-  return { providers, loading, error, fetchAll, create, update, remove };
+  return {
+    providers,
+    loading: fetchOp.loading, error: fetchOp.error,
+    crudLoading: crudOp.loading, crudError: crudOp.error,
+    fetchAll, create, update, remove,
+  };
 });
