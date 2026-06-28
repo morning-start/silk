@@ -32,3 +32,4 @@ src-tauri/sqlx_temp/
 docs/superpowers/
 .mimocode
 .plans
+test/
