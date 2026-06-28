@@ -11,8 +11,11 @@ use axum::http::Request;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
+
+use crate::persistence::ModelMappingRepo;
 
 pub use context::{load_gateway_context, GatewayContext, RequestContext, RouteManager};
 pub use error::GatewayError;
@@ -64,6 +67,7 @@ fn build_router(context: GatewayContext) -> Router {
 
     Router::new()
         .route("/health", get(health_handler))
+        .route("/v1/models", get(models_handler))
         .fallback(proxy_handler)
         .layer(axum::middleware::from_fn_with_state(
             rate_limit_state,
@@ -77,6 +81,30 @@ async fn health_handler() -> impl IntoResponse {
         "status": "ok",
         "service": "silk-gateway"
     }))
+}
+
+/// 返回模型池中的所有启用的模型列表（OpenAI 兼容格式）
+async fn models_handler(State(context): State<GatewayContext>) -> impl IntoResponse {
+    let pool = &context.pool;
+    match ModelMappingRepo::find_enabled(pool).await {
+        Ok(mappings) => {
+            let data: Vec<serde_json::Value> = mappings
+                .iter()
+                .map(|m| {
+                    json!({
+                        "id": m.model_name,
+                        "object": "model",
+                        "created": m.created_at.and_utc().timestamp(),
+                        "owned_by": if m.vendor.is_empty() { "silk" } else { &m.vendor },
+                    })
+                })
+                .collect();
+            axum::Json(json!({ "object": "list", "data": data }))
+        }
+        Err(_) => {
+            axum::Json(json!({ "object": "list", "data": [] }))
+        }
+    }
 }
 
 async fn proxy_handler(State(context): State<GatewayContext>, req: Request<Body>) -> Response {

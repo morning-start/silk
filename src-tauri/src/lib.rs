@@ -172,6 +172,7 @@ pub fn run() {
             commands::create_model_mapping,
             commands::update_model_mapping,
             commands::delete_model_mapping,
+            commands::get_group_providers,
             // 网关 Key 管理
             commands::list_gateway_keys,
             commands::get_gateway_key,
