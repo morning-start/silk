@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use tracing::{error, info, warn};
 
-use crate::crypto::{derive_key_from_password, encrypt_api_key};
-use crate::models::{NewProvider, Provider, UpdateProvider};
+use crate::models::{NewProvider, Provider, ProviderKeyEntry, UpdateProvider};
 use crate::persistence::ProviderRepo;
 use crate::AppState;
 
@@ -14,6 +13,8 @@ pub struct ProviderResponse {
     pub protocols: Vec<String>,
     pub models: Vec<String>,
     pub key_count: i64,
+    /// 密钥条目列表（value 已解密用于展示）
+    pub keys: Vec<ProviderKeyEntry>,
     pub api_base_url: String,
     pub proxy_url: Option<String>,
     pub timeout_seconds: i64,
@@ -86,7 +87,10 @@ pub async fn list(_state: State<'_, AppState>) -> Result<Vec<ProviderResponse>, 
         .await
         .map_err(|e| format!("查询 Provider 失败: {e}"))?;
 
-    Ok(providers.into_iter().map(ProviderResponse::from).collect())
+    Ok(providers
+        .into_iter()
+        .map(ProviderResponse::from_provider)
+        .collect())
 }
 
 pub async fn get(_state: State<'_, AppState>, id: String) -> Result<ProviderResponse, String> {
@@ -96,7 +100,7 @@ pub async fn get(_state: State<'_, AppState>, id: String) -> Result<ProviderResp
         .map_err(|e| format!("查询 Provider 失败: {e}"))?
         .ok_or("Provider 不存在")?;
 
-    Ok(ProviderResponse::from(provider))
+    Ok(ProviderResponse::from_provider(provider))
 }
 
 pub async fn create(
@@ -105,14 +109,11 @@ pub async fn create(
 ) -> Result<ProviderResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
-    let master_key = derive_key_from_password("silk-master-key", b"salt")
-        .map_err(|e| format!("密钥派生失败: {e}"))?;
-
     let new = NewProvider {
         name: payload.name,
         protocols: payload.protocols,
         models: payload.models,
-        keys: encrypt_keys(payload.keys, &master_key),
+        keys: payload.keys, // 明文存储，不再加密
         key_strategy: payload.key_strategy,
         api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
         proxy_url: payload.proxy_url,
@@ -128,7 +129,7 @@ pub async fn create(
         .await
         .map_err(|e| format!("创建 Provider 失败: {e}"))?;
 
-    Ok(ProviderResponse::from(provider))
+    Ok(ProviderResponse::from_provider(provider))
 }
 
 pub async fn update(
@@ -138,14 +139,11 @@ pub async fn update(
 ) -> Result<ProviderResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
-    let master_key = derive_key_from_password("silk-master-key", b"salt")
-        .map_err(|e| format!("密钥派生失败: {e}"))?;
-
     let update = UpdateProvider {
         name: payload.name,
         protocols: payload.protocols,
         models: payload.models,
-        keys: payload.keys.map(|k| encrypt_keys(k, &master_key)),
+        keys: payload.keys, // 明文存储，不再加密
         key_strategy: payload.key_strategy,
         api_base_url: payload
             .api_base_url
@@ -164,15 +162,18 @@ pub async fn update(
         .map_err(|e| format!("更新 Provider 失败: {e}"))?
         .ok_or("Provider 不存在")?;
 
-    state.gateway.read().await.provider_cache.invalidate(&id).await;
+    state
+        .gateway
+        .read()
+        .await
+        .provider_cache
+        .invalidate(&id)
+        .await;
 
-    Ok(ProviderResponse::from(provider))
+    Ok(ProviderResponse::from_provider(provider))
 }
 
-pub async fn test(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<ProviderTestResponse, String> {
+pub async fn test(state: State<'_, AppState>, id: String) -> Result<ProviderTestResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
     let provider = ProviderRepo::find_by_id(pool, &id)
@@ -191,11 +192,9 @@ pub async fn test(
 
     let start = std::time::Instant::now();
 
-    let master_key = derive_key_from_password("silk-master-key", b"salt")
-        .map_err(|e| format!("密钥派生失败: {e}"))?;
     let api_key = provider
-        .decrypted_api_key(&master_key)
-        .map_err(|e| format!("解密 API Key 失败: {e}"))?;
+        .decrypted_api_key(&[0u8; 32]) // 明文存储，主密钥不再使用
+        .map_err(|e| format!("获取 API Key 失败: {e}"))?;
 
     let result = client
         .get(&test_url)
@@ -235,7 +234,13 @@ pub async fn test(
         .await
         .map_err(|e| format!("更新健康状态失败: {e}"))?;
 
-    state.gateway.read().await.provider_cache.invalidate(&id).await;
+    state
+        .gateway
+        .read()
+        .await
+        .provider_cache
+        .invalidate(&id)
+        .await;
 
     Ok(ProviderTestResponse {
         status_code,
@@ -252,7 +257,13 @@ pub async fn delete(state: State<'_, AppState>, id: String) -> Result<bool, Stri
         .map_err(|e| format!("删除 Provider 失败: {e}"))?;
 
     if deleted {
-        state.gateway.read().await.provider_cache.invalidate(&id).await;
+        state
+            .gateway
+            .read()
+            .await
+            .provider_cache
+            .invalidate(&id)
+            .await;
     }
 
     Ok(deleted)
@@ -367,42 +378,43 @@ pub async fn fetch_models(
     Ok(result)
 }
 
-impl From<Provider> for ProviderResponse {
-    fn from(p: Provider) -> Self {
+impl ProviderResponse {
+    fn from_provider(p: Provider) -> Self {
+        let (keys, key_count) = Self::parse_keys(&p.keys);
+        let protocols = p.protocols_vec();
+        let models = p.models_vec();
         Self {
-            id: p.id.clone(),
-            name: p.name.clone(),
-            protocols: p.protocols_vec(),
-            models: p.models_vec(),
-            key_count: {
-                let keys_str = &p.keys;
-                serde_json::from_str::<Vec<crate::models::ProviderKeyEntry>>(keys_str)
-                    .map(|k| k.len() as i64)
-                    .unwrap_or(0)
-            },
-            api_base_url: p.api_base_url.clone(),
-            proxy_url: p.proxy_url.clone(),
+            id: p.id,
+            name: p.name,
+            protocols,
+            models,
+            key_count,
+            keys,
+            api_base_url: p.api_base_url,
+            proxy_url: p.proxy_url,
             timeout_seconds: p.timeout_seconds,
             max_retries: p.max_retries,
-            status: p.status.clone(),
-            health_status: p.health_status.clone(),
+            status: p.status,
+            health_status: p.health_status,
             created_at: p.created_at.to_string(),
             updated_at: p.updated_at.to_string(),
         }
     }
-}
 
-/// 加密额外 Key 列表中的每个 value（value 是明文，加密后替换为密文）
-fn encrypt_keys(keys: Vec<crate::models::ProviderKeyEntry>, master_key: &[u8; 32]) -> Vec<crate::models::ProviderKeyEntry> {
-    keys.into_iter()
-        .map(|mut k| {
-            if !k.value.is_empty() {
-                if let Ok(encrypted) = encrypt_api_key(&k.value, master_key) {
-                    k.value = encrypted;
+    /// 解析 keys JSON 字段（明文存储，直接返回）
+    fn parse_keys(keys_json: &str) -> (Vec<ProviderKeyEntry>, i64) {
+        let entries: Vec<ProviderKeyEntry> = serde_json::from_str(keys_json).unwrap_or_default();
+        let count = entries.len() as i64;
+        // 旧加密数据视为无效，清空 value 让用户重新填写
+        let cleaned: Vec<ProviderKeyEntry> = entries
+            .into_iter()
+            .map(|mut k| {
+                if k.value.starts_with('{') && k.value.contains("\"ciphertext\"") {
+                    k.value = String::new();
                 }
-            }
-            k
-        })
-        .collect()
+                k
+            })
+            .collect();
+        (cleaned, count)
+    }
 }
-

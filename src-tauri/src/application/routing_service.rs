@@ -100,7 +100,14 @@ pub async fn create(
         .await
         .map_err(|e| format!("创建路由规则失败: {e}"))?;
 
-    state.gateway.read().await.route_manager.reload(pool).await.ok();
+    state
+        .gateway
+        .read()
+        .await
+        .route_manager
+        .reload(pool)
+        .await
+        .ok();
 
     Ok(RoutingRuleResponse::from(rule))
 }
@@ -133,7 +140,14 @@ pub async fn update(
         .map_err(|e| format!("更新路由规则失败: {e}"))?
         .ok_or("路由规则不存在")?;
 
-    state.gateway.read().await.route_manager.reload(pool).await.ok();
+    state
+        .gateway
+        .read()
+        .await
+        .route_manager
+        .reload(pool)
+        .await
+        .ok();
 
     Ok(RoutingRuleResponse::from(rule))
 }
@@ -145,7 +159,14 @@ pub async fn delete(state: State<'_, AppState>, id: String) -> Result<bool, Stri
         .map_err(|e| format!("删除路由规则失败: {e}"))?;
 
     if deleted {
-        state.gateway.read().await.route_manager.reload(pool).await.ok();
+        state
+            .gateway
+            .read()
+            .await
+            .route_manager
+            .reload(pool)
+            .await
+            .ok();
     }
 
     Ok(deleted)
@@ -171,4 +192,3 @@ impl From<RoutingRule> for RoutingRuleResponse {
         }
     }
 }
-

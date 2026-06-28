@@ -53,7 +53,10 @@ pub async fn status(state: State<'_, AppState>) -> Result<GatewayStatusResponse,
     Ok(GatewayStatusResponse {
         running,
         address: if running {
-            format!("{}:{}", gateway_settings.bind_host, gateway_settings.bind_port)
+            format!(
+                "{}:{}",
+                gateway_settings.bind_host, gateway_settings.bind_port
+            )
         } else {
             "未运行".to_string()
         },
@@ -70,7 +73,8 @@ pub async fn start(state: State<'_, AppState>) -> Result<GatewayStartResponse, S
     }
 
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let (log_sender, log_receiver) = tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
+    let (log_sender, log_receiver) =
+        tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
     let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
 
     let gateway = load_gateway_context(pool.clone(), log_sender)
@@ -117,7 +121,8 @@ pub async fn restart(state: State<'_, AppState>) -> Result<GatewayStartResponse,
     }
 
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let (log_sender, log_receiver) = tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
+    let (log_sender, log_receiver) =
+        tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
     let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
 
     let gateway = load_gateway_context(pool.clone(), log_sender)
@@ -130,6 +135,31 @@ pub async fn restart(state: State<'_, AppState>) -> Result<GatewayStartResponse,
     {
         let mut state_gateway = state.gateway.write().await;
         *state_gateway = gateway.clone();
+        let mut server = state.gateway_server.write().await;
+        *server = Some(gateway_server);
+    }
+
+    let settings = gateway.settings.read().await;
+    Ok(GatewayStartResponse {
+        success: true,
+        address: format!("{}:{}", settings.bind_host, settings.bind_port),
+    })
+}
+
+pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResponse, String> {
+    {
+        let server = state.gateway_server.read().await;
+        if server.is_some() {
+            return Err("网关已在运行中".to_string());
+        }
+    }
+
+    let gateway = state.gateway.read().await.clone();
+    let gateway_server = spawn_gateway_server(gateway.clone())
+        .await
+        .map_err(|e| format!("启动网关失败: {e}"))?;
+
+    {
         let mut server = state.gateway_server.write().await;
         *server = Some(gateway_server);
     }
@@ -158,5 +188,62 @@ impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
             created_at: settings.created_at.to_string(),
             updated_at: settings.updated_at.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use tokio::sync::RwLock;
+
+    use crate::gateway::load_gateway_context;
+    use crate::persistence::GatewaySettingsRepo;
+    use crate::{init_database, AppState};
+
+    use super::start_existing_gateway;
+    use crate::models::UpdateGatewaySettings;
+
+    #[tokio::test]
+    async fn start_existing_gateway_marks_server_running() {
+        let data_dir = unique_temp_dir();
+        let pool = init_database(&data_dir).await.expect("db init");
+        let bind_port = free_port();
+
+        let update = UpdateGatewaySettings {
+            bind_host: Some("127.0.0.1".to_string()),
+            bind_port: Some(bind_port),
+            ..Default::default()
+        };
+        GatewaySettingsRepo::update(pool, &update)
+            .await
+            .expect("update settings");
+
+        let (log_sender, _log_receiver) = tokio::sync::mpsc::channel(1);
+        let gateway = load_gateway_context(pool.clone(), log_sender)
+            .await
+            .expect("load gateway context");
+        let state = AppState {
+            gateway: Arc::new(RwLock::new(gateway)),
+            gateway_server: Arc::new(RwLock::new(None)),
+        };
+
+        start_existing_gateway(&state)
+            .await
+            .expect("auto start gateway");
+
+        assert!(state.gateway_server.read().await.is_some());
+    }
+
+    fn unique_temp_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("silk-gateway-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    fn free_port() -> i64 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        listener.local_addr().expect("local addr").port() as i64
     }
 }

@@ -163,7 +163,14 @@ pub async fn delete(state: State<'_, AppState>, id: String) -> Result<bool, Stri
         .map_err(|e| format!("删除分组失败: {e}"))?;
 
     if deleted {
-        state.gateway.read().await.group_manager.reload_all(pool).await.ok();
+        state
+            .gateway
+            .read()
+            .await
+            .group_manager
+            .reload_all(pool)
+            .await
+            .ok();
     }
 
     Ok(deleted)
@@ -242,7 +249,14 @@ pub async fn remove_member(state: State<'_, AppState>, id: String) -> Result<boo
 
     if deleted {
         if let Some(gid) = group_id {
-            state.gateway.read().await.group_manager.reload_group(pool, &gid).await.ok();
+            state
+                .gateway
+                .read()
+                .await
+                .group_manager
+                .reload_group(pool, &gid)
+                .await
+                .ok();
         }
     }
 
