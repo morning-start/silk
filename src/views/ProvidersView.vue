@@ -10,9 +10,13 @@ import {
   NSelect,
   NSwitch,
   NTag,
+  NIcon,
   useMessage,
   useDialog,
 } from "naive-ui";
+import {
+  SearchOutline,
+} from "@vicons/ionicons5";
 import { useProvidersStore } from "../stores/providers";
 import { storeToRefs } from "pinia";
 import type { Provider } from "../api";
@@ -200,7 +204,7 @@ onMounted(() => {
           size="small"
         >
           <template #prefix>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;margin-top:2px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <NIcon><SearchOutline /></NIcon>
           </template>
         </NInput>
         <NButton type="primary" @click="handleAdd">+ 新增渠道</NButton>

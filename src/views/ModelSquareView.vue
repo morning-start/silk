@@ -15,9 +15,13 @@ import {
   NSpin,
   NGrid,
   NGi,
+  NIcon,
   useMessage,
   useDialog,
 } from "naive-ui";
+import {
+  SearchOutline,
+} from "@vicons/ionicons5";
 import { api, type ModelMapping, type NewMappingChannel, type Provider } from "../api";
 
 const message = useMessage();
@@ -448,7 +452,7 @@ onMounted(loadData);
               clearable
             >
               <template #prefix>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <NIcon><SearchOutline /></NIcon>
               </template>
             </NInput>
 
