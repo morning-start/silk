@@ -5,8 +5,8 @@ use linguafranca::anthropic::request::AnthropicRequest;
 use linguafranca::anthropic::response::AnthropicResponse;
 use linguafranca::traits::IntoOpenResponses;
 
-use crate::protocol::adapter::{ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse};
 use crate::models::Provider;
+use crate::protocol::adapter::{ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse};
 
 pub struct ClaudeMessagesAdapter;
 
@@ -20,6 +20,7 @@ impl ProviderAdapter for ClaudeMessagesAdapter {
         &self,
         req_body: &[u8],
         provider: &Provider,
+        selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError> {
         let _anthropic_req: AnthropicRequest = serde_json::from_slice(req_body)
             .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
@@ -27,18 +28,12 @@ impl ProviderAdapter for ClaudeMessagesAdapter {
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-api-key",
-            HeaderValue::from_str(
-                &provider.decrypted_api_key(&[0u8; 32]).unwrap_or_default(),
-            )
-            .map_err(|e| ProtocolError::InvalidValue {
+            HeaderValue::from_str(selected_api_key).map_err(|e| ProtocolError::InvalidValue {
                 field: "x-api-key".to_string(),
                 reason: e.to_string(),
             })?,
         );
-        headers.insert(
-            "anthropic-version",
-            HeaderValue::from_static("2023-06-01"),
-        );
+        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
         headers.insert(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
@@ -49,6 +44,7 @@ impl ProviderAdapter for ClaudeMessagesAdapter {
 
         Ok(UpstreamRequest {
             url: format!("{}/v1/messages", provider.api_base_url),
+            method: "POST".to_string(),
             headers,
             body,
         })
@@ -96,7 +92,8 @@ mod tests {
             provider_type: "anthropic".to_string(),
             protocols: r#"["message"]"#.to_string(),
             models: r#"["claude-3-opus"]"#.to_string(),
-            keys: r#"[{"name":"主密钥","value":"encrypted","enabled":true,"weight":1}]"#.to_string(),
+            keys: r#"[{"name":"主密钥","value":"encrypted","enabled":true,"weight":1}]"#
+                .to_string(),
             key_strategy: "round_robin".to_string(),
             api_base_url: "https://api.anthropic.com".to_string(),
             proxy_url: None,
@@ -122,7 +119,10 @@ mod tests {
         });
         let req_bytes = serde_json::to_vec(&req_body).unwrap();
 
-        let result = adapter.transform_request(&req_bytes, &provider).await.unwrap();
+        let result = adapter
+            .transform_request(&req_bytes, &provider, "sk-test")
+            .await
+            .unwrap();
         assert_eq!(result.url, "https://api.anthropic.com/v1/messages");
         assert!(result.body["model"].as_str().unwrap() == "claude-3-opus");
     }
