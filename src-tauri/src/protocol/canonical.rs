@@ -1,3 +1,7 @@
+// TODO(canonical): 当前未在 Adapter 中使用。适配器依赖 linguafranca 的
+//   IntoOpenResponses / FromOpenResponses 做协议转换。未来如需支持更多
+//   协议或自定义协议桥接，可恢复此中间格式作为通用中转表示层。
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
