@@ -33,7 +33,8 @@ pub async fn read_body(ctx: RequestContext, body: Body) -> Result<RequestContext
     })?;
 
     let mut ctx = ctx;
-    ctx.body = bytes;
+    ctx.client_body = bytes.clone();
+    ctx.request_body = bytes;
     let host = header_value_as_str(ctx.headers.get(axum::http::header::HOST))
         .map(|value| value.to_string());
     let content_type = header_value_as_str(ctx.headers.get(axum::http::header::CONTENT_TYPE))
