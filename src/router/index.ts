@@ -8,6 +8,7 @@ import MonitoringView from "../views/MonitoringView.vue";
 import AnalyticsView from "../views/AnalyticsView.vue";
 import SettingsView from "../views/SettingsView.vue";
 import DebuggerView from "../views/DebuggerView.vue";
+import RoutingRulesView from "../views/RoutingRulesView.vue";
 
 const routes = [
   { path: "/", redirect: "/dashboard" },
@@ -20,6 +21,7 @@ const routes = [
   { path: "/analytics", name: "analytics", component: AnalyticsView, meta: { title: "用量分析" } },
   { path: "/settings", name: "settings", component: SettingsView, meta: { title: "系统设置" } },
   { path: "/debugger", name: "debugger", component: DebuggerView, meta: { title: "API 调试" } },
+  { path: "/routing-rules", name: "routing-rules", component: RoutingRulesView, meta: { title: "路由规则" } },
 ];
 
 const router = createRouter({
