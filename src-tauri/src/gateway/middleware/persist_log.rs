@@ -1,8 +1,25 @@
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
-use crate::persistence::ModelMappingRepo;
 
 use super::{headers_to_json, maybe_body_text};
+
+/// 日志 body 最大存储字节数，超过部分截断并标注
+const MAX_BODY_STORAGE: usize = 65536; // 64KB
+
+/// 截断过长的 body 文本，保留尺寸标记
+fn truncate_body(text: Option<String>) -> Option<String> {
+    text.map(|s| {
+        if s.len() > MAX_BODY_STORAGE {
+            format!(
+                "{}... [truncated, original_size: {}]",
+                &s[..MAX_BODY_STORAGE],
+                s.len()
+            )
+        } else {
+            s
+        }
+    })
+}
 
 /// 日志异步写入中间件
 ///
@@ -24,8 +41,8 @@ pub async fn run(
         .map(|value| value.as_u16() as i64);
 
     // 从请求体 JSON 提取 model 和 stream 字段
-    let request_body = maybe_body_text(&ctx.request_body);
-    let (model_from_body, stream_from_body) = request_body
+    let request_body_full = maybe_body_text(&ctx.request_body);
+    let (model_from_body, stream_from_body) = request_body_full
         .as_deref()
         .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
         .map(|json| {
@@ -40,6 +57,7 @@ pub async fn run(
             (model, stream)
         })
         .unwrap_or((None, false));
+    let request_body = truncate_body(request_body_full);
 
     // 流式判定：请求体 stream=true 优先，兜底看 upstream_body 是否为空
     let is_streaming = stream_from_body || ctx.upstream_body.is_none();
@@ -56,11 +74,11 @@ pub async fn run(
         });
 
     // 从响应体提取 token 用量（非流式场景）
-    let response_body = ctx
+    let response_body_full = ctx
         .upstream_body
         .as_ref()
         .and_then(|body| maybe_body_text(body));
-    let (tokens_input, tokens_output) = response_body
+    let (tokens_input, tokens_output) = response_body_full
         .as_deref()
         .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
         .and_then(|json| {
@@ -75,14 +93,10 @@ pub async fn run(
             })
         })
         .unwrap_or((None, None));
+    let response_body = truncate_body(response_body_full);
 
-    // 计费：通过模型映射价格计算本次费用（仅非流式响应有完整 tokens 信息）
-    let cost = calculate_cost(
-        &model_used,
-        tokens_input,
-        tokens_output,
-    )
-    .await;
+    // 计费：延迟到消费侧（log_writer）计算，不阻塞请求路径
+    let cost = None;
 
     let response_headers = ctx.upstream_headers.as_ref().and_then(headers_to_json);
     let request_headers = headers_to_json(&ctx.headers);
@@ -117,34 +131,15 @@ pub async fn run(
         auth_key_name: ctx.auth_key_name.clone(),
     };
 
-    if let Err(err) = log_sender.send(log).await {
-        tracing::warn!(%err, "发送日志到 channel 失败");
+    match log_sender.try_send(log) {
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            tracing::warn!("日志 channel 已满，丢弃一条日志");
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            // receiver 已 drop，无需额外处理
+        }
+        Ok(_) => {}
     }
 
     Ok(())
-}
-
-/// 通过模型映射价格计算本次请求费用
-///
-/// 公式：(tokens_input / 1_000_000) × input_price_per_1m + (tokens_output / 1_000_000) × output_price_per_1m
-async fn calculate_cost(
-    model_used: &Option<String>,
-    tokens_input: Option<i64>,
-    tokens_output: Option<i64>,
-) -> Option<f64> {
-    let model_name = model_used.as_ref()?;
-
-    let pool = crate::get_db_pool()?;
-    let mapping = ModelMappingRepo::find_by_model_name(pool, model_name)
-        .await
-        .ok()
-        .flatten()?;
-
-    let input_price = mapping.input_price_per_1m?;
-    let output_price = mapping.output_price_per_1m?;
-
-    let inp = tokens_input.unwrap_or(0) as f64 / 1_000_000.0 * input_price;
-    let out = tokens_output.unwrap_or(0) as f64 / 1_000_000.0 * output_price;
-
-    Some(inp + out)
 }

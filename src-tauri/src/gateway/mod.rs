@@ -128,36 +128,62 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
         return;
     }
 
-    let logs = batch.drain(..).collect::<Vec<_>>();
+    let mut logs = batch.drain(..).collect::<Vec<_>>();
+
+    // 在消费侧计算 cost，不阻塞请求热路径
+    for log in &mut logs {
+        if log.cost.is_some() {
+            continue;
+        }
+        log.cost = calculate_cost(pool, &log.model_used, log.tokens_input, log.tokens_output).await;
+    }
+
     match crate::persistence::LogRepo::insert_batch(pool, &logs).await {
         Ok(count) => {
             tracing::debug!(count, "批量写入日志成功");
         }
         Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("787") => {
-            // FOREIGN KEY 约束失败：逐个写入，遇到 FK 错误时将 provider_id 置空重试
-            tracing::warn!("日志 FOREIGN KEY 约束失败，逐个降级写入");
-            for mut log in logs {
-                let mut retries = 0;
-                loop {
-                    match crate::persistence::LogRepo::insert(pool, &log).await {
-                        Ok(_) => break,
-                        Err(sqlx::Error::Database(ref e))
-                            if e.code().as_deref() == Some("787") && retries < 1 =>
-                        {
-                            log.provider_id = None;
-                            log.route_id = None;
-                            retries += 1;
-                        }
-                        Err(err) => {
-                            tracing::warn!(%err, "单条日志写入失败");
-                            break;
-                        }
-                    }
-                }
+            // FOREIGN KEY 约束失败：批量将 provider_id 和 route_id 置空后重试
+            tracing::warn!("日志 FOREIGN KEY 约束失败，整批降级写入");
+            let fallback_logs: Vec<_> = logs
+                .into_iter()
+                .map(|mut log| {
+                    log.provider_id = None;
+                    log.route_id = None;
+                    log
+                })
+                .collect();
+            if let Err(err) = crate::persistence::LogRepo::insert_batch(pool, &fallback_logs).await {
+                tracing::warn!(%err, "降级写入日志仍然失败");
             }
         }
         Err(err) => {
             tracing::warn!(%err, "批量写入日志失败");
         }
     }
+}
+
+/// 通过模型映射价格计算本次请求费用（在消费侧异步执行）
+///
+/// 公式：(tokens_input / 1_000_000) × input_price_per_1m + (tokens_output / 1_000_000) × output_price_per_1m
+async fn calculate_cost(
+    pool: &SqlitePool,
+    model_used: &Option<String>,
+    tokens_input: Option<i64>,
+    tokens_output: Option<i64>,
+) -> Option<f64> {
+    let model_name = model_used.as_ref()?;
+
+    let mapping = crate::persistence::ModelMappingRepo::find_by_model_name(pool, model_name)
+        .await
+        .ok()
+        .flatten()?;
+
+    let input_price = mapping.input_price_per_1m?;
+    let output_price = mapping.output_price_per_1m?;
+
+    let inp = tokens_input.unwrap_or(0) as f64 / 1_000_000.0 * input_price;
+    let out = tokens_output.unwrap_or(0) as f64 / 1_000_000.0 * output_price;
+
+    Some(inp + out)
 }
