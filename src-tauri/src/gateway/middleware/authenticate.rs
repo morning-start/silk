@@ -49,7 +49,6 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
             }
             // 认证通过，注入 key 名称到上下文中（日志可用）
             ctx.auth_key_name = Some(key.name);
-            ctx.auth_key_value = Some(bearer_token);
             Ok(ctx)
         }
         Ok(None) => Err(StageError::new(

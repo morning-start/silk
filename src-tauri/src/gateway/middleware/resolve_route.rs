@@ -5,6 +5,8 @@ use crate::load_balancer::{LoadBalanceStrategy, LoadBalancedItem, LoadBalancer};
 use crate::models::Provider;
 use crate::persistence::{ModelMappingRepo, ProviderRepo};
 
+use axum::response::IntoResponse;
+
 /// Provider 协议 → 适配器名称映射
 const PROTOCOL_ADAPTER_MAP: &[(&str, &str)] = &[
     ("chat", "openai_chat"),

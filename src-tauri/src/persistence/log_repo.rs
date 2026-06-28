@@ -85,9 +85,9 @@ impl LogRepo {
                                           response_headers, response_body, duration_ms, provider_id,
                                           error_message, error_code, model_used, retry_count, stream_enabled,
                                           cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output,
-                                          cost)
+                                          cost, auth_key_name)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                            $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                            $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
                 "#,
             )
             .bind(id)
@@ -116,6 +116,7 @@ impl LogRepo {
             .bind(log.tokens_input)
             .bind(log.tokens_output)
             .bind(log.cost)
+            .bind(log.auth_key_name.as_deref())
             .execute(&mut *tx)
             .await?;
             count += result.rows_affected();
