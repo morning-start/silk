@@ -92,11 +92,7 @@ pub async fn run(
         method: ctx.method.to_string(),
         path: ctx.path.clone(),
         // 无 routing rule 时有认证 key 则记录 key 名
-        route_id: route.map(|route| route.id.clone()).or_else(|| {
-            ctx.auth_key_name
-                .as_ref()
-                .map(|name| format!("key:{}", name))
-        }),
+        route_id: route.map(|route| route.id.clone()),
         inbound_protocol: ctx.inbound_protocol.clone(),
         outbound_protocol: ctx.outbound_protocol.clone(),
         request_headers,
