@@ -1,3 +1,4 @@
+pub mod authenticate;
 pub mod dispatch_upstream;
 pub mod extract;
 pub mod finalize;
@@ -5,6 +6,7 @@ pub mod normalize_protocol;
 pub mod persist_log;
 pub mod rate_limit;
 pub mod resolve_route;
+pub mod select_channel;
 pub mod stream_response;
 pub mod transform_request;
 pub mod transform_response;
@@ -16,10 +18,7 @@ pub(crate) mod internals {
 
     use crate::gateway::error::GatewayError;
 
-    pub fn build_upstream_url(
-        base_url: &str,
-        uri: &Uri,
-    ) -> Result<reqwest::Url, GatewayError> {
+    pub fn build_upstream_url(base_url: &str, uri: &Uri) -> Result<reqwest::Url, GatewayError> {
         let mut url = reqwest::Url::parse(base_url)
             .map_err(|err| GatewayError::BadRequest(format!("无效的上游地址: {err}")))?;
         url.set_path(uri.path());

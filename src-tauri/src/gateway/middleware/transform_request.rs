@@ -33,23 +33,29 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         )
     })?;
 
+    let selected_api_key = ctx.selected_api_key.as_deref().ok_or_else(|| {
+        StageError::new(
+            ctx.clone(),
+            GatewayError::Internal("缺少已选中的上游 Key".to_string()),
+        )
+    })?;
+
     // 调用适配器转换
     let upstream_req = adapter
-        .transform_request(&ctx.body, provider)
+        .transform_request(&ctx.body, provider, selected_api_key)
         .await
         .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e.to_string())))?;
 
     // 序列化上游请求体
-    let new_body = serde_json::to_vec(&upstream_req.body).map_err(|e| {
-        StageError::new(
-            ctx.clone(),
-            GatewayError::Serialization(e.to_string()),
-        )
-    })?;
+    let new_body = serde_json::to_vec(&upstream_req.body)
+        .map_err(|e| StageError::new(ctx.clone(), GatewayError::Serialization(e.to_string())))?;
 
     // 更新上下文
     ctx.body = bytes::Bytes::from(new_body);
     ctx.upstream_headers = Some(upstream_req.headers);
+    // 适配器决定的上游 URL 和方法（dispatch_upstream 将使用）
+    ctx.upstream_url = Some(upstream_req.url);
+    ctx.upstream_method = Some(upstream_req.method);
 
     Ok(ctx)
 }

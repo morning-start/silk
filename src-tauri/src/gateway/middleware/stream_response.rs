@@ -58,9 +58,9 @@ impl StreamResponse {
                         h.insert(k.clone(), v.clone());
                     }
                 }
-                builder.body(Body::from(body)).unwrap_or_else(|e| {
-                    GatewayError::Internal(e.to_string()).into_response()
-                })
+                builder
+                    .body(Body::from(body))
+                    .unwrap_or_else(|e| GatewayError::Internal(e.to_string()).into_response())
             }
             StreamResponse::Sse {
                 status,
