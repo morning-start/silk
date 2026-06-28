@@ -24,7 +24,7 @@ pub async fn run(
         .map(|value| value.as_u16() as i64);
 
     // 从请求体 JSON 提取 model 和 stream 字段
-    let request_body = maybe_body_text(&ctx.body);
+    let request_body = maybe_body_text(&ctx.request_body);
     let (model_from_body, stream_from_body) = request_body
         .as_deref()
         .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
@@ -106,7 +106,7 @@ pub async fn run(
         response_headers,
         response_body,
         duration_ms: Some(ctx.elapsed_ms()),
-        provider_id: provider.map(|provider| provider.id.clone()),
+        provider_id: provider.filter(|p| !p.id.is_empty()).map(|provider| provider.id.clone()),
         error_message: ctx.error_message.clone(),
         error_code: ctx.error_code.clone(),
         model_used,
