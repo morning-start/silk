@@ -190,7 +190,10 @@ pub struct RequestContext {
     pub host: Option<String>,
     pub content_type: Option<String>,
     pub path: String,
-    pub body: bytes::Bytes,
+    /// 客户端原始请求体（初始化时设置，永不修改）
+    pub client_body: bytes::Bytes,
+    /// 管道中流转的请求体（可被 resolve_route / transform_request 修改）
+    pub request_body: bytes::Bytes,
     pub route: Option<RoutingRule>,
     pub provider: Option<Provider>,
     pub inbound_protocol: Option<String>,
@@ -237,7 +240,8 @@ impl Clone for RequestContext {
             host: self.host.clone(),
             content_type: self.content_type.clone(),
             path: self.path.clone(),
-            body: self.body.clone(),
+            client_body: self.client_body.clone(),
+            request_body: self.request_body.clone(),
             route: self.route.clone(),
             provider: self.provider.clone(),
             inbound_protocol: self.inbound_protocol.clone(),
@@ -301,7 +305,8 @@ impl RequestContext {
             headers,
             host,
             content_type,
-            body: bytes::Bytes::new(),
+            client_body: bytes::Bytes::new(),
+            request_body: bytes::Bytes::new(),
             route: None,
             provider: None,
             inbound_protocol: None,
@@ -339,7 +344,7 @@ impl RequestContext {
     }
 
     pub fn request_size_bytes(&self) -> i64 {
-        self.body.len() as i64
+        self.client_body.len() as i64
     }
 
     pub fn response_size_bytes(&self) -> Option<i64> {
