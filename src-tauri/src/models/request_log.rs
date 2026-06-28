@@ -29,6 +29,10 @@ pub struct RequestLog {
     pub response_size_bytes: Option<i64>,
     pub tokens_input: Option<i64>,
     pub tokens_output: Option<i64>,
+    /// 本次请求费用（美元），非流式响应时计算
+    pub cost: Option<f64>,
+    /// 认证使用的 Gateway Key 名称
+    pub auth_key_name: Option<String>,
 }
 
 /// 用于写入日志的输入结构
@@ -58,6 +62,10 @@ pub struct NewRequestLog {
     pub response_size_bytes: Option<i64>,
     pub tokens_input: Option<i64>,
     pub tokens_output: Option<i64>,
+    /// 本次请求费用（美元），非流式响应时计算
+    pub cost: Option<f64>,
+    /// 认证使用的 Gateway Key 名称
+    pub auth_key_name: Option<String>,
 }
 
 impl RequestLog {
