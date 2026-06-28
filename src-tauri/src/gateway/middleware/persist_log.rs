@@ -118,6 +118,7 @@ pub async fn run(
         tokens_input,
         tokens_output,
         cost,
+        auth_key_name: ctx.auth_key_name.clone(),
     };
 
     if let Err(err) = log_sender.send(log).await {
