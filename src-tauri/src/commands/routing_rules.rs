@@ -38,9 +38,6 @@ pub async fn update_routing_rule(
 }
 
 #[tauri::command]
-pub async fn delete_routing_rule(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<bool, String> {
+pub async fn delete_routing_rule(state: State<'_, AppState>, id: String) -> Result<bool, String> {
     routing_service::delete(state, id).await
 }

@@ -7,9 +7,7 @@ use crate::application::provider_service::{
 use crate::AppState;
 
 #[tauri::command]
-pub async fn list_providers(
-    state: State<'_, AppState>,
-) -> Result<Vec<ProviderResponse>, String> {
+pub async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderResponse>, String> {
     provider_service::list(state).await
 }
 
@@ -47,10 +45,7 @@ pub async fn test_provider(
 }
 
 #[tauri::command]
-pub async fn delete_provider(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<bool, String> {
+pub async fn delete_provider(state: State<'_, AppState>, id: String) -> Result<bool, String> {
     provider_service::delete(state, id).await
 }
 

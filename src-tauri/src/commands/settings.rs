@@ -1,8 +1,6 @@
 use tauri::State;
 
-use crate::application::settings_service::{
-    self, GatewaySettingsResponse, UpdateSettingsPayload,
-};
+use crate::application::settings_service::{self, GatewaySettingsResponse, UpdateSettingsPayload};
 use crate::AppState;
 
 #[tauri::command]
