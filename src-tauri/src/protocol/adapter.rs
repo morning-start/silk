@@ -47,7 +47,10 @@ impl From<serde_json::Error> for ProtocolError {
 
 #[derive(Debug, Clone)]
 pub struct UpstreamRequest {
+    /// 上游 URL（适配器决定具体路径，如 /v1/chat/completions）
     pub url: String,
+    /// HTTP 方法（适配器决定，通常为 POST）
+    pub method: String,
     pub headers: HeaderMap,
     pub body: serde_json::Value,
 }
@@ -75,6 +78,7 @@ pub trait ProviderAdapter: Send + Sync {
         &self,
         req_body: &[u8],
         provider: &Provider,
+        selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError>;
 
     /// 将上游响应转为客户端期望的格式（JSON）
@@ -105,9 +109,6 @@ mod tests {
     #[test]
     fn test_unsupported_format() {
         let err = ProtocolError::UnsupportedFormat("custom".to_string());
-        assert_eq!(
-            err.to_string(),
-            "不支持的协议格式: custom"
-        );
+        assert_eq!(err.to_string(), "不支持的协议格式: custom");
     }
 }
