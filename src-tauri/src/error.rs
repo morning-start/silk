@@ -36,31 +36,6 @@ pub enum AppError {
     Validation(String),
 }
 
-impl AppError {
-    /// 是否应该重试此错误
-    pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            AppError::Timeout | AppError::ProviderUnavailable(_) | AppError::Io(_)
-        )
-    }
-
-    /// 获取 HTTP 状态码（用于网关返回）
-    pub fn status_code(&self) -> u16 {
-        match self {
-            AppError::NotFound(_) => 404,
-            AppError::Validation(_) => 400,
-            AppError::Timeout => 504,
-            AppError::ProviderUnavailable(_) => 502,
-            AppError::Crypto(_) | AppError::Config(_) | AppError::Serialization(_) => 500,
-            AppError::Database(_) => 500,
-            AppError::Gateway(_) => 500,
-            AppError::Protocol(_) => 500,
-            AppError::Io(_) => 500,
-        }
-    }
-}
-
 impl From<AppError> for String {
     fn from(err: AppError) -> String {
         err.to_string()

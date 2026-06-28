@@ -125,21 +125,6 @@ impl Provider {
         std::time::Duration::from_secs(self.timeout_seconds as u64)
     }
 
-    /// 是否启用
-    pub fn is_enabled(&self) -> bool {
-        self.status == "enabled"
-    }
-
-    /// 是否处于健康状态
-    pub fn is_healthy(&self) -> bool {
-        self.health_status.as_deref() == Some("healthy")
-    }
-
-    /// 归一化的健康状态标签
-    pub fn health_status_label(&self) -> &str {
-        self.health_status.as_deref().unwrap_or("unknown")
-    }
-
     /// 解析 protocols JSON 字段为 Vec<String>
     pub fn protocols_vec(&self) -> Vec<String> {
         serde_json::from_str(&self.protocols).unwrap_or_default()

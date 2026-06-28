@@ -68,27 +68,4 @@ pub struct NewRequestLog {
     pub auth_key_name: Option<String>,
 }
 
-impl RequestLog {
-    /// 请求是否成功（2xx 状态码）
-    pub fn is_success(&self) -> bool {
-        self.status_code
-            .or(self.response_status)
-            .map(|s| s >= 200 && s < 300)
-            .unwrap_or(false)
-    }
 
-    /// 获取耗时（毫秒）
-    pub fn duration_ms(&self) -> Option<i64> {
-        self.duration_ms
-    }
-
-    /// 是否为流式请求
-    pub fn is_streaming(&self) -> bool {
-        self.stream_enabled != 0
-    }
-
-    /// 是否命中缓存
-    pub fn is_cache_hit(&self) -> bool {
-        self.cache_hit != 0
-    }
-}
