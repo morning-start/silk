@@ -12,7 +12,10 @@ impl GroupRepo {
     // ProviderGroup CRUD
     // ---------------------------------------------------------------------------
 
-    pub async fn create_group(pool: &SqlitePool, new: &NewProviderGroup) -> Result<ProviderGroup, sqlx::Error> {
+    pub async fn create_group(
+        pool: &SqlitePool,
+        new: &NewProviderGroup,
+    ) -> Result<ProviderGroup, sqlx::Error> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().naive_utc();
         let strategy = new.strategy.as_deref().unwrap_or("round_robin");
@@ -35,7 +38,10 @@ impl GroupRepo {
         .await
     }
 
-    pub async fn find_group_by_id(pool: &SqlitePool, id: &str) -> Result<Option<ProviderGroup>, sqlx::Error> {
+    pub async fn find_group_by_id(
+        pool: &SqlitePool,
+        id: &str,
+    ) -> Result<Option<ProviderGroup>, sqlx::Error> {
         sqlx::query_as::<_, ProviderGroup>(
             r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE id = ?1"#,
         )
@@ -44,7 +50,10 @@ impl GroupRepo {
         .await
     }
 
-    pub async fn find_groups_by_model(pool: &SqlitePool, model_name: &str) -> Result<Vec<ProviderGroup>, sqlx::Error> {
+    pub async fn find_groups_by_model(
+        pool: &SqlitePool,
+        model_name: &str,
+    ) -> Result<Vec<ProviderGroup>, sqlx::Error> {
         sqlx::query_as::<_, ProviderGroup>(
             r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE model_name = ?1 AND enabled = 1 ORDER BY created_at DESC"#,
         )
@@ -114,7 +123,10 @@ impl GroupRepo {
     // GroupMember CRUD
     // ---------------------------------------------------------------------------
 
-    pub async fn add_member(pool: &SqlitePool, new: &NewGroupMember) -> Result<GroupMember, sqlx::Error> {
+    pub async fn add_member(
+        pool: &SqlitePool,
+        new: &NewGroupMember,
+    ) -> Result<GroupMember, sqlx::Error> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().naive_utc();
         let weight = new.weight.unwrap_or(1);
@@ -135,7 +147,10 @@ impl GroupRepo {
         .await
     }
 
-    pub async fn find_members_by_group(pool: &SqlitePool, group_id: &str) -> Result<Vec<GroupMember>, sqlx::Error> {
+    pub async fn find_members_by_group(
+        pool: &SqlitePool,
+        group_id: &str,
+    ) -> Result<Vec<GroupMember>, sqlx::Error> {
         sqlx::query_as::<_, GroupMember>(
             r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE group_id = ?1 ORDER BY created_at ASC"#,
         )

@@ -70,11 +70,9 @@ impl GatewayKeyRepo {
 
     /// 查询所有 Key
     pub async fn find_all(pool: &SqlitePool) -> Result<Vec<GatewayKey>, sqlx::Error> {
-        sqlx::query_as::<_, GatewayKey>(
-            r#"SELECT * FROM gateway_keys ORDER BY created_at DESC"#,
-        )
-        .fetch_all(pool)
-        .await
+        sqlx::query_as::<_, GatewayKey>(r#"SELECT * FROM gateway_keys ORDER BY created_at DESC"#)
+            .fetch_all(pool)
+            .await
     }
 
     /// 根据 key 哈希查询（用于验证）

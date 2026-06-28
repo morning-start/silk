@@ -6,10 +6,7 @@ pub struct ProviderRepo;
 
 impl ProviderRepo {
     /// 创建新 Provider
-    pub async fn create(
-        pool: &SqlitePool,
-        new: &NewProvider,
-    ) -> Result<Provider, sqlx::Error> {
+    pub async fn create(pool: &SqlitePool, new: &NewProvider) -> Result<Provider, sqlx::Error> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().naive_utc();
 
@@ -108,9 +105,24 @@ impl ProviderRepo {
         .bind(id)
         .bind(update.name.as_deref())
         .bind(update.protocols.as_ref().map(|_| "custom"))
-        .bind(update.protocols.as_ref().map(|p| serde_json::to_string(p).unwrap_or_default()))
-        .bind(update.models.as_ref().map(|m| serde_json::to_string(m).unwrap_or_default()))
-        .bind(update.keys.as_ref().map(|k| serde_json::to_string(k).unwrap_or_default()))
+        .bind(
+            update
+                .protocols
+                .as_ref()
+                .map(|p| serde_json::to_string(p).unwrap_or_default()),
+        )
+        .bind(
+            update
+                .models
+                .as_ref()
+                .map(|m| serde_json::to_string(m).unwrap_or_default()),
+        )
+        .bind(
+            update
+                .keys
+                .as_ref()
+                .map(|k| serde_json::to_string(k).unwrap_or_default()),
+        )
         .bind(update.key_strategy.as_deref())
         .bind(update.api_base_url.as_deref())
         .bind(update.proxy_url.as_deref())

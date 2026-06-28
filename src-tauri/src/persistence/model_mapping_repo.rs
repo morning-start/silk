@@ -1,12 +1,15 @@
 use sqlx::Row;
 use sqlx::SqlitePool;
 
-use crate::models::{ModelMapping, NewModelMapping, UpdateModelMapping};
+use crate::models::{
+    MappingChannelInfo, ModelMapping, ModelMappingChannel, NewMappingChannel, NewModelMapping,
+    UpdateModelMapping,
+};
 
 pub struct ModelMappingRepo;
 
 impl ModelMappingRepo {
-    /// 创建新模型映射
+    /// 创建新模型映射（含关联渠道）
     pub async fn create(
         pool: &SqlitePool,
         new: &NewModelMapping,
@@ -16,23 +19,24 @@ impl ModelMappingRepo {
         let enabled = if new.enabled.unwrap_or(true) { 1 } else { 0 };
         let capabilities = serde_json::to_string(&new.capabilities.as_deref().unwrap_or(&[]))
             .unwrap_or_else(|_| "[]".to_string());
+        let strategy = new.strategy.as_deref().unwrap_or("round_robin");
 
-        sqlx::query_as::<_, ModelMapping>(
+        let mapping = sqlx::query_as::<_, ModelMapping>(
             r#"
             INSERT INTO model_mappings (
                 id, model_name, provider_group_id,
                 max_input_tokens, max_context_tokens, max_output_tokens,
                 input_price_per_1m, output_price_per_1m,
                 capabilities, description, vendor, knowledge_cutoff, model_family, reference_url,
-                enabled, created_at, updated_at
+                strategy, enabled, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             RETURNING *
             "#,
         )
-        .bind(id)
+        .bind(&id)
         .bind(new.model_name.as_str())
-        .bind(new.provider_group_id.as_deref())
+        .bind(None::<String>) // provider_group_id: always NULL for new records
         .bind(new.max_input_tokens)
         .bind(new.max_context_tokens)
         .bind(new.max_output_tokens)
@@ -40,15 +44,23 @@ impl ModelMappingRepo {
         .bind(new.output_price_per_1m)
         .bind(capabilities)
         .bind(new.description.as_deref().unwrap_or(""))
-        .bind(new.vendor.as_deref().unwrap_or(""))
-        .bind(new.knowledge_cutoff.as_deref())
-        .bind(new.model_family.as_deref().unwrap_or(""))
-        .bind(new.reference_url.as_deref())
+        .bind("") // vendor: always empty
+        .bind(None::<String>) // knowledge_cutoff: always NULL
+        .bind("") // model_family: always empty
+        .bind(None::<String>) // reference_url: always NULL
+        .bind(strategy)
         .bind(enabled)
         .bind(now)
         .bind(now)
         .fetch_one(pool)
-        .await
+        .await?;
+
+        // 插入关联渠道
+        if let Some(ref channels) = new.channels {
+            Self::replace_channels_internal(pool, &id, channels).await?;
+        }
+
+        Ok(mapping)
     }
 
     /// 根据 ID 查询
@@ -67,12 +79,10 @@ impl ModelMappingRepo {
         pool: &SqlitePool,
         model_name: &str,
     ) -> Result<Option<ModelMapping>, sqlx::Error> {
-        sqlx::query_as::<_, ModelMapping>(
-            r#"SELECT * FROM model_mappings WHERE model_name = $1"#,
-        )
-        .bind(model_name)
-        .fetch_optional(pool)
-        .await
+        sqlx::query_as::<_, ModelMapping>(r#"SELECT * FROM model_mappings WHERE model_name = $1"#)
+            .bind(model_name)
+            .fetch_optional(pool)
+            .await
     }
 
     /// 查询所有模型映射
@@ -93,7 +103,7 @@ impl ModelMappingRepo {
         .await
     }
 
-    /// 更新模型映射
+    /// 更新模型映射（含关联渠道替换）
     pub async fn update(
         pool: &SqlitePool,
         id: &str,
@@ -102,9 +112,10 @@ impl ModelMappingRepo {
         let now = chrono::Utc::now().naive_utc();
         let enabled = update.enabled.map(|v| if v { 1 } else { 0 });
 
-        let capabilities = update.capabilities.as_ref().map(|caps| {
-            serde_json::to_string(caps).unwrap_or_else(|_| "[]".to_string())
-        });
+        let capabilities = update
+            .capabilities
+            .as_ref()
+            .map(|caps| serde_json::to_string(caps).unwrap_or_else(|_| "[]".to_string()));
 
         let Some(_) =
             sqlx::query_as::<_, ModelMapping>(r#"SELECT * FROM model_mappings WHERE id = $1"#)
@@ -115,11 +126,10 @@ impl ModelMappingRepo {
             return Ok(None);
         };
 
-        sqlx::query_as::<_, ModelMapping>(
+        let mapping = sqlx::query_as::<_, ModelMapping>(
             r#"
             UPDATE model_mappings
             SET model_name = COALESCE($2, model_name),
-                provider_group_id = COALESCE($3, provider_group_id),
                 max_input_tokens = COALESCE($4, max_input_tokens),
                 max_context_tokens = COALESCE($5, max_context_tokens),
                 max_output_tokens = COALESCE($6, max_output_tokens),
@@ -127,19 +137,16 @@ impl ModelMappingRepo {
                 output_price_per_1m = COALESCE($8, output_price_per_1m),
                 capabilities = COALESCE($9, capabilities),
                 description = COALESCE($10, description),
-                vendor = COALESCE($11, vendor),
-                knowledge_cutoff = COALESCE($12, knowledge_cutoff),
-                model_family = COALESCE($13, model_family),
-                reference_url = COALESCE($14, reference_url),
-                enabled = COALESCE($15, enabled),
-                updated_at = $16
+                strategy = COALESCE($15, strategy),
+                enabled = COALESCE($16, enabled),
+                updated_at = $17
             WHERE id = $1
             RETURNING *
             "#,
         )
         .bind(id)
         .bind(update.model_name.as_deref())
-        .bind(update.provider_group_id.as_deref())
+        .bind(None::<String>) // provider_group_id: $3, always NULL
         .bind(update.max_input_tokens)
         .bind(update.max_context_tokens)
         .bind(update.max_output_tokens)
@@ -147,17 +154,25 @@ impl ModelMappingRepo {
         .bind(update.output_price_per_1m)
         .bind(capabilities.as_deref())
         .bind(update.description.as_deref())
-        .bind(update.vendor.as_deref())
-        .bind(update.knowledge_cutoff.as_deref())
-        .bind(update.model_family.as_deref())
-        .bind(update.reference_url.as_deref())
+        .bind("") // vendor: $11
+        .bind(None::<String>) // knowledge_cutoff: $12
+        .bind("") // model_family: $13
+        .bind(None::<String>) // reference_url: $14
+        .bind(update.strategy.as_deref())
         .bind(enabled)
         .bind(now)
         .fetch_optional(pool)
-        .await
+        .await?;
+
+        // 替换关联渠道
+        if let Some(ref channels) = update.channels {
+            Self::replace_channels_internal(pool, id, channels).await?;
+        }
+
+        Ok(mapping)
     }
 
-    /// 删除模型映射
+    /// 删除模型映射（关联渠道由 ON DELETE CASCADE 自动清理）
     pub async fn delete(pool: &SqlitePool, id: &str) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(r#"DELETE FROM model_mappings WHERE id = $1"#)
             .bind(id)
@@ -175,7 +190,111 @@ impl ModelMappingRepo {
         Ok(row.get::<i64, _>("count"))
     }
 
-    /// 查询分组内的渠道信息（用于模型池表单展示）
+    /// 查询某映射的所有关联渠道（带渠道详情）
+    pub async fn find_channels_by_mapping_id(
+        pool: &SqlitePool,
+        mapping_id: &str,
+    ) -> Result<Vec<MappingChannelInfo>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT mmc.id, mmc.mapping_id, mmc.provider_id,
+                   p.name as provider_name, p.protocols, p.models, p.health_status,
+                   mmc.selected_models, mmc.enabled
+            FROM model_mapping_channels mmc
+            JOIN providers p ON p.id = mmc.provider_id
+            WHERE mmc.mapping_id = ?1
+            ORDER BY mmc.created_at
+            "#,
+        )
+        .bind(mapping_id)
+        .fetch_all(pool)
+        .await?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            let protocols: Vec<String> =
+                serde_json::from_str(row.get::<&str, _>("protocols")).unwrap_or_default();
+            let models: Vec<String> =
+                serde_json::from_str(row.get::<&str, _>("models")).unwrap_or_default();
+            let selected_models: Vec<String> =
+                serde_json::from_str(row.get::<&str, _>("selected_models")).unwrap_or_default();
+            result.push(MappingChannelInfo {
+                id: row.get("id"),
+                mapping_id: row.get("mapping_id"),
+                provider_id: row.get("provider_id"),
+                provider_name: row.get("provider_name"),
+                provider_protocols: protocols,
+                provider_models: models.clone(),
+                provider_models_count: models.len() as i64,
+                provider_health: row.get("health_status"),
+                selected_models,
+                enabled: row.get::<i64, _>("enabled") != 0,
+            });
+        }
+        Ok(result)
+    }
+
+    /// 查询某映射的启用关联渠道（网关路由用，轻量）
+    pub async fn find_enabled_channels(
+        pool: &SqlitePool,
+        mapping_id: &str,
+    ) -> Result<Vec<ModelMappingChannel>, sqlx::Error> {
+        sqlx::query_as::<_, ModelMappingChannel>(
+            r#"
+            SELECT * FROM model_mapping_channels
+            WHERE mapping_id = ?1 AND enabled = 1
+            ORDER BY created_at
+            "#,
+        )
+        .bind(mapping_id)
+        .fetch_all(pool)
+        .await
+    }
+
+    /// 批量替换关联渠道（事务内删旧插新）
+    async fn replace_channels_internal(
+        pool: &SqlitePool,
+        mapping_id: &str,
+        channels: &[NewMappingChannel],
+    ) -> Result<(), sqlx::Error> {
+        // 先删除旧的
+        sqlx::query(r#"DELETE FROM model_mapping_channels WHERE mapping_id = ?1"#)
+            .bind(mapping_id)
+            .execute(pool)
+            .await?;
+
+        // 再批量插入
+        let now = chrono::Utc::now().naive_utc();
+        for channel in channels {
+            let id = uuid::Uuid::new_v4().to_string();
+            let enabled = if channel.enabled.unwrap_or(true) {
+                1
+            } else {
+                0
+            };
+            let selected_models =
+                serde_json::to_string(&channel.selected_models.as_deref().unwrap_or(&[]))
+                    .unwrap_or_else(|_| "[]".to_string());
+            sqlx::query(
+                r#"
+                INSERT INTO model_mapping_channels (id, mapping_id, provider_id, selected_models, enabled, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+            )
+            .bind(id)
+            .bind(mapping_id)
+            .bind(&channel.provider_id)
+            .bind(selected_models)
+            .bind(enabled)
+            .bind(now)
+            .execute(pool)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    /// 查询分组内的渠道信息（废弃，保留兼容）
     pub async fn find_group_providers(
         pool: &SqlitePool,
         group_id: &str,
