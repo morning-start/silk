@@ -10,6 +10,10 @@ use axum::response::Response;
 use dashmap::DashMap;
 use tokio::sync::RwLock;
 
+use crate::gateway::context::{GatewayContext, RequestContext};
+use crate::gateway::error::GatewayError;
+use crate::gateway::pipeline::StageError;
+
 /// 限流计数器（按客户端 IP）
 #[derive(Debug)]
 struct RateCounter {
@@ -123,7 +127,40 @@ impl RateLimitState {
     }
 }
 
-/// 限流中间件
+fn client_ip_from_headers(ctx: &RequestContext) -> String {
+    ctx.headers
+        .get("x-forwarded-for")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// 管道级限流检查（在认证之后、路由之前调用）
+///
+/// 使用 `ip:provider_id` 作为隔离键，实现 per-provider 独立限流。
+/// 若 provider 未知则降级为 IP 级别。
+pub async fn run(mut ctx: RequestContext, runtime: &GatewayContext) -> Result<RequestContext, StageError> {
+    let state = &runtime.rate_limit_state;
+    if !state.enabled {
+        return Ok(ctx);
+    }
+
+    let client_ip = client_ip_from_headers(&ctx);
+    let key = match ctx.provider.as_ref() {
+        Some(p) => format!("{}:{}", client_ip, p.id),
+        None => client_ip,
+    };
+
+    if !state.check(key, 0).await {
+        let err = GatewayError::TooManyRequests;
+        ctx.mark_error(err.to_string(), err.error_code().to_string(), err.status_code());
+        return Err(StageError::new(ctx, err));
+    }
+    Ok(ctx)
+}
+
+/// Axum 中间件（保留用于早期 IP 级过滤，与管道级限流共存）
 pub async fn rate_limit_middleware(
     State(state): State<Arc<RateLimitState>>,
     request: Request<Body>,

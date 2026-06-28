@@ -5,8 +5,8 @@ use axum::response::Response;
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::middleware::{
-    authenticate, dispatch_upstream, extract, finalize, normalize_protocol, persist_log,
-    resolve_route, select_channel, transform_request, transform_response,
+    authenticate, dispatch_upstream, extract, finalize, persist_log, rate_limit, resolve_route,
+    select_channel, transform_request, transform_response,
 };
 
 pub struct StageError {
@@ -36,8 +36,8 @@ impl GatewayPipeline {
         let result = self.run_main(base_ctx, body).await;
 
         match result {
-            Ok(mut ctx) => {
-                let _ = persist_log::run(&self.runtime.log_sender, &mut ctx).await;
+            Ok(ctx) => {
+                // persist_log 已在 pipeline 内部执行
                 finalize::success(ctx)
             }
             Err(mut stage_error) => {
@@ -64,10 +64,13 @@ impl GatewayPipeline {
     ) -> Result<RequestContext, StageError> {
         let ctx = extract::read_body(ctx, body).await?;
         let ctx = authenticate::run(ctx).await?;
-        let ctx = resolve_route::run(&self.runtime, ctx).await?;
+        // 认证后 IP 级限流检查
+        let ctx = rate_limit::run(ctx, &self.runtime).await?;
+        let mut ctx = resolve_route::run(&self.runtime, ctx).await?;
 
-        // 如果路由阶段已构建响应（如 /v1/models），跳过后续流程
+        // 如果路由阶段已构建响应（如 /v1/models），记录日志后跳过后续流程
         if ctx.response.is_some() {
+            let _ = persist_log::run(&self.runtime.log_sender, &mut ctx).await;
             return Ok(ctx);
         }
 
@@ -85,17 +88,21 @@ impl GatewayPipeline {
             // 清理上次渠道的 Key 失败记录
             ctx.failed_keys.clear();
 
+            // 每换一个渠道做一次 per-provider 限流检查
+            ctx = rate_limit::run(ctx, &self.runtime).await?;
+
             // 中层循环：换 Key（Level 2）
             loop {
                 ctx = select_channel::run(ctx).await?;
-                ctx = normalize_protocol::run(ctx).await?;
                 ctx = transform_request::run(ctx).await?;
 
                 // dispatch_upstream 内部包含 Level 1（重试）
                 match dispatch_upstream::run(&self.runtime, ctx).await {
                     Ok(new_ctx) => {
-                        // 成功！继续到响应转换
-                        return transform_response::run(new_ctx).await;
+                        // 成功！继续到响应转换 + 日志
+                        let mut ctx = transform_response::run(new_ctx).await?;
+                        let _ = persist_log::run(&self.runtime.log_sender, &mut ctx).await;
+                        return Ok(ctx);
                     }
                     Err(stage_err) => {
                         // 记录失败的 Key
