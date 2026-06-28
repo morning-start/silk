@@ -37,7 +37,13 @@ pub async fn run(
 
     // 0. /v1/models：直接返回模型列表，不路由到上游
     if ctx.path == "/v1/models" {
-        let models = ModelMappingRepo::find_enabled(&runtime.pool).await.unwrap_or_default();
+        let models = match ModelMappingRepo::find_enabled(&runtime.pool).await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(%e, "查询模型列表失败");
+                Vec::new()
+            }
+        };
         let data: Vec<serde_json::Value> = models
             .iter()
             .map(|m| {
@@ -55,7 +61,7 @@ pub async fn run(
     }
 
     // 1. 优先通过请求体中的 model 字段做模型映射路由
-    let body_cloned = ctx.body.clone();
+    let body_cloned = ctx.request_body.clone();
     let body_text = String::from_utf8_lossy(&body_cloned).into_owned();
 
     // 简单 JSON 提取 model
@@ -138,18 +144,20 @@ pub async fn run(
                                                     serde_json::Value::String(remote_model.clone()),
                                                 );
                                                 if let Ok(new_body) = serde_json::to_vec(&json) {
-                                                    ctx.body = bytes::Bytes::from(new_body);
+                                                    ctx.request_body = bytes::Bytes::from(new_body);
                                                 }
                                             }
                                         }
                                         ctx.remote_model_override = Some(remote_model.clone());
                                     }
 
-                                    // 根据 Provider 支持的协议设置 inbound/outbound 适配器
-                                    let adapter = resolve_protocol_adapter(&provider);
+                                    // 检测入站协议（从请求体 JSON 结构推断）
+                                    // outbound 根据 Provider 的 protocols 决定
+                                    let inbound_adapter = detect_inbound_protocol(&json);
+                                    let outbound_adapter = resolve_protocol_adapter(&provider);
                                     ctx.provider = Some(provider);
-                                    ctx.inbound_protocol = Some(adapter.clone());
-                                    ctx.outbound_protocol = Some(adapter);
+                                    ctx.inbound_protocol = Some(inbound_adapter.to_string());
+                                    ctx.outbound_protocol = Some(outbound_adapter);
                                     ctx.adapter_registry = runtime.adapter_registry.clone();
                                     return Ok(ctx);
                                 }
@@ -207,8 +215,6 @@ pub async fn try_next_channel(
     runtime: &GatewayContext,
     mut ctx: RequestContext,
 ) -> Option<RequestContext> {
-    let _body_text = String::from_utf8_lossy(&ctx.body).into_owned();
-
     // 从 channels_available 中找第一个未失败的 provider
     let next_provider_id = ctx
         .channels_available
@@ -225,19 +231,75 @@ pub async fn try_next_channel(
         return None;
     };
 
-    // 根据 Provider 支持的协议设置 inbound/outbound 适配器
-    let adapter = resolve_protocol_adapter(&provider);
+    // 重新计算远程模型覆盖（每个渠道可能有不同的 selected_models）
+    let body_json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&ctx.client_body)).unwrap_or_default();
+    if let Some(original_model) = body_json
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+    {
+        if let Ok(Some(mapping)) =
+            ModelMappingRepo::find_by_model_name(&runtime.pool, &original_model).await
+        {
+            if mapping.enabled != 0 {
+                if let Ok(channels) =
+                    ModelMappingRepo::find_enabled_channels(&runtime.pool, &mapping.id).await
+                {
+                    if let Some(channel) = channels.iter().find(|c| c.provider_id == next_provider_id)
+                    {
+                        let sm = channel.selected_models_vec();
+                        if !sm.contains(&original_model) {
+                            if let Some(remote_model) = sm.first().cloned() {
+                                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(
+                                    &String::from_utf8_lossy(&ctx.request_body),
+                                ) {
+                                    if let Some(obj) = json.as_object_mut() {
+                                        obj.insert(
+                                            "model".to_string(),
+                                            serde_json::Value::String(remote_model.clone()),
+                                        );
+                                        if let Ok(new_body) = serde_json::to_vec(&json) {
+                                            ctx.request_body = bytes::Bytes::from(new_body);
+                                        }
+                                    }
+                                }
+                                ctx.remote_model_override = Some(remote_model);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 协议推断（使用 client_body 避免被覆盖干扰）
+    let inbound_adapter = detect_inbound_protocol(&body_json);
+    let outbound_adapter = resolve_protocol_adapter(&provider);
     ctx.provider = Some(provider);
-    ctx.inbound_protocol = Some(adapter.clone());
-    ctx.outbound_protocol = Some(adapter);
+    ctx.inbound_protocol = Some(inbound_adapter.to_string());
+    ctx.outbound_protocol = Some(outbound_adapter);
     // 重置 Key 相关的失败记录（新渠道从头开始试 Key）
     ctx.failed_keys.clear();
     ctx.selected_api_key = None;
 
-    // 如果渠道的 selected_models 有远程模型覆盖，再次应用
-    // （这里简化处理：不重新计算 remote_model_override，使用已经覆盖过的 body 即可）
-
     Some(ctx)
+}
+
+/// 从请求体中检测客户端使用的入站协议
+///
+/// 检测策略（按 JSON 顶层键）：
+/// - 有 "input" 字段 → "openai_response"
+/// - 有 "messages" 字段 → "openai_chat"（兼容 Claude Messages，后者也有 messages）
+/// - 其他 → 默认 "openai_chat"
+fn detect_inbound_protocol(body: &serde_json::Value) -> &'static str {
+    if body.get("input").is_some() {
+        "openai_response"
+    } else if body.get("messages").is_some() {
+        "openai_chat"
+    } else {
+        "openai_chat"
+    }
 }
 
 /// 根据 Provider 的 protocols 字段解析对应的适配器名称
