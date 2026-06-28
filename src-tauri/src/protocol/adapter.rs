@@ -19,6 +19,9 @@ pub enum ProtocolError {
     #[error("无效值: 字段 {field}, 原因 {reason}")]
     InvalidValue { field: String, reason: String },
 
+    #[error("上游错误: HTTP {status}: {message}")]
+    UpstreamError { status: u16, message: String },
+
     #[error("序列化错误: {0}")]
     SerializationError(String),
 
@@ -38,6 +41,15 @@ impl From<ProtocolError> for crate::error::AppError {
 impl From<serde_json::Error> for ProtocolError {
     fn from(err: serde_json::Error) -> Self {
         ProtocolError::SerializationError(err.to_string())
+    }
+}
+
+impl ProtocolError {
+    pub fn upstream_status(&self) -> Option<u16> {
+        match self {
+            ProtocolError::UpstreamError { status, .. } => Some(*status),
+            _ => None,
+        }
     }
 }
 

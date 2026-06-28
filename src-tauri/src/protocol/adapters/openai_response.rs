@@ -54,9 +54,9 @@ impl ProviderAdapter for OpenAIResponseAdapter {
         resp: &UpstreamResponse,
     ) -> Result<serde_json::Value, ProtocolError> {
         if resp.status >= 400 {
-            return Err(ProtocolError::InvalidValue {
-                field: "status".to_string(),
-                reason: format!("HTTP {}: {}", resp.status, json_err_msg(&resp.body)),
+            return Err(ProtocolError::UpstreamError {
+                status: resp.status,
+                message: json_err_msg(&resp.body),
             });
         }
 
