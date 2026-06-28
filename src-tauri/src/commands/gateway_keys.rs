@@ -37,7 +37,7 @@ pub async fn get_gateway_key(
     Ok(GatewayKeyResponse::from(key))
 }
 
-/// 创建 Key
+/// 创建 Key（自动生成 sk-gw- 密钥）
 #[tauri::command]
 pub async fn create_gateway_key(
     _state: State<'_, AppState>,
@@ -45,9 +45,19 @@ pub async fn create_gateway_key(
 ) -> Result<CreateGatewayKeyResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
+    // Key 值为空时自动生成
+    let key_value = if payload.key_value.is_empty() {
+        format!(
+            "sk-gw-{}",
+            uuid::Uuid::new_v4().to_string().replace("-", "")
+        )
+    } else {
+        payload.key_value
+    };
+
     let new = NewGatewayKey {
         name: payload.name,
-        key_value: payload.key_value,
+        key_value,
         enabled: payload.enabled,
         expires_at: payload.expires_at,
         max_concurrent: payload.max_concurrent,
@@ -89,10 +99,7 @@ pub async fn update_gateway_key(
 
 /// 删除 Key
 #[tauri::command]
-pub async fn delete_gateway_key(
-    _state: State<'_, AppState>,
-    id: String,
-) -> Result<bool, String> {
+pub async fn delete_gateway_key(_state: State<'_, AppState>, id: String) -> Result<bool, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let deleted = GatewayKeyRepo::delete(pool, &id)
         .await

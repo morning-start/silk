@@ -85,8 +85,7 @@ pub async fn cleanup_logs(
 ) -> Result<u64, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
-    let before = chrono::Utc::now().naive_utc()
-        - chrono::Duration::days(payload.before_days);
+    let before = chrono::Utc::now().naive_utc() - chrono::Duration::days(payload.before_days);
 
     let deleted = LogRepo::delete_before(pool, before)
         .await
@@ -155,9 +154,12 @@ pub async fn export_logs_csv(
     }
 
     // 写入文件
-    let file_path = payload
-        .file_path
-        .unwrap_or_else(|| format!("silk_logs_{}.csv", chrono::Utc::now().format("%Y%m%d_%H%M%S")));
+    let file_path = payload.file_path.unwrap_or_else(|| {
+        format!(
+            "silk_logs_{}.csv",
+            chrono::Utc::now().format("%Y%m%d_%H%M%S")
+        )
+    });
 
     tokio::fs::write(&file_path, &csv_content)
         .await
