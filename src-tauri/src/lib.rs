@@ -17,6 +17,7 @@ use sqlx::SqlitePool;
 use tauri::Manager;
 use tokio::sync::RwLock;
 
+use crate::application::gateway_service::start_existing_gateway;
 use crate::gateway::load_gateway_context;
 use crate::gateway::{GatewayContext, GatewayServerHandle};
 
@@ -35,8 +36,7 @@ pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx:
     let data_dir = data_dir.to_path_buf();
     DB_POOL
         .get_or_try_init(|| async move {
-            std::fs::create_dir_all(&data_dir)
-                .map_err(sqlx::Error::Io)?;
+            std::fs::create_dir_all(&data_dir).map_err(sqlx::Error::Io)?;
             let db_path = data_dir.join("silk.db");
 
             eprintln!("[silk] 数据库路径: {}", db_path.display());
@@ -86,15 +86,13 @@ pub fn run() {
     tracing_subscriber::fmt::init();
 
     // 日志 channel：容量 1000，背压时丢弃最旧日志
-    let (log_sender, log_receiver) = tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
+    let (log_sender, log_receiver) =
+        tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("无法解析应用数据目录");
+            let data_dir = app.path().app_data_dir().expect("无法解析应用数据目录");
 
             eprintln!("[silk] 应用数据目录: {}", data_dir.display());
 
@@ -105,7 +103,8 @@ pub fn run() {
                 eprintln!("[silk] 数据库文件: {}", db_path.display());
 
                 // 启动后台日志写入任务
-                let log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
+                let log_writer_handle =
+                    crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
                 app.manage(log_writer_handle);
 
                 // 加载网关上下文（不启动 HTTP 服务，由用户手动启动）
@@ -122,6 +121,11 @@ pub fn run() {
                     gateway: Arc::new(RwLock::new(gateway)),
                     gateway_server: Arc::new(RwLock::new(None)),
                 });
+
+                let state = app.state::<AppState>();
+                start_existing_gateway(state.inner()).await.map_err(|err| {
+                    sqlx::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, err))
+                })?;
                 Ok::<(), sqlx::Error>(())
             }) {
                 panic!("数据库初始化失败: {err}");
