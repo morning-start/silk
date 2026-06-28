@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 import {
   NCard,
   NButton,
@@ -18,7 +18,7 @@ import {
   useMessage,
   useDialog,
 } from "naive-ui";
-import { api, type ModelMapping, type ProviderGroup } from "../api";
+import { api, type ModelMapping, type ProviderGroup, type GroupProviderInfo } from "../api";
 
 const message = useMessage();
 const dialog = useDialog();
@@ -31,6 +31,9 @@ const error = ref<string | null>(null);
 const showModal = ref(false);
 const editingId = ref<string | null>(null);
 
+const groupProviders = ref<GroupProviderInfo[]>([]);
+const loadingProviders = ref(false);
+
 const formValue = ref({
   model_name: "",
   provider_group_id: null as string | null,
@@ -40,9 +43,30 @@ const formValue = ref({
   input_price_per_1m: null as number | null,
   output_price_per_1m: null as number | null,
   capabilities: [] as string[],
+  description: "",
+  vendor: "",
+  knowledge_cutoff: null as string | null,
+  model_family: "",
+  reference_url: null as string | null,
   strategy: "weighted_round_robin",
   enabled: true,
 });
+
+watch(
+  () => formValue.value.provider_group_id,
+  async (groupId) => {
+    groupProviders.value = [];
+    if (!groupId) return;
+    loadingProviders.value = true;
+    try {
+      groupProviders.value = await api.getGroupProviders(groupId);
+    } catch {
+      // ignore
+    } finally {
+      loadingProviders.value = false;
+    }
+  }
+);
 
 const capabilityOptions = [
   { label: "思考", value: "thinking" },
@@ -104,9 +128,15 @@ function handleAdd() {
     input_price_per_1m: null,
     output_price_per_1m: null,
     capabilities: [],
+    description: "",
+    vendor: "",
+    knowledge_cutoff: null,
+    model_family: "",
+    reference_url: null,
     strategy: "weighted_round_robin",
     enabled: true,
   };
+  groupProviders.value = [];
   showModal.value = true;
 }
 
@@ -121,6 +151,11 @@ function handleEdit(row: ModelMapping) {
     input_price_per_1m: row.input_price_per_1m,
     output_price_per_1m: row.output_price_per_1m,
     capabilities: row.capabilities || [],
+    description: row.description || "",
+    vendor: row.vendor || "",
+    knowledge_cutoff: row.knowledge_cutoff || null,
+    model_family: row.model_family || "",
+    reference_url: row.reference_url || null,
     strategy: "weighted_round_robin",
     enabled: row.enabled,
   };
@@ -224,8 +259,10 @@ onMounted(loadData);
                 <NTag size="tiny" type="success" v-if="item.enabled">启用</NTag>
                 <NTag size="tiny" type="warning" v-else>禁用</NTag>
               </div>
-              <span class="mc-strategy">加权轮询</span>
             </div>
+
+            <div class="mc-vendor" v-if="item.vendor">{{ item.vendor }}</div>
+            <div class="mc-desc" v-if="item.description">{{ item.description }}</div>
 
             <div class="mc-stats">
               <span>
@@ -304,6 +341,20 @@ onMounted(loadData);
           />
         </NFormItem>
 
+        <!-- 分组内渠道列表 -->
+        <NFormItem v-if="groupProviders.length > 0" label="渠道列表">
+          <div style="width: 100%; display: flex; flex-direction: column; gap: 6px">
+            <div v-for="p in groupProviders" :key="p.id" class="gp-row">
+              <span class="gp-name">{{ p.name }}</span>
+              <span class="gp-protocols">{{ p.protocols.join(', ') }}</span>
+              <span class="gp-models">{{ p.models_count }} 模型</span>
+              <NTag size="tiny" :type="p.health_status === 'healthy' ? 'success' : 'warning'">
+                {{ p.health_status === 'healthy' ? '正常' : '异常' }}
+              </NTag>
+            </div>
+          </div>
+        </NFormItem>
+
         <div class="form-row">
           <NFormItem label="最大输入" style="flex: 1">
             <NInputNumber v-model:value="formValue.max_input_tokens" placeholder="128K" :min="0" style="width: 100%" />
@@ -322,6 +373,28 @@ onMounted(loadData);
           </NFormItem>
           <NFormItem label="输出价格" style="flex: 1">
             <NInputNumber v-model:value="formValue.output_price_per_1m" placeholder="$60/1M" :min="0" style="width: 100%" />
+          </NFormItem>
+        </div>
+
+        <NFormItem label="描述">
+          <NInput v-model:value="formValue.description" placeholder="模型描述，如"最新 GPT-4 模型，支持多模态"" type="textarea" :rows="2" />
+        </NFormItem>
+
+        <div class="form-row">
+          <NFormItem label="厂商" style="flex: 1">
+            <NInput v-model:value="formValue.vendor" placeholder="OpenAI" />
+          </NFormItem>
+          <NFormItem label="模型系列" style="flex: 1">
+            <NInput v-model:value="formValue.model_family" placeholder="gpt-4" />
+          </NFormItem>
+        </div>
+
+        <div class="form-row">
+          <NFormItem label="知识截止" style="flex: 1">
+            <NInput v-model:value="formValue.knowledge_cutoff" placeholder="2024-04" />
+          </NFormItem>
+          <NFormItem label="参考链接" style="flex: 1">
+            <NInput v-model:value="formValue.reference_url" placeholder="https://..." />
           </NFormItem>
         </div>
 
@@ -415,6 +488,19 @@ onMounted(loadData);
   font-weight: 600;
 }
 
+.mc-vendor {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
+  margin-bottom: 4px;
+}
+
+.mc-desc {
+  font-size: 13px;
+  color: var(--text-color-2, #64748b);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
 .mc-strategy {
   font-size: 11px;
   color: var(--text-color-3, #94a3b8);
@@ -484,6 +570,33 @@ onMounted(loadData);
   border-top: 1px solid var(--border-color, #e2e8f0);
   padding-top: 10px;
   margin-top: 4px;
+}
+
+.gp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  font-size: 13px;
+}
+
+.gp-name {
+  font-weight: 600;
+  min-width: 80px;
+}
+
+.gp-protocols {
+  color: var(--text-color-2, #64748b);
+  font-size: 12px;
+  flex: 1;
+}
+
+.gp-models {
+  color: var(--text-color-2, #64748b);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
 }
 
 .form-row {

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::models::{ModelMapping, NewModelMapping, UpdateModelMapping};
+use crate::models::{GroupProviderInfo, ModelMapping, NewModelMapping, UpdateModelMapping};
 use crate::persistence::ModelMappingRepo;
 use crate::AppState;
 
@@ -69,6 +69,11 @@ pub async fn create_model_mapping(
         input_price_per_1m: payload.input_price_per_1m,
         output_price_per_1m: payload.output_price_per_1m,
         capabilities: payload.capabilities,
+        description: payload.description,
+        vendor: payload.vendor,
+        knowledge_cutoff: payload.knowledge_cutoff,
+        model_family: payload.model_family,
+        reference_url: payload.reference_url,
         enabled: payload.enabled,
     };
 
@@ -97,6 +102,11 @@ pub async fn update_model_mapping(
         input_price_per_1m: payload.input_price_per_1m,
         output_price_per_1m: payload.output_price_per_1m,
         capabilities: payload.capabilities,
+        description: payload.description,
+        vendor: payload.vendor,
+        knowledge_cutoff: payload.knowledge_cutoff,
+        model_family: payload.model_family,
+        reference_url: payload.reference_url,
         enabled: payload.enabled,
     };
 
@@ -122,6 +132,18 @@ pub async fn delete_model_mapping(
     Ok(deleted)
 }
 
+/// 获取分组内的渠道信息
+#[tauri::command]
+pub async fn get_group_providers(
+    _state: State<'_, AppState>,
+    group_id: String,
+) -> Result<Vec<GroupProviderInfo>, String> {
+    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+    ModelMappingRepo::find_group_providers(pool, &group_id)
+        .await
+        .map_err(|e| format!("查询分组渠道失败: {e}"))
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -137,6 +159,11 @@ pub struct ModelMappingResponse {
     pub input_price_per_1m: Option<f64>,
     pub output_price_per_1m: Option<f64>,
     pub capabilities: Vec<String>,
+    pub description: String,
+    pub vendor: String,
+    pub knowledge_cutoff: Option<String>,
+    pub model_family: String,
+    pub reference_url: Option<String>,
     pub enabled: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -155,6 +182,11 @@ impl From<ModelMapping> for ModelMappingResponse {
             input_price_per_1m: m.input_price_per_1m,
             output_price_per_1m: m.output_price_per_1m,
             capabilities,
+            description: m.description,
+            vendor: m.vendor,
+            knowledge_cutoff: m.knowledge_cutoff,
+            model_family: m.model_family,
+            reference_url: m.reference_url,
             enabled: m.enabled != 0,
             created_at: m.created_at.to_string(),
             updated_at: m.updated_at.to_string(),
@@ -172,6 +204,11 @@ pub struct CreateModelMappingPayload {
     pub input_price_per_1m: Option<f64>,
     pub output_price_per_1m: Option<f64>,
     pub capabilities: Option<Vec<String>>,
+    pub description: Option<String>,
+    pub vendor: Option<String>,
+    pub knowledge_cutoff: Option<String>,
+    pub model_family: Option<String>,
+    pub reference_url: Option<String>,
     pub enabled: Option<bool>,
 }
 
@@ -185,5 +222,10 @@ pub struct UpdateModelMappingPayload {
     pub input_price_per_1m: Option<f64>,
     pub output_price_per_1m: Option<f64>,
     pub capabilities: Option<Vec<String>>,
+    pub description: Option<String>,
+    pub vendor: Option<String>,
+    pub knowledge_cutoff: Option<String>,
+    pub model_family: Option<String>,
+    pub reference_url: Option<String>,
     pub enabled: Option<bool>,
 }

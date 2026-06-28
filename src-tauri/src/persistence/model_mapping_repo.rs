@@ -23,9 +23,10 @@ impl ModelMappingRepo {
                 id, model_name, provider_group_id,
                 max_input_tokens, max_context_tokens, max_output_tokens,
                 input_price_per_1m, output_price_per_1m,
-                capabilities, enabled, created_at, updated_at
+                capabilities, description, vendor, knowledge_cutoff, model_family, reference_url,
+                enabled, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING *
             "#,
         )
@@ -38,6 +39,11 @@ impl ModelMappingRepo {
         .bind(new.input_price_per_1m)
         .bind(new.output_price_per_1m)
         .bind(capabilities)
+        .bind(new.description.as_deref().unwrap_or(""))
+        .bind(new.vendor.as_deref().unwrap_or(""))
+        .bind(new.knowledge_cutoff.as_deref())
+        .bind(new.model_family.as_deref().unwrap_or(""))
+        .bind(new.reference_url.as_deref())
         .bind(enabled)
         .bind(now)
         .bind(now)
@@ -120,8 +126,13 @@ impl ModelMappingRepo {
                 input_price_per_1m = COALESCE($7, input_price_per_1m),
                 output_price_per_1m = COALESCE($8, output_price_per_1m),
                 capabilities = COALESCE($9, capabilities),
-                enabled = COALESCE($10, enabled),
-                updated_at = $11
+                description = COALESCE($10, description),
+                vendor = COALESCE($11, vendor),
+                knowledge_cutoff = COALESCE($12, knowledge_cutoff),
+                model_family = COALESCE($13, model_family),
+                reference_url = COALESCE($14, reference_url),
+                enabled = COALESCE($15, enabled),
+                updated_at = $16
             WHERE id = $1
             RETURNING *
             "#,
@@ -135,6 +146,11 @@ impl ModelMappingRepo {
         .bind(update.input_price_per_1m)
         .bind(update.output_price_per_1m)
         .bind(capabilities.as_deref())
+        .bind(update.description.as_deref())
+        .bind(update.vendor.as_deref())
+        .bind(update.knowledge_cutoff.as_deref())
+        .bind(update.model_family.as_deref())
+        .bind(update.reference_url.as_deref())
         .bind(enabled)
         .bind(now)
         .fetch_optional(pool)
@@ -157,5 +173,40 @@ impl ModelMappingRepo {
             .fetch_one(pool)
             .await?;
         Ok(row.get::<i64, _>("count"))
+    }
+
+    /// 查询分组内的渠道信息（用于模型池表单展示）
+    pub async fn find_group_providers(
+        pool: &SqlitePool,
+        group_id: &str,
+    ) -> Result<Vec<crate::models::GroupProviderInfo>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT p.id, p.name, p.protocols, p.models, p.health_status
+            FROM group_members gm
+            JOIN providers p ON p.id = gm.provider_id
+            WHERE gm.group_id = ?1 AND gm.enabled = 1
+            "#,
+        )
+        .bind(group_id)
+        .fetch_all(pool)
+        .await?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            let protocols: Vec<String> =
+                serde_json::from_str(row.get::<&str, _>("protocols")).unwrap_or_default();
+            let models: Vec<String> =
+                serde_json::from_str(row.get::<&str, _>("models")).unwrap_or_default();
+
+            result.push(crate::models::GroupProviderInfo {
+                id: row.get("id"),
+                name: row.get("name"),
+                protocols,
+                models_count: models.len() as i64,
+                health_status: row.get("health_status"),
+            });
+        }
+        Ok(result)
     }
 }

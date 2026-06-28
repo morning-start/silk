@@ -172,9 +172,22 @@ export interface ModelMapping {
   input_price_per_1m: number | null;
   output_price_per_1m: number | null;
   capabilities: string[];
+  description: string;
+  vendor: string;
+  knowledge_cutoff: string | null;
+  model_family: string;
+  reference_url: string | null;
   enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface GroupProviderInfo {
+  id: string;
+  name: string;
+  protocols: string[];
+  models_count: number;
+  health_status: string | null;
 }
 
 export interface GatewayKey {
@@ -269,6 +282,7 @@ export const api = {
   updateModelMapping: (id: string, data: Partial<ModelMapping>) =>
     invoke<ModelMapping>("update_model_mapping", { id, payload: data }),
   deleteModelMapping: (id: string) => invoke<boolean>("delete_model_mapping", { id }),
+  getGroupProviders: (groupId: string) => invoke<GroupProviderInfo[]>("get_group_providers", { groupId }),
 
   // Gateway Keys
   listGatewayKeys: () => invoke<GatewayKey[]>("list_gateway_keys"),

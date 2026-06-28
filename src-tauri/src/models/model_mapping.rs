@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-/// 模型映射（模型广场）
+/// 模型映射（模型池）
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct ModelMapping {
     pub id: String,
@@ -14,6 +14,11 @@ pub struct ModelMapping {
     pub output_price_per_1m: Option<f64>,
     /// 能力标签 JSON 数组
     pub capabilities: String,
+    pub description: String,
+    pub vendor: String,
+    pub knowledge_cutoff: Option<String>,
+    pub model_family: String,
+    pub reference_url: Option<String>,
     pub enabled: i64,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
@@ -30,6 +35,11 @@ pub struct NewModelMapping {
     pub input_price_per_1m: Option<f64>,
     pub output_price_per_1m: Option<f64>,
     pub capabilities: Option<Vec<String>>,
+    pub description: Option<String>,
+    pub vendor: Option<String>,
+    pub knowledge_cutoff: Option<String>,
+    pub model_family: Option<String>,
+    pub reference_url: Option<String>,
     pub enabled: Option<bool>,
 }
 
@@ -44,7 +54,22 @@ pub struct UpdateModelMapping {
     pub input_price_per_1m: Option<f64>,
     pub output_price_per_1m: Option<f64>,
     pub capabilities: Option<Vec<String>>,
+    pub description: Option<String>,
+    pub vendor: Option<String>,
+    pub knowledge_cutoff: Option<String>,
+    pub model_family: Option<String>,
+    pub reference_url: Option<String>,
     pub enabled: Option<bool>,
+}
+
+/// 分组内渠道概要信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupProviderInfo {
+    pub id: String,
+    pub name: String,
+    pub protocols: Vec<String>,
+    pub models_count: i64,
+    pub health_status: Option<String>,
 }
 
 impl ModelMapping {
