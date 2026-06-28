@@ -16,6 +16,7 @@ export interface Provider {
   protocols: string[];
   models: string[];
   key_count: number;
+  keys: { name: string; value: string; enabled: boolean; weight: number }[];
   api_base_url: string;
   model_name: string | null;
   proxy_url: string | null;
@@ -162,10 +163,29 @@ export interface ProviderModelInfo {
   supported_endpoint_types: string[];
 }
 
+export interface MappingChannelInfo {
+  id: string;
+  mapping_id: string;
+  provider_id: string;
+  provider_name: string;
+  provider_protocols: string[];
+  provider_models: string[];
+  provider_models_count: number;
+  provider_health: string | null;
+  selected_models: string[];
+  enabled: boolean;
+}
+
+export interface NewMappingChannel {
+  provider_id: string;
+  selected_models?: string[];
+  enabled?: boolean;
+}
+
 export interface ModelMapping {
   id: string;
   model_name: string;
-  provider_group_id: string | null;
+  strategy: string;
   max_input_tokens: number | null;
   max_context_tokens: number | null;
   max_output_tokens: number | null;
@@ -173,11 +193,8 @@ export interface ModelMapping {
   output_price_per_1m: number | null;
   capabilities: string[];
   description: string;
-  vendor: string;
-  knowledge_cutoff: string | null;
-  model_family: string;
-  reference_url: string | null;
   enabled: boolean;
+  channels: MappingChannelInfo[];
   created_at: string;
   updated_at: string;
 }
@@ -277,10 +294,32 @@ export const api = {
   // Model Mappings
   listModelMappings: () => invoke<ModelMapping[]>("list_model_mappings"),
   getMappingModel: (id: string) => invoke<ModelMapping>("get_model_mapping", { id }),
-  createModelMapping: (data: Partial<ModelMapping>) =>
-    invoke<ModelMapping>("create_model_mapping", { payload: data }),
-  updateModelMapping: (id: string, data: Partial<ModelMapping>) =>
-    invoke<ModelMapping>("update_model_mapping", { id, payload: data }),
+  createModelMapping: (data: {
+    model_name: string;
+    strategy?: string;
+    max_input_tokens?: number | null;
+    max_context_tokens?: number | null;
+    max_output_tokens?: number | null;
+    input_price_per_1m?: number | null;
+    output_price_per_1m?: number | null;
+    capabilities?: string[];
+    description?: string;
+    enabled?: boolean;
+    channels?: NewMappingChannel[];
+  }) => invoke<ModelMapping>("create_model_mapping", { payload: data }),
+  updateModelMapping: (id: string, data: {
+    model_name?: string;
+    strategy?: string;
+    max_input_tokens?: number | null;
+    max_context_tokens?: number | null;
+    max_output_tokens?: number | null;
+    input_price_per_1m?: number | null;
+    output_price_per_1m?: number | null;
+    capabilities?: string[];
+    description?: string;
+    enabled?: boolean;
+    channels?: NewMappingChannel[];
+  }) => invoke<ModelMapping>("update_model_mapping", { id, payload: data }),
   deleteModelMapping: (id: string) => invoke<boolean>("delete_model_mapping", { id }),
   getGroupProviders: (groupId: string) => invoke<GroupProviderInfo[]>("get_group_providers", { groupId }),
 
