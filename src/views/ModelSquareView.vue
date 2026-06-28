@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from "vue";
+import { ref, onMounted, computed } from "vue";
 import {
   NCard,
   NButton,
@@ -18,25 +18,27 @@ import {
   useMessage,
   useDialog,
 } from "naive-ui";
-import { api, type ModelMapping, type ProviderGroup, type GroupProviderInfo } from "../api";
+import { api, type ModelMapping, type NewMappingChannel, type Provider } from "../api";
 
 const message = useMessage();
 const dialog = useDialog();
 
 const mappings = ref<ModelMapping[]>([]);
-const groups = ref<ProviderGroup[]>([]);
+const allProviders = ref<Provider[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
 const showModal = ref(false);
 const editingId = ref<string | null>(null);
 
-const groupProviders = ref<GroupProviderInfo[]>([]);
-const loadingProviders = ref(false);
-
+// 表单数据
 const formValue = ref({
   model_name: "",
-  provider_group_id: null as string | null,
+  strategy: "round_robin",
+  // 步骤①：选中的渠道 ID 列表
+  selectedProviderIds: [] as string[],
+  // 步骤②：每个渠道选中的模型列表 { provider_id → model[] }
+  selectedModelsMap: {} as Record<string, string[]>,
   max_input_tokens: null as number | null,
   max_context_tokens: null as number | null,
   max_output_tokens: null as number | null,
@@ -44,29 +46,43 @@ const formValue = ref({
   output_price_per_1m: null as number | null,
   capabilities: [] as string[],
   description: "",
-  vendor: "",
-  knowledge_cutoff: null as string | null,
-  model_family: "",
-  reference_url: null as string | null,
-  strategy: "weighted_round_robin",
   enabled: true,
 });
 
-watch(
-  () => formValue.value.provider_group_id,
-  async (groupId) => {
-    groupProviders.value = [];
-    if (!groupId) return;
-    loadingProviders.value = true;
-    try {
-      groupProviders.value = await api.getGroupProviders(groupId);
-    } catch {
-      // ignore
-    } finally {
-      loadingProviders.value = false;
-    }
-  }
+// 步骤②：模型模糊搜索关键字
+const modelSearchKeyword = ref("");
+
+// 已选渠道的提供者信息（供模型步骤使用）
+const selectedProviders = computed(() =>
+  allProviders.value.filter((p) => formValue.value.selectedProviderIds.includes(p.id))
 );
+
+// 按渠道分组的模型（供步骤②展示）
+const channelModels = computed(() => {
+  const kw = modelSearchKeyword.value.trim().toLowerCase();
+  return selectedProviders.value.map((p) => {
+    const models = (p.models || []).filter((m) => !kw || m.toLowerCase().includes(kw));
+    return {
+      provider_id: p.id,
+      provider_name: p.name,
+      models,
+      selectedModels: formValue.value.selectedModelsMap[p.id] || [],
+    };
+  });
+});
+
+// 切换选中/取消某个渠道的某个模型
+function toggleModel(providerId: string, model: string) {
+  const map = { ...formValue.value.selectedModelsMap };
+  if (!map[providerId]) map[providerId] = [];
+  const idx = map[providerId].indexOf(model);
+  if (idx >= 0) {
+    map[providerId] = map[providerId].filter((m) => m !== model);
+  } else {
+    map[providerId] = [...map[providerId], model];
+  }
+  formValue.value.selectedModelsMap = map;
+}
 
 const capabilityOptions = [
   { label: "思考", value: "thinking" },
@@ -93,23 +109,16 @@ function capabilityColor(val: string): string {
   return colors[val] || "default";
 }
 
-const groupOptions = computed(() =>
-  groups.value.map((g) => ({
-    label: `${g.name} (${g.model_name})`,
-    value: g.id,
-  }))
-);
-
 async function loadData() {
   loading.value = true;
   error.value = null;
   try {
-    const [m, g] = await Promise.all([
+    const [m, p] = await Promise.all([
       api.listModelMappings(),
-      api.listGroups(),
+      api.listProviders(),
     ]);
     mappings.value = m;
-    groups.value = g;
+    allProviders.value = p;
   } catch (e: any) {
     error.value = e.message || "加载数据失败";
   } finally {
@@ -117,11 +126,13 @@ async function loadData() {
   }
 }
 
-function handleAdd() {
+function resetForm() {
   editingId.value = null;
   formValue.value = {
     model_name: "",
-    provider_group_id: null,
+    strategy: "round_robin",
+    selectedProviderIds: [],
+    selectedModelsMap: {},
     max_input_tokens: null,
     max_context_tokens: null,
     max_output_tokens: null,
@@ -129,22 +140,32 @@ function handleAdd() {
     output_price_per_1m: null,
     capabilities: [],
     description: "",
-    vendor: "",
-    knowledge_cutoff: null,
-    model_family: "",
-    reference_url: null,
-    strategy: "weighted_round_robin",
     enabled: true,
   };
-  groupProviders.value = [];
+  modelSearchKeyword.value = "";
+}
+
+function handleAdd() {
+  resetForm();
   showModal.value = true;
 }
 
 function handleEdit(row: ModelMapping) {
   editingId.value = row.id;
+  // 从 channels 回填 selectedProviderIds 和 selectedModelsMap
+  const providerIds: string[] = [];
+  const modelsMap: Record<string, string[]> = {};
+  for (const c of row.channels || []) {
+    providerIds.push(c.provider_id);
+    if (c.selected_models && c.selected_models.length > 0) {
+      modelsMap[c.provider_id] = c.selected_models;
+    }
+  }
   formValue.value = {
     model_name: row.model_name,
-    provider_group_id: row.provider_group_id,
+    strategy: row.strategy || "round_robin",
+    selectedProviderIds: providerIds,
+    selectedModelsMap: modelsMap,
     max_input_tokens: row.max_input_tokens,
     max_context_tokens: row.max_context_tokens,
     max_output_tokens: row.max_output_tokens,
@@ -152,13 +173,9 @@ function handleEdit(row: ModelMapping) {
     output_price_per_1m: row.output_price_per_1m,
     capabilities: row.capabilities || [],
     description: row.description || "",
-    vendor: row.vendor || "",
-    knowledge_cutoff: row.knowledge_cutoff || null,
-    model_family: row.model_family || "",
-    reference_url: row.reference_url || null,
-    strategy: "weighted_round_robin",
     enabled: row.enabled,
   };
+  modelSearchKeyword.value = "";
   showModal.value = true;
 }
 
@@ -182,19 +199,41 @@ function handleDelete(row: ModelMapping) {
 
 async function handleSubmit() {
   try {
+    const channels: NewMappingChannel[] = formValue.value.selectedProviderIds.map((pid) => {
+      const selectedModels = formValue.value.selectedModelsMap[pid];
+      return {
+        provider_id: pid,
+        selected_models: selectedModels && selectedModels.length > 0 ? selectedModels : undefined,
+      };
+    });
+
+    const payload = {
+      model_name: formValue.value.model_name,
+      strategy: formValue.value.strategy,
+      max_input_tokens: formValue.value.max_input_tokens,
+      max_context_tokens: formValue.value.max_context_tokens,
+      max_output_tokens: formValue.value.max_output_tokens,
+      input_price_per_1m: formValue.value.input_price_per_1m,
+      output_price_per_1m: formValue.value.output_price_per_1m,
+      capabilities: formValue.value.capabilities.length > 0 ? formValue.value.capabilities : undefined,
+      description: formValue.value.description || undefined,
+      enabled: formValue.value.enabled,
+      channels: channels.length > 0 ? channels : undefined,
+    };
+
     if (editingId.value) {
-      const updated = await api.updateModelMapping(editingId.value, formValue.value as any);
+      const updated = await api.updateModelMapping(editingId.value, payload as any);
       const idx = mappings.value.findIndex((m) => m.id === editingId.value);
       if (idx >= 0) mappings.value[idx] = updated;
       message.success("更新成功");
     } else {
-      const created = await api.createModelMapping(formValue.value as any);
+      const created = await api.createModelMapping(payload as any);
       mappings.value.unshift(created);
       message.success("创建成功");
     }
     showModal.value = false;
-  } catch {
-    message.error("操作失败");
+  } catch (e: any) {
+    message.error(e?.message || "操作失败");
   }
 }
 
@@ -209,10 +248,20 @@ function formatTokens(val: number | null): string {
   return `${val}`;
 }
 
-const groupName = (id: string | null) => {
-  if (!id) return "-";
-  return groups.value.find((g) => g.id === id)?.name || id;
-};
+// 渠道健康状态显示
+function healthColor(status: string | null): "success" | "error" | "warning" | "default" {
+  return status === "healthy" ? "success" : status === "unhealthy" ? "error" : "warning";
+}
+function healthLabel(status: string | null): string {
+  return status === "healthy" ? "正常" : status === "unhealthy" ? "异常" : "未知";
+}
+
+// 卡片显示渠道的选中模型摘要
+function channelModelSummary(selected: string[]): string {
+  if (!selected || selected.length === 0) return "";
+  if (selected.length <= 2) return selected.join(", ");
+  return `${selected.slice(0, 2).join(", ")} +${selected.length - 2}`;
+}
 
 onMounted(loadData);
 </script>
@@ -261,13 +310,27 @@ onMounted(loadData);
               </div>
             </div>
 
-            <div class="mc-vendor" v-if="item.vendor">{{ item.vendor }}</div>
             <div class="mc-desc" v-if="item.description">{{ item.description }}</div>
 
-            <div class="mc-stats">
-              <span>
-                渠道 <span class="num">{{ item.provider_group_id ? 1 : 0 }}</span>
-              </span>
+            <!-- 关联渠道展示 -->
+            <div class="mc-stats" v-if="item.channels">
+              <span>渠道 <span class="num">{{ item.channels.length }}</span></span>
+            </div>
+            <div class="mc-channels" v-if="item.channels && item.channels.length > 0">
+              <div
+                v-for="c in item.channels.slice(0, 3)"
+                :key="c.id"
+                class="channel-badge"
+                :class="{ healthy: c.provider_health === 'healthy' }"
+              >
+                <span class="cb-name">{{ c.provider_name }}</span>
+                <span class="cb-models" v-if="c.selected_models && c.selected_models.length > 0">
+                  {{ channelModelSummary(c.selected_models) }}
+                </span>
+              </div>
+              <NTag v-if="item.channels.length > 3" size="tiny" round>
+                +{{ item.channels.length - 3 }}
+              </NTag>
             </div>
 
             <div class="mc-specs">
@@ -306,10 +369,6 @@ onMounted(loadData);
               </NTag>
             </div>
 
-            <div class="mc-group" v-if="item.provider_group_id">
-              <span class="group-badge">{{ groupName(item.provider_group_id) }}</span>
-            </div>
-
             <div class="mc-actions">
               <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
               <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
@@ -324,35 +383,116 @@ onMounted(loadData);
       v-model:show="showModal"
       preset="card"
       :title="editingId ? '编辑模型映射' : '新增模型映射'"
-      style="max-width: 560px"
+      style="max-width: 640px"
       :bordered="false"
       :segmented="{ footer: true }"
     >
-      <NForm :model="formValue" label-placement="left" label-width="110">
+      <NForm :model="formValue" label-placement="left" label-width="90">
         <NFormItem label="模型名称" required>
           <NInput v-model:value="formValue.model_name" placeholder="例如：gpt-4、claude-3-opus" />
         </NFormItem>
-        <NFormItem label="关联分组">
-          <NSelect
-            v-model:value="formValue.provider_group_id"
-            :options="groupOptions"
-            placeholder="选择渠道分组"
-            clearable
-          />
-        </NFormItem>
 
-        <!-- 分组内渠道列表 -->
-        <NFormItem v-if="groupProviders.length > 0" label="渠道列表">
-          <div style="width: 100%; display: flex; flex-direction: column; gap: 6px">
-            <div v-for="p in groupProviders" :key="p.id" class="gp-row">
-              <span class="gp-name">{{ p.name }}</span>
-              <span class="gp-protocols">{{ p.protocols.join(', ') }}</span>
-              <span class="gp-models">{{ p.models_count }} 模型</span>
-              <NTag size="tiny" :type="p.health_status === 'healthy' ? 'success' : 'warning'">
-                {{ p.health_status === 'healthy' ? '正常' : '异常' }}
-              </NTag>
+        <!-- 步骤①：关联渠道（多选） -->
+        <NFormItem label="关联渠道">
+          <div style="width: 100%">
+            <div v-if="allProviders.length === 0" style="font-size: 13px; color: #94a3b8; padding: 8px 0">
+              暂无可用渠道，请先在「渠道管理」中添加
+            </div>
+            <div v-else class="channel-list">
+              <label
+                v-for="p in allProviders"
+                :key="p.id"
+                class="channel-item"
+                :class="{ selected: formValue.selectedProviderIds.includes(p.id) }"
+              >
+                <input
+                  type="checkbox"
+                  class="channel-checkbox"
+                  :checked="formValue.selectedProviderIds.includes(p.id)"
+                  @change="(e: any) => {
+                    if (e.target.checked) {
+                      formValue.selectedProviderIds.push(p.id);
+                    } else {
+                      formValue.selectedProviderIds = formValue.selectedProviderIds.filter(id => id !== p.id);
+                      // 取消渠道时清空其选中的模型
+                      const map = { ...formValue.selectedModelsMap };
+                      delete map[p.id];
+                      formValue.selectedModelsMap = map;
+                    }
+                  }"
+                />
+                <div class="channel-info">
+                  <span class="channel-name">{{ p.name }}</span>
+                  <span class="channel-protocols">
+                    <NTag v-for="proto in (p.protocols || [])" :key="proto" size="tiny" round style="margin-right: 2px">
+                      {{ proto }}
+                    </NTag>
+                  </span>
+                  <span class="channel-models">{{ (p.models || []).length }} 模型</span>
+                  <NTag size="tiny" :type="healthColor(p.health_status)" round>
+                    {{ healthLabel(p.health_status) }}
+                  </NTag>
+                </div>
+              </label>
             </div>
           </div>
+        </NFormItem>
+
+        <!-- 步骤②：从已选渠道中挑选模型（点击切换选中） -->
+        <NFormItem v-if="selectedProviders.length > 0" label="选择模型">
+          <div style="width: 100%; display: flex; flex-direction: column; gap: 10px">
+            <!-- 模糊搜索 -->
+            <NInput
+              v-model:value="modelSearchKeyword"
+              placeholder="搜索模型名，点击模型切换选中..."
+              clearable
+            >
+              <template #prefix>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </template>
+            </NInput>
+
+            <!-- 按渠道分组展示模型 -->
+            <div v-for="grp in channelModels" :key="grp.provider_id" class="channel-model-group">
+              <div class="cmg-header">
+                <span class="cmg-name">{{ grp.provider_name }}</span>
+                <span class="cmg-count">已选 {{ (formValue.selectedModelsMap[grp.provider_id] || []).length }}/{{ (selectedProviders.find(p => p.id === grp.provider_id)?.models || []).length }}</span>
+              </div>
+              <div v-if="grp.models.length === 0" class="cmg-empty">无匹配模型</div>
+              <div v-else class="cmg-list">
+                <div
+                  v-for="m in grp.models"
+                  :key="grp.provider_id + '-' + m"
+                  class="cmg-item"
+                  :class="{ selected: (formValue.selectedModelsMap[grp.provider_id] || []).includes(m) }"
+                  @click="toggleModel(grp.provider_id, m)"
+                >
+                  <div class="cmg-check">
+                    <span class="cmg-check-icon">{{ (formValue.selectedModelsMap[grp.provider_id] || []).includes(m) ? '✓' : '' }}</span>
+                  </div>
+                  <span class="cmg-model">{{ m }}</span>
+                  <span class="cmg-remark">外部视为 {{ formValue.model_name || '同模型名' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 无结果提示 -->
+            <div v-if="channelModels.length === 0 && modelSearchKeyword" style="font-size:13px;color:#94a3b8;padding:8px 0">
+              无匹配模型
+            </div>
+          </div>
+        </NFormItem>
+
+        <NFormItem label="负载策略">
+          <NSelect
+            v-model:value="formValue.strategy"
+            :options="[
+              { label: '轮询 (Round Robin)', value: 'round_robin' },
+              { label: '加权轮询 (Weighted)', value: 'weighted' },
+              { label: '最少连接 (Least Conn)', value: 'least_conn' },
+              { label: '故障转移 (Failover)', value: 'failover' },
+            ]"
+          />
         </NFormItem>
 
         <div class="form-row">
@@ -377,26 +517,8 @@ onMounted(loadData);
         </div>
 
         <NFormItem label="描述">
-          <NInput v-model:value="formValue.description" placeholder="模型描述，如"最新 GPT-4 模型，支持多模态"" type="textarea" :rows="2" />
+          <NInput v-model:value="formValue.description" placeholder="模型描述，如 '最新 GPT-4 模型，支持多模态'" type="textarea" :rows="2" />
         </NFormItem>
-
-        <div class="form-row">
-          <NFormItem label="厂商" style="flex: 1">
-            <NInput v-model:value="formValue.vendor" placeholder="OpenAI" />
-          </NFormItem>
-          <NFormItem label="模型系列" style="flex: 1">
-            <NInput v-model:value="formValue.model_family" placeholder="gpt-4" />
-          </NFormItem>
-        </div>
-
-        <div class="form-row">
-          <NFormItem label="知识截止" style="flex: 1">
-            <NInput v-model:value="formValue.knowledge_cutoff" placeholder="2024-04" />
-          </NFormItem>
-          <NFormItem label="参考链接" style="flex: 1">
-            <NInput v-model:value="formValue.reference_url" placeholder="https://..." />
-          </NFormItem>
-        </div>
 
         <NFormItem label="模型能力">
           <div class="cap-checkboxes">
@@ -420,7 +542,9 @@ onMounted(loadData);
       <template #footer>
         <div style="display: flex; justify-content: flex-end; gap: 8px">
           <NButton @click="showModal = false">取消</NButton>
-          <NButton type="primary" @click="handleSubmit">{{ editingId ? '保存修改' : '确认添加' }}</NButton>
+          <NButton type="primary" @click="handleSubmit" :disabled="!formValue.model_name || formValue.selectedProviderIds.length === 0">
+            {{ editingId ? '保存修改' : '确认添加' }}
+          </NButton>
         </div>
       </template>
     </NModal>
@@ -488,12 +612,6 @@ onMounted(loadData);
   font-weight: 600;
 }
 
-.mc-vendor {
-  font-size: 12px;
-  color: var(--text-color-3, #94a3b8);
-  margin-bottom: 4px;
-}
-
 .mc-desc {
   font-size: 13px;
   color: var(--text-color-2, #64748b);
@@ -501,18 +619,45 @@ onMounted(loadData);
   line-height: 1.4;
 }
 
-.mc-strategy {
-  font-size: 11px;
-  color: var(--text-color-3, #94a3b8);
-  background: var(--tag-bg, #f1f5f9);
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
 .mc-stats {
   font-size: 13px;
   color: var(--text-color-2, #64748b);
+  margin-bottom: 6px;
+}
+
+.mc-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-bottom: 8px;
+}
+
+.channel-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #eef2ff;
+  color: #6366f1;
+  font-weight: 500;
+  border: 1px solid #e0e7ff;
+}
+
+.channel-badge.healthy {
+  background: #ecfdf5;
+  color: #059669;
+  border-color: #d1fae5;
+}
+
+.cb-models {
+  font-size: 10px;
+  opacity: 0.8;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mc-specs {
@@ -550,19 +695,6 @@ onMounted(loadData);
   margin-bottom: 8px;
 }
 
-.mc-group {
-  margin-bottom: 8px;
-}
-
-.group-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: #eef2ff;
-  color: #6366f1;
-  font-weight: 500;
-}
-
 .mc-actions {
   display: flex;
   justify-content: flex-end;
@@ -572,31 +704,161 @@ onMounted(loadData);
   margin-top: 4px;
 }
 
-.gp-row {
+/* 渠道列表 */
+.channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.channel-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
   border: 1px solid var(--border-color, #e2e8f0);
-  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-.gp-name {
-  font-weight: 600;
-  min-width: 80px;
+.channel-item:hover {
+  background: var(--hover-color, #f8fafc);
 }
 
-.gp-protocols {
-  color: var(--text-color-2, #64748b);
-  font-size: 12px;
+.channel-item.selected {
+  border-color: #6366f1;
+  background: #eef2ff;
+}
+
+.channel-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #6366f1;
+}
+
+.channel-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   flex: 1;
 }
 
-.gp-models {
-  color: var(--text-color-2, #64748b);
+.channel-name {
+  font-weight: 600;
+  font-size: 13px;
+  min-width: 60px;
+}
+
+.channel-protocols {
+  display: flex;
+  gap: 2px;
+}
+
+.channel-models {
   font-size: 12px;
+  color: var(--text-color-2, #64748b);
   font-family: 'JetBrains Mono', 'Consolas', monospace;
+}
+
+/* 模型分组 */
+.channel-model-group {
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cmg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.cmg-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.cmg-count {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
+}
+
+.cmg-empty {
+  padding: 12px;
+  font-size: 13px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.cmg-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.cmg-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.cmg-item:last-child {
+  border-bottom: none;
+}
+
+.cmg-item:hover {
+  background: #f8fafc;
+}
+
+.cmg-item.selected {
+  background: #eef2ff;
+}
+
+.cmg-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1.5px solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+
+.cmg-item.selected .cmg-check {
+  background: #6366f1;
+  border-color: #6366f1;
+}
+
+.cmg-check-icon {
+  line-height: 1;
+}
+
+.cmg-model {
+  font-weight: 600;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  flex: 1;
+}
+
+.cmg-remark {
+  font-size: 11px;
+  color: var(--text-color-3, #94a3b8);
 }
 
 .form-row {

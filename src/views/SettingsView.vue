@@ -40,8 +40,9 @@ const formValue = ref({
 const keys = ref<GatewayKey[]>([]);
 const showAddKey = ref(false);
 const newKeyName = ref("");
-const newKeyValue = ref("");
 const newKeyMaxConcurrent = ref(10);
+const newKeyCreated = ref<{ name: string; key: string } | null>(null);
+const showNewKeyModal = ref(false);
 
 async function loadKeys() {
   try {
@@ -72,25 +73,37 @@ async function deleteKey(id: string) {
 }
 
 async function addKey() {
-  if (!newKeyName.value || !newKeyValue.value) {
-    message.warning("请填写名称和 Key");
+  if (!newKeyName.value) {
+    message.warning("请填写名称");
     return;
   }
   try {
-    await api.createGatewayKey({
+    const result = await api.createGatewayKey({
       name: newKeyName.value,
-      key_value: newKeyValue.value,
+      key_value: "",  // 空值触发后端自动生成
       max_concurrent: newKeyMaxConcurrent.value,
     });
     message.success("添加成功");
+    newKeyCreated.value = {
+      name: result.key.name,
+      key: result.plain_key,
+    };
+    showNewKeyModal.value = true;
     newKeyName.value = "";
-    newKeyValue.value = "";
     newKeyMaxConcurrent.value = 10;
     showAddKey.value = false;
     await loadKeys();
   } catch {
     message.error("添加失败");
   }
+}
+
+function copyKey(text: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    message.success("已复制到剪贴板");
+  }).catch(() => {
+    message.error("复制失败");
+  });
 }
 
 async function handleSave() {
@@ -197,12 +210,47 @@ onMounted(() => {
       <div v-if="showAddKey" class="add-key-box">
         <div class="form-row" style="margin-bottom: 8px">
           <NInput v-model:value="newKeyName" placeholder="名称" style="flex: 1" />
-          <NInput v-model:value="newKeyValue" placeholder="Key 值 (sk-...)" style="flex: 2" />
           <NInputNumber v-model:value="newKeyMaxConcurrent" :min="1" :max="1000" placeholder="并发数" style="flex: 0 0 100px" />
-          <NButton type="primary" size="small" @click="addKey">确定</NButton>
+          <NButton type="primary" size="small" @click="addKey">生成</NButton>
           <NButton size="small" @click="showAddKey = false">取消</NButton>
         </div>
+        <div style="font-size:12px;color:var(--text-color-3,#94a3b8);margin-top:4px">
+          Key 值由系统自动生成（<code>sk-gw-xxx</code> 格式），创建后仅展示一次
+        </div>
       </div>
+
+      <!-- 新 Key 展示 -->
+      <NModal
+        v-model:show="showNewKeyModal"
+        preset="card"
+        title="Key 已创建"
+        style="max-width: 480px"
+        :bordered="false"
+        @update:show="(val: boolean) => { if (!val) newKeyCreated = null; }"
+      >
+        <div v-if="newKeyCreated" style="display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:13px">名称: <strong>{{ newKeyCreated.name }}</strong></div>
+          <div style="font-size:13px;margin-bottom:4px">Key 值（请立即复制，关闭后不再显示）:</div>
+          <div
+            style="
+              font-family:'JetBrains Mono','Consolas',monospace;
+              font-size:14px;
+              background:#1e293b;
+              color:#e2e8f0;
+              padding:12px 16px;
+              border-radius:8px;
+              word-break:break-all;
+              cursor:pointer;
+              user-select:all;
+            "
+            @click="copyKey(newKeyCreated.key)"
+          >
+            {{ newKeyCreated.key }}
+          </div>
+          <NButton size="small" @click="copyKey(newKeyCreated.key)">复制 Key</NButton>
+          <NButton size="small" type="primary" @click="newKeyCreated = null">我已保存，关闭</NButton>
+        </div>
+      </NModal>
 
       <div class="keys-list">
         <div v-for="key in keys" :key="key.id" class="key-row">

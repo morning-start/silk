@@ -134,7 +134,9 @@ function handleEdit(row: Provider) {
     max_retries: row.max_retries,
     status: row.status,
     key_strategy: "round_robin",
-    keys: [{ name: "默认", value: "", enabled: true, weight: 1 }],
+    keys: (row.keys && row.keys.length > 0)
+      ? row.keys.map((k) => ({ name: k.name, value: k.value, enabled: k.enabled, weight: k.weight }))
+      : [{ name: "默认", value: "", enabled: true, weight: 1 }],
   };
   showModal.value = true;
 }
