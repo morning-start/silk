@@ -145,6 +145,7 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
                             if e.code().as_deref() == Some("787") && retries < 1 =>
                         {
                             log.provider_id = None;
+                            log.route_id = None;
                             retries += 1;
                         }
                         Err(err) => {
