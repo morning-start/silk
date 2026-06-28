@@ -4,12 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ProviderKeyEntry {
-  name: string;
-  value: string;
-  enabled: boolean;
-}
-
 export interface Provider {
   id: string;
   name: string;
@@ -147,13 +141,6 @@ export interface HourlyStats {
   total_tokens: number;
 }
 
-export interface ProviderTestResponse {
-  status_code: number;
-  response_time_ms: number;
-  health_status: string;
-  error: string | null;
-}
-
 /** 从上游 API 获取的模型元信息 */
 export interface ProviderModelInfo {
   id: string;
@@ -199,14 +186,6 @@ export interface ModelMapping {
   updated_at: string;
 }
 
-export interface GroupProviderInfo {
-  id: string;
-  name: string;
-  protocols: string[];
-  models_count: number;
-  health_status: string | null;
-}
-
 export interface GatewayKey {
   id: string;
   name: string;
@@ -232,7 +211,6 @@ export const api = {
 
   // Providers
   listProviders: () => invoke<Provider[]>("list_providers"),
-  getProvider: (id: string) => invoke<Provider>("get_provider", { id }),
   createProvider: (data: Partial<Provider> & { api_key: string }) =>
     invoke<Provider>("create_provider", { payload: data }),
   updateProvider: (id: string, data: Partial<Provider>) =>
@@ -241,8 +219,6 @@ export const api = {
 
   // Groups
   listGroups: () => invoke<ProviderGroup[]>("list_groups"),
-  findGroupsByModel: (modelName: string) =>
-    invoke<ProviderGroup[]>("find_groups_by_model", { modelName }),
   getGroup: (id: string) => invoke<GroupWithMembers>("get_group", { id }),
   createGroup: (data: { name: string; model_name: string; strategy?: string; enabled?: boolean }) =>
     invoke<ProviderGroup>("create_group", { payload: data }),
@@ -251,13 +227,10 @@ export const api = {
   deleteGroup: (id: string) => invoke<boolean>("delete_group", { id }),
   addGroupMember: (groupId: string, data: { provider_id: string; weight?: number }) =>
     invoke<GroupMember>("add_group_member", { groupId, payload: data }),
-  updateGroupMember: (id: string, data: { weight?: number; enabled?: boolean }) =>
-    invoke<GroupMember>("update_group_member", { id, payload: data }),
   removeGroupMember: (id: string) => invoke<boolean>("remove_group_member", { id }),
 
   // Routing Rules
   listRoutingRules: () => invoke<RoutingRule[]>("list_routing_rules"),
-  getRoutingRule: (id: string) => invoke<RoutingRule>("get_routing_rule", { id }),
   createRoutingRule: (data: Partial<RoutingRule>) =>
     invoke<RoutingRule>("create_routing_rule", { payload: data }),
   updateRoutingRule: (id: string, data: Partial<RoutingRule>) =>
@@ -270,11 +243,6 @@ export const api = {
       "list_logs",
       { payload: { limit, offset } }
     ),
-  logsByProvider: (providerId: string, limit = 50) =>
-    invoke<RequestLog[]>("logs_by_provider", { providerId, limit }),
-  logsByRequestId: (requestId: string) =>
-    invoke<RequestLog[]>("logs_by_request_id", { requestId }),
-  countLogs: () => invoke<number>("count_logs"),
   cleanupLogs: (beforeDays: number) => invoke<number>("cleanup_logs", { payload: { beforeDays } }),
   clearAllLogs: () => invoke<number>("clear_all_logs"),
 
@@ -284,16 +252,12 @@ export const api = {
   statsByProvider: (limit = 10) => invoke<ProviderStats[]>("stats_by_provider", { limit }),
   hourlyStats: (hours = 24) => invoke<HourlyStats[]>("hourly_stats", { hours }),
 
-  // Provider Test
-  testProvider: (id: string) => invoke<ProviderTestResponse>("test_provider", { id }),
-
   // Fetch Models from Provider API
   fetchProviderModels: (data: { api_base_url: string; api_key: string; proxy_url?: string; timeout_seconds?: number }) =>
     invoke<ProviderModelInfo[]>("fetch_provider_models", { payload: data }),
 
   // Model Mappings
   listModelMappings: () => invoke<ModelMapping[]>("list_model_mappings"),
-  getMappingModel: (id: string) => invoke<ModelMapping>("get_model_mapping", { id }),
   createModelMapping: (data: {
     model_name: string;
     strategy?: string;
@@ -321,7 +285,6 @@ export const api = {
     channels?: NewMappingChannel[];
   }) => invoke<ModelMapping>("update_model_mapping", { id, payload: data }),
   deleteModelMapping: (id: string) => invoke<boolean>("delete_model_mapping", { id }),
-  getGroupProviders: (groupId: string) => invoke<GroupProviderInfo[]>("get_group_providers", { groupId }),
 
   // Gateway Keys
   listGatewayKeys: () => invoke<GatewayKey[]>("list_gateway_keys"),
@@ -336,7 +299,6 @@ export const api = {
     invoke<{ file_path: string; exported_count: number }>("export_logs_csv", { payload: data }),
 
   // Settings
-  getGatewaySettings: () => invoke<GatewaySettings>("get_gateway_settings"),
   updateGatewaySettings: (data: Partial<GatewaySettings>) =>
     invoke<GatewaySettings>("update_gateway_settings", { payload: data }),
 };
