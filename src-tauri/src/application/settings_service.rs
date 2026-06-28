@@ -96,4 +96,3 @@ impl From<GatewaySettings> for GatewaySettingsResponse {
         }
     }
 }
-
