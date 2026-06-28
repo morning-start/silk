@@ -118,26 +118,4 @@ impl RoutingRule {
 
         true
     }
-
-    /// 是否启用协议转换
-    pub fn needs_protocol_conversion(&self) -> bool {
-        self.protocol_conversion != 0
-    }
-
-    /// 获取模型名（优先使用覆盖值，否则返回 None 让上层使用 Provider 默认值）
-    pub fn effective_model(&self) -> Option<&str> {
-        self.model_name_override.as_deref()
-    }
-
-    /// 获取入站协议标签
-    pub fn inbound_protocol_label(&self) -> &str {
-        self.inbound_protocol.as_deref().unwrap_or("any")
-    }
-
-    /// 获取出站协议标签
-    pub fn outbound_protocol_label(&self) -> &str {
-        self.outbound_protocol
-            .as_deref()
-            .unwrap_or("openai_response")
-    }
 }

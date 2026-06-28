@@ -118,20 +118,4 @@ impl ModelMapping {
     pub fn capabilities_vec(&self) -> Vec<String> {
         serde_json::from_str(&self.capabilities).unwrap_or_default()
     }
-
-    /// 获取能力标签显示名称
-    pub fn capability_labels(&self) -> Vec<(&str, &str)> {
-        self.capabilities_vec()
-            .iter()
-            .filter_map(|c| match c.as_str() {
-                "thinking" => Some(("思考", "think")),
-                "image" => Some(("识图", "image")),
-                "text" => Some(("文本", "text")),
-                "draw" => Some(("生图", "draw")),
-                "code" => Some(("代码", "code")),
-                "audio" => Some(("语音", "audio")),
-                _ => None,
-            })
-            .collect()
-    }
 }

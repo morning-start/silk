@@ -44,15 +44,6 @@ impl From<serde_json::Error> for ProtocolError {
     }
 }
 
-impl ProtocolError {
-    pub fn upstream_status(&self) -> Option<u16> {
-        match self {
-            ProtocolError::UpstreamError { status, .. } => Some(*status),
-            _ => None,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Upstream Types
 // ---------------------------------------------------------------------------

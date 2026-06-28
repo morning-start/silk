@@ -137,12 +137,4 @@ impl GatewayKeyRepo {
 
         Ok(result.rows_affected() > 0)
     }
-
-    /// 统计 Key 数量
-    pub async fn count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query(r#"SELECT COUNT(*) as count FROM gateway_keys"#)
-            .fetch_one(pool)
-            .await?;
-        Ok(row.get::<i64, _>("count"))
-    }
 }

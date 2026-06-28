@@ -2,11 +2,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::body::Body;
-use axum::extract::State;
-use axum::http::{Request, StatusCode};
-use axum::middleware::Next;
-use axum::response::Response;
 use dashmap::DashMap;
 use tokio::sync::RwLock;
 
@@ -158,34 +153,6 @@ pub async fn run(mut ctx: RequestContext, runtime: &GatewayContext) -> Result<Re
         return Err(StageError::new(ctx, err));
     }
     Ok(ctx)
-}
-
-/// Axum 中间件（保留用于早期 IP 级过滤，与管道级限流共存）
-pub async fn rate_limit_middleware(
-    State(state): State<Arc<RateLimitState>>,
-    request: Request<Body>,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    // 如果未启用限流，直接放行
-    if !state.enabled {
-        return Ok(next.run(request).await);
-    }
-
-    // 获取客户端 IP
-    let client_ip = request
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    // 检查限流
-    if !state.check(client_ip, 0).await {
-        return Err(StatusCode::TOO_MANY_REQUESTS);
-    }
-
-    Ok(next.run(request).await)
 }
 
 #[cfg(test)]
