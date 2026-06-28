@@ -5,7 +5,7 @@ use crate::gateway::pipeline::StageError;
 /// 请求转换中间件
 ///
 /// 根据路由规则的 inbound_protocol 选择适配器，
-/// 将原始请求体（JSON）转为上游请求格式，更新 ctx.body。
+/// 将原始请求体（JSON）转为上游请求格式，更新 ctx.request_body。
 pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> {
     // 获取入站协议
     let inbound_protocol = ctx
@@ -40,9 +40,9 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         )
     })?;
 
-    // 调用适配器转换
+    // 调用适配器转换（入站适配器负责验证并生成请求头/URL）
     let upstream_req = adapter
-        .transform_request(&ctx.body, provider, selected_api_key)
+        .transform_request(&ctx.request_body, provider, selected_api_key)
         .await
         .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e.to_string())))?;
 
@@ -51,13 +51,38 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         .map_err(|e| StageError::new(ctx.clone(), GatewayError::Serialization(e.to_string())))?;
 
     // 更新上下文
-    ctx.body = bytes::Bytes::from(new_body);
+    ctx.request_body = bytes::Bytes::from(new_body);
     ctx.upstream_headers = Some(upstream_req.headers);
-    // 适配器决定的上游 URL 和方法（dispatch_upstream 将使用）
     ctx.upstream_url = Some(upstream_req.url);
     ctx.upstream_method = Some(upstream_req.method);
 
+    // 跨协议场景：若 outbound != inbound，用 outbound 协议修正上游 URL
+    // （适配器按入站协议生成 URL，但出站协议可能需要不同的路径）
+    let outbound_protocol = ctx.outbound_protocol.as_deref();
+    if let Some(outbound) = outbound_protocol {
+        if outbound != inbound_protocol.as_str() {
+            let current_url = ctx.upstream_url.as_deref().unwrap_or("");
+            let corrected = upstream_url_for_protocol(provider.api_base_url.as_str(), outbound);
+            tracing::debug!(
+                "跨协议请求: inbound={}, outbound={}, URL: {} → {}",
+                inbound_protocol, outbound, current_url, corrected
+            );
+            ctx.upstream_url = Some(corrected);
+        }
+    }
+
     Ok(ctx)
+}
+
+/// 根据出站协议返回上游 API 路径
+fn upstream_url_for_protocol(api_base_url: &str, protocol: &str) -> String {
+    let base = api_base_url.trim_end_matches('/');
+    match protocol {
+        "openai_chat" => format!("{base}/v1/chat/completions"),
+        "claude_messages" => format!("{base}/v1/messages"),
+        "openai_response" => format!("{base}/v1/responses"),
+        _ => format!("{base}/v1/chat/completions"),
+    }
 }
 
 #[cfg(test)]
