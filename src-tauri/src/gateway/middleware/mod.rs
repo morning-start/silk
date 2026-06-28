@@ -2,7 +2,7 @@ pub mod authenticate;
 pub mod dispatch_upstream;
 pub mod extract;
 pub mod finalize;
-pub mod normalize_protocol;
+
 pub mod persist_log;
 pub mod rate_limit;
 pub mod resolve_route;

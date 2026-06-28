@@ -59,15 +59,9 @@ pub async fn spawn_gateway_server(
 }
 
 fn build_router(context: GatewayContext) -> Router {
-    let rate_limit_state = context.rate_limit_state.clone();
-
     Router::new()
         .route("/health", get(health_handler))
         .fallback(proxy_handler)
-        .layer(axum::middleware::from_fn_with_state(
-            rate_limit_state,
-            crate::gateway::middleware::rate_limit::rate_limit_middleware,
-        ))
         .with_state(context)
 }
 
