@@ -23,9 +23,10 @@ impl LogRepo {
                                       request_headers, request_body, response_status, status_code,
                                       response_headers, response_body, duration_ms, provider_id,
                                       error_message, error_code, model_used, retry_count, stream_enabled,
-                                      cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output)
+                                      cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output,
+                                      cost, auth_key_name)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+                    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
             RETURNING *
             "#,
         )
@@ -54,6 +55,8 @@ impl LogRepo {
         .bind(log.response_size_bytes)
         .bind(log.tokens_input)
         .bind(log.tokens_output)
+        .bind(log.cost)
+        .bind(log.auth_key_name.as_deref())
         .fetch_one(pool)
         .await
     }
@@ -81,9 +84,10 @@ impl LogRepo {
                                           request_headers, request_body, response_status, status_code,
                                           response_headers, response_body, duration_ms, provider_id,
                                           error_message, error_code, model_used, retry_count, stream_enabled,
-                                          cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+                                          cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output,
+                                          cost)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                            $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
                 "#,
             )
             .bind(id)
@@ -111,6 +115,7 @@ impl LogRepo {
             .bind(log.response_size_bytes)
             .bind(log.tokens_input)
             .bind(log.tokens_output)
+            .bind(log.cost)
             .execute(&mut *tx)
             .await?;
             count += result.rows_affected();
