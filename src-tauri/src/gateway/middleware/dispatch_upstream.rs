@@ -12,9 +12,16 @@ use crate::gateway::middleware::stream_response::{
     self, is_sse_response, SseParser, StreamConfig, StreamResponse, StreamState,
 };
 use crate::gateway::pipeline::StageError;
-use crate::protocol::{AdapterRegistry, UpstreamResponse};
-
 use super::{build_upstream_url, should_forward_header};
+
+fn is_streaming_body(ctx: &RequestContext) -> bool {
+    let body_str = String::from_utf8_lossy(&ctx.request_body);
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
+        json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false)
+    } else {
+        false
+    }
+}
 
 /// 请求转发入口：自动判断流式/非流式
 pub async fn run(
@@ -41,10 +48,18 @@ pub async fn run(
             .map_err(|error| StageError::new(error_ctx.clone(), error))?
     };
 
-    let client = Client::builder()
-        .timeout(provider.timeout())
-        .build()
-        .map_err(|err| StageError::new(error_ctx.clone(), GatewayError::Upstream(err)))?;
+    let is_streaming = is_streaming_body(&ctx);
+    let client = if is_streaming {
+        Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+    } else {
+        Client::builder()
+            .timeout(provider.timeout())
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+    }
+    .map_err(|err| StageError::new(error_ctx.clone(), GatewayError::Upstream(err)))?;
 
     let reqwest_method = if let Some(ref method) = ctx.upstream_method {
         reqwest::Method::from_bytes(method.as_bytes()).map_err(|err| {
@@ -62,10 +77,27 @@ pub async fn run(
         })?
     };
 
+    // 保存 URL 和方法的字符串形式（用于日志，因为后续会被 move）
+    let url_str = upstream_url.to_string();
+    let method_str = reqwest_method.as_str().to_string();
+
     let mut upstream_request = client.request(reqwest_method, upstream_url);
-    for (name, value) in ctx.headers.iter() {
-        if should_forward_header(name) {
+    // 应用适配器生成的上游请求头（API Key、Content-Type 等）
+    if let Some(ref adapter_headers) = ctx.upstream_headers {
+        for (name, value) in adapter_headers.iter() {
             upstream_request = upstream_request.header(name, value);
+        }
+    }
+    // 转发必需的客户端头（不再转发全量客户端头，避免 Cloudflare 误判）
+    for (name, value) in ctx.headers.iter() {
+        if name == "user-agent"
+            || name == "accept"
+            || name == "x-request-id"
+            || name == "x-trace-id"
+        {
+            if !ctx.upstream_headers.as_ref().map_or(false, |h| h.contains_key(name)) {
+                upstream_request = upstream_request.header(name, value);
+            }
         }
     }
 
@@ -76,6 +108,27 @@ pub async fn run(
     };
 
     let mut last_error = None;
+
+    // 调试日志：输出实际上游请求信息
+    {
+        let masked_key = ctx.selected_api_key.as_deref().map(|k| {
+            if k.len() > 8 {
+                format!("{}...{}", &k[..4], &k[k.len()-4..])
+            } else {
+                "***".to_string()
+            }
+        }).unwrap_or_default();
+        let body_preview = String::from_utf8_lossy(&ctx.request_body)
+            .chars().take(200).collect::<String>();
+        tracing::debug!(
+            url = %url_str,
+            method = %method_str,
+            api_key = %masked_key,
+            body_len = ctx.request_body.len(),
+            body_preview = %body_preview,
+            "转发上游请求"
+        );
+    }
 
     for attempt in 0..=max_retries {
         if attempt > 0 {
@@ -96,17 +149,19 @@ pub async fn run(
             )
         })?;
 
-        match request_clone.body(ctx.body.clone()).send().await {
+        match request_clone.body(ctx.request_body.clone()).send().await {
             Ok(response) => {
-                let _status = response.status();
+                let status = response.status();
                 let headers = response.headers().clone();
+                tracing::debug!(
+                    status = %status,
+                    attempt = attempt,
+                    "收到上游响应"
+                );
 
                 if is_sse_response(&headers) {
-                    let adapter_registry = ctx.adapter_registry.clone();
-                    let outbound_protocol = ctx.outbound_protocol.clone();
                     return handle_sse_response(
                         ctx, response, headers, provider, &stream_config,
-                        adapter_registry, outbound_protocol,
                     )
                     .await;
                 } else {
@@ -138,6 +193,27 @@ async fn handle_single_response(
         .await
         .map_err(|err| StageError::new(ctx.clone(), GatewayError::Upstream(err)))?;
 
+    // 上游返回错误时，输出实际发送的请求体（用于调试）
+    if status.as_u16() >= 400 {
+        let req_body_preview = String::from_utf8_lossy(&ctx.request_body)
+            .chars().take(1000).collect::<String>();
+        let masked_key = ctx.selected_api_key.as_deref().map(|k| {
+            if k.len() > 8 {
+                format!("{}...{}", &k[..4], &k[k.len()-4..])
+            } else {
+                "***".to_string()
+            }
+        }).unwrap_or_default();
+        tracing::warn!(
+            upstream_status = %status,
+            upstream_url = %ctx.upstream_url.as_deref().unwrap_or("(none)"),
+            api_key = %masked_key,
+            req_body = %req_body_preview,
+            resp_body_preview = %String::from_utf8_lossy(&body).chars().take(500).collect::<String>(),
+            "上游返回错误 — 实际发送的请求体如上"
+        );
+    }
+
     ctx.provider = Some(provider);
     ctx.upstream_status = Some(status);
     ctx.upstream_headers = Some(headers);
@@ -150,17 +226,18 @@ async fn handle_single_response(
 /// 架构：
 /// 1. 创建 shared state（bytes_sent / last_event_id）用于读取任务与主线程同步
 /// 2. 创建 mpsc channel 逐 chunk 推送数据
-/// 3. 后台任务读取上游 → 解析 SSE → 反向协议转换 → 更新 shared state → 推送 chunk
+/// 3. 后台任务读取上游 → SSE 解析 → 更新 shared state → 推送 chunk
 /// 4. 主线程从 channel 接收 → 构建 StreamBody → 返回响应
 /// 5. 断线重连时携带 Last-Event-ID
+///
+/// 注意：流式场景下不做协议转换（chunk 级别的增量数据无法用 transform_response 处理）。
+/// 同协议流转（inbound == outbound）直接透传；跨协议流式转发暂不支持转换。
 async fn handle_sse_response(
     mut ctx: RequestContext,
     response: reqwest::Response,
     headers: axum::http::HeaderMap,
     provider: crate::models::Provider,
     config: &StreamConfig,
-    adapter_registry: Arc<AdapterRegistry>,
-    outbound_protocol: Option<String>,
 ) -> Result<RequestContext, StageError> {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, GatewayError>>(256);
     let shared = Arc::new(RwLock::new(StreamSharedState::default()));
@@ -175,10 +252,6 @@ async fn handle_sse_response(
         let mut pinned_stream = std::pin::pin!(response_stream);
         let mut heartbeat = tokio::time::interval(stream_config.heartbeat_interval);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-        // 获取反向转换适配器（非 OpenAI 原生协议时需要）
-        let protocol = outbound_protocol.as_deref().unwrap_or("openai_response");
-        let converter = adapter_registry.get(protocol);
 
         loop {
             tokio::select! {
@@ -196,7 +269,6 @@ async fn handle_sse_response(
                             }
 
                             let mut output = Vec::new();
-                            let mut all_converted = true;
 
                             for event in &events {
                                 stream_state.record_event();
@@ -212,33 +284,8 @@ async fn handle_sse_response(
                                     return;
                                 }
 
-                                // 尝试对每个事件做反向协议转换
-                                if let Some(ref data) = event.data {
-                                    if let Some(ref adapter) = converter {
-                                        if let Ok(json_data) = serde_json::from_str::<serde_json::Value>(data) {
-                                            let upstream_resp = UpstreamResponse {
-                                                status: 200,
-                                                headers: axum::http::HeaderMap::new(),
-                                                body: json_data,
-                                            };
-                                            match adapter.transform_response(&upstream_resp).await {
-                                                Ok(converted) => {
-                                                    let mut new_event = event.clone();
-                                                    new_event.data = Some(serde_json::to_string(&converted).unwrap_or_default());
-                                                    output.extend_from_slice(new_event.serialize().as_bytes());
-                                                    continue;
-                                                }
-                                                Err(_) => {
-                                                    all_converted = false;
-                                                }
-                                            }
-                                        } else {
-                                            all_converted = false;
-                                        }
-                                    }
-                                }
-
-                                // 没有转换器或转换失败：使用原始事件序列化
+                                // 流式场景透传原始 SSE 事件，不做协议转换
+                                // （chunk 级增量数据无法用 transform_response 处理）
                                 output.extend_from_slice(event.serialize().as_bytes());
                             }
 
@@ -248,14 +295,7 @@ async fn handle_sse_response(
                                 state.bytes_sent += output.len() as u64;
                             }
 
-                            let payload = if all_converted && !output.is_empty() {
-                                Bytes::from(output)
-                            } else {
-                                // 有任何事件转换失败则回退到原始 bytes
-                                bytes
-                            };
-
-                            if tx.send(Ok(payload)).await.is_err() {
+                            if tx.send(Ok(Bytes::from(output))).await.is_err() {
                                 return;
                             }
                         }
