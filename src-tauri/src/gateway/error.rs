@@ -1,5 +1,5 @@
-use axum::response::IntoResponse;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -33,6 +33,9 @@ pub enum GatewayError {
 
     #[error("序列化错误: {0}")]
     Serialization(String),
+
+    #[error("未授权: {0}")]
+    Unauthorized(String),
 }
 
 impl From<crate::protocol::ProtocolError> for GatewayError {
@@ -46,6 +49,7 @@ impl GatewayError {
         match self {
             GatewayError::BadRequest(_) | GatewayError::Transform(_) => StatusCode::BAD_REQUEST,
             GatewayError::NotFound(_) => StatusCode::NOT_FOUND,
+            GatewayError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             GatewayError::Upstream(_) => StatusCode::BAD_GATEWAY,
             GatewayError::Timeout => StatusCode::GATEWAY_TIMEOUT,
             GatewayError::Database(_)
@@ -58,6 +62,7 @@ impl GatewayError {
         match self {
             GatewayError::BadRequest(_) => "bad_request",
             GatewayError::NotFound(_) => "not_found",
+            GatewayError::Unauthorized(_) => "unauthorized",
             GatewayError::Transform(_) => "transform_error",
             GatewayError::Upstream(_) => "upstream_error",
             GatewayError::Database(_) => "database_error",

@@ -208,6 +208,22 @@ pub struct RequestContext {
     pub last_event_id: Option<String>,
     /// 适配器注册表（用于协议转换）
     pub adapter_registry: Arc<crate::protocol::AdapterRegistry>,
+    /// 远程模型名覆盖（来自 model_mapping_channels 的 selected_models）
+    pub remote_model_override: Option<String>,
+    /// 认证通过的 Gateway Key 名称（用于日志记录）
+    pub auth_key_name: Option<String>,
+    /// 渠道映射选中的上游 API Key
+    pub selected_api_key: Option<String>,
+    /// 适配器指定的上游 URL（覆盖原始请求 URI）
+    pub upstream_url: Option<String>,
+    /// 适配器指定的上游 HTTP 方法（覆盖原始请求方法）
+    pub upstream_method: Option<String>,
+    /// 失败回退：已尝试失败的上游 Key 列表
+    pub failed_keys: Vec<String>,
+    /// 失败回退：已尝试失败的 Provider ID 列表
+    pub failed_providers: Vec<String>,
+    /// 模型池映射中可用的渠道列表（provider_id），用于失败回退
+    pub channels_available: Vec<String>,
 }
 
 impl Clone for RequestContext {
@@ -236,6 +252,14 @@ impl Clone for RequestContext {
             response_bytes_sent: self.response_bytes_sent,
             last_event_id: self.last_event_id.clone(),
             adapter_registry: self.adapter_registry.clone(),
+            remote_model_override: self.remote_model_override.clone(),
+            auth_key_name: self.auth_key_name.clone(),
+            selected_api_key: self.selected_api_key.clone(),
+            upstream_url: self.upstream_url.clone(),
+            upstream_method: self.upstream_method.clone(),
+            failed_keys: self.failed_keys.clone(),
+            failed_providers: self.failed_providers.clone(),
+            channels_available: self.channels_available.clone(),
         }
     }
 }
@@ -292,6 +316,14 @@ impl RequestContext {
             response_bytes_sent: 0,
             last_event_id: None,
             adapter_registry: Arc::new(crate::protocol::AdapterRegistry::new()),
+            remote_model_override: None,
+            auth_key_name: None,
+            selected_api_key: None,
+            upstream_url: None,
+            upstream_method: None,
+            failed_keys: Vec::new(),
+            failed_providers: Vec::new(),
+            channels_available: Vec::new(),
         }
     }
 

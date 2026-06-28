@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use axum::body::{to_bytes, Body};
-use axum::http::{Method, Uri};
 use axum::http::request::Parts;
+use axum::http::{Method, Uri};
 use uuid::Uuid;
 
 use crate::gateway::context::RequestContext;
@@ -25,14 +25,12 @@ pub fn initialize(parts: Parts) -> RequestContext {
 
 pub async fn read_body(ctx: RequestContext, body: Body) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
-    let bytes = to_bytes(body, REQUEST_BODY_LIMIT)
-        .await
-        .map_err(|err| {
-            StageError::new(
-                error_ctx,
-                GatewayError::BadRequest(format!("读取请求体失败: {err}")),
-            )
-        })?;
+    let bytes = to_bytes(body, REQUEST_BODY_LIMIT).await.map_err(|err| {
+        StageError::new(
+            error_ctx,
+            GatewayError::BadRequest(format!("读取请求体失败: {err}")),
+        )
+    })?;
 
     let mut ctx = ctx;
     ctx.body = bytes;

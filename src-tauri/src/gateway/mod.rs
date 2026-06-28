@@ -11,14 +11,10 @@ use axum::http::Request;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
-use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
 
-use crate::persistence::ModelMappingRepo;
-
-pub use context::{load_gateway_context, GatewayContext, RequestContext, RouteManager};
-pub use error::GatewayError;
+pub use context::{load_gateway_context, GatewayContext, RequestContext, RouteManager};pub use error::GatewayError;
 pub use pipeline::{GatewayPipeline, StageError};
 
 pub struct GatewayServerHandle {
@@ -46,8 +42,8 @@ pub async fn spawn_gateway_server(
     let app = build_router(context);
 
     let join_handle = tokio::spawn(async move {
-        let server = axum::serve(listener, app.into_make_service())
-            .with_graceful_shutdown(async move {
+        let server =
+            axum::serve(listener, app.into_make_service()).with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
             });
 
@@ -67,7 +63,6 @@ fn build_router(context: GatewayContext) -> Router {
 
     Router::new()
         .route("/health", get(health_handler))
-        .route("/v1/models", get(models_handler))
         .fallback(proxy_handler)
         .layer(axum::middleware::from_fn_with_state(
             rate_limit_state,
@@ -81,30 +76,6 @@ async fn health_handler() -> impl IntoResponse {
         "status": "ok",
         "service": "silk-gateway"
     }))
-}
-
-/// 返回模型池中的所有启用的模型列表（OpenAI 兼容格式）
-async fn models_handler(State(context): State<GatewayContext>) -> impl IntoResponse {
-    let pool = &context.pool;
-    match ModelMappingRepo::find_enabled(pool).await {
-        Ok(mappings) => {
-            let data: Vec<serde_json::Value> = mappings
-                .iter()
-                .map(|m| {
-                    json!({
-                        "id": m.model_name,
-                        "object": "model",
-                        "created": m.created_at.and_utc().timestamp(),
-                        "owned_by": if m.vendor.is_empty() { "silk" } else { &m.vendor },
-                    })
-                })
-                .collect();
-            axum::Json(json!({ "object": "list", "data": data }))
-        }
-        Err(_) => {
-            axum::Json(json!({ "object": "list", "data": [] }))
-        }
-    }
 }
 
 async fn proxy_handler(State(context): State<GatewayContext>, req: Request<Body>) -> Response {
@@ -167,6 +138,28 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
     match crate::persistence::LogRepo::insert_batch(pool, &logs).await {
         Ok(count) => {
             tracing::debug!(count, "批量写入日志成功");
+        }
+        Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("787") => {
+            // FOREIGN KEY 约束失败：逐个写入，遇到 FK 错误时将 provider_id 置空重试
+            tracing::warn!("日志 FOREIGN KEY 约束失败，逐个降级写入");
+            for mut log in logs {
+                let mut retries = 0;
+                loop {
+                    match crate::persistence::LogRepo::insert(pool, &log).await {
+                        Ok(_) => break,
+                        Err(sqlx::Error::Database(ref e))
+                            if e.code().as_deref() == Some("787") && retries < 1 =>
+                        {
+                            log.provider_id = None;
+                            retries += 1;
+                        }
+                        Err(err) => {
+                            tracing::warn!(%err, "单条日志写入失败");
+                            break;
+                        }
+                    }
+                }
+            }
         }
         Err(err) => {
             tracing::warn!(%err, "批量写入日志失败");

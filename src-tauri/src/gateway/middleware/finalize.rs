@@ -14,9 +14,10 @@ pub fn success(mut ctx: RequestContext) -> Response {
     }
 
     // 非流式：从上下文构建响应
-    let status = ctx.final_status.or(ctx.upstream_status).unwrap_or(
-        axum::http::StatusCode::OK,
-    );
+    let status = ctx
+        .final_status
+        .or(ctx.upstream_status)
+        .unwrap_or(axum::http::StatusCode::OK);
     let headers = ctx.upstream_headers.clone().unwrap_or_default();
     let body = ctx.upstream_body.clone().unwrap_or_default();
 

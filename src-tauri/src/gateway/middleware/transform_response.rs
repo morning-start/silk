@@ -45,17 +45,12 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
     let final_body = match outbound_protocol.as_str() {
         "openai_response" => hub_body,
-        _ => convert_hub_to_client(&hub_body, &outbound_protocol).map_err(|e| {
-            StageError::new(ctx.clone(), GatewayError::Transform(e))
-        })?,
+        _ => convert_hub_to_client(&hub_body, &outbound_protocol)
+            .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e)))?,
     };
 
-    let response_bytes = serde_json::to_vec(&final_body).map_err(|e| {
-        StageError::new(
-            ctx.clone(),
-            GatewayError::Serialization(e.to_string()),
-        )
-    })?;
+    let response_bytes = serde_json::to_vec(&final_body)
+        .map_err(|e| StageError::new(ctx.clone(), GatewayError::Serialization(e.to_string())))?;
 
     ctx.upstream_body = Some(bytes::Bytes::from(response_bytes));
     ctx.upstream_status = Some(axum::http::StatusCode::OK);
@@ -76,16 +71,14 @@ fn convert_hub_to_client(
             let chat_resp = ChatCompletionsOpenAiResponse::from_open_responses(openai_resp, None)
                 .map_err(|e| format!("转换到 Chat 格式失败: {e}"))?
                 .value;
-            serde_json::to_value(chat_resp)
-                .map_err(|e| format!("序列化 Chat 响应失败: {e}"))
+            serde_json::to_value(chat_resp).map_err(|e| format!("序列化 Chat 响应失败: {e}"))
         }
         "claude_messages" => {
             use linguafranca::anthropic::response::AnthropicResponse;
             let anthropic_resp = AnthropicResponse::from_open_responses(openai_resp, None)
                 .map_err(|e| format!("转换到 Claude 格式失败: {e}"))?
                 .value;
-            serde_json::to_value(anthropic_resp)
-                .map_err(|e| format!("序列化 Claude 响应失败: {e}"))
+            serde_json::to_value(anthropic_resp).map_err(|e| format!("序列化 Claude 响应失败: {e}"))
         }
         _ => Ok(hub_body.clone()),
     }
