@@ -4,7 +4,11 @@ use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
 use crate::persistence::GatewayKeyRepo;
 
-/// 认证中间件：对所有 /v1/* 请求校验 Authorization: Bearer <sk-gw-xxx>
+/// 认证中间件：对所有 /v1/* 请求校验网关 Key
+///
+/// 支持的认证方式：
+/// - Authorization: Bearer <sk-gw-xxx>  (OpenAI 风格)
+/// - x-api-key: <sk-gw-xxx>              (Anthropic 风格)
 pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
 
@@ -13,16 +17,29 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         return Ok(ctx);
     }
 
-    // 从 Authorization header 提取 Bearer token
-    let auth_header = ctx
+    // 提取 token：优先 Authorization: Bearer，其次 x-api-key
+    let token = ctx
         .headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_string());
+        .map(|s| s.trim().to_string())
+        .and_then(|val| {
+            if val.starts_with("Bearer ") {
+                Some(val[7..].trim().to_string())
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            ctx.headers
+                .get("x-api-key")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.trim().to_string())
+        });
 
-    let bearer_token = match auth_header {
-        Some(ref val) if val.starts_with("Bearer ") => val[7..].trim().to_string(),
-        _ => {
+    let bearer_token = match token {
+        Some(t) => t,
+        None => {
             return Err(StageError::new(
                 error_ctx,
                 GatewayError::Unauthorized("缺少 Key".to_string()),

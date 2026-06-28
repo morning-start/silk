@@ -12,7 +12,7 @@ use crate::gateway::middleware::stream_response::{
     self, is_sse_response, SseParser, StreamConfig, StreamResponse, StreamState,
 };
 use crate::gateway::pipeline::StageError;
-use super::{build_upstream_url, should_forward_header};
+use super::build_upstream_url;
 
 fn is_streaming_body(ctx: &RequestContext) -> bool {
     let body_str = String::from_utf8_lossy(&ctx.request_body);

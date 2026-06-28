@@ -151,9 +151,9 @@ pub async fn run(
                                         ctx.remote_model_override = Some(remote_model.clone());
                                     }
 
-                                    // 检测入站协议（从请求体 JSON 结构推断）
+                                    // 检测入站协议（从请求路径 + 请求体 JSON 结构推断）
                                     // outbound 根据 Provider 的 protocols 决定
-                                    let inbound_adapter = detect_inbound_protocol(&json);
+                                    let inbound_adapter = detect_inbound_protocol(&ctx.path, &json);
                                     let outbound_adapter = resolve_protocol_adapter(&provider);
                                     ctx.provider = Some(provider);
                                     ctx.inbound_protocol = Some(inbound_adapter.to_string());
@@ -274,7 +274,7 @@ pub async fn try_next_channel(
     }
 
     // 协议推断（使用 client_body 避免被覆盖干扰）
-    let inbound_adapter = detect_inbound_protocol(&body_json);
+    let inbound_adapter = detect_inbound_protocol(&ctx.path, &body_json);
     let outbound_adapter = resolve_protocol_adapter(&provider);
     ctx.provider = Some(provider);
     ctx.inbound_protocol = Some(inbound_adapter.to_string());
@@ -286,13 +286,20 @@ pub async fn try_next_channel(
     Some(ctx)
 }
 
-/// 从请求体中检测客户端使用的入站协议
+/// 从请求路径 + 请求体中检测客户端使用的入站协议
 ///
-/// 检测策略（按 JSON 顶层键）：
-/// - 有 "input" 字段 → "openai_response"
-/// - 有 "messages" 字段 → "openai_chat"（兼容 Claude Messages，后者也有 messages）
-/// - 其他 → 默认 "openai_chat"
-fn detect_inbound_protocol(body: &serde_json::Value) -> &'static str {
+/// 检测优先级：
+/// 1. 路径匹配（优先）：/v1/chat/completions → openai_chat,
+///    /v1/responses → openai_response, /v1/messages → claude_messages
+/// 2. 请求体 JSON 顶层键（兜底）：有 "input" → openai_response,
+///    有 "messages" → openai_chat, 其他 → openai_chat
+fn detect_inbound_protocol(path: &str, body: &serde_json::Value) -> &'static str {
+    match path {
+        "/v1/chat/completions" => return "openai_chat",
+        "/v1/responses" => return "openai_response",
+        "/v1/messages" => return "claude_messages",
+        _ => {}
+    }
     if body.get("input").is_some() {
         "openai_response"
     } else if body.get("messages").is_some() {
