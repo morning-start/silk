@@ -79,28 +79,45 @@ pub struct ProviderKeyEntry {
 }
 
 impl LoadBalancedItem for ProviderKeyEntry {
-    fn weight(&self) -> i64 { self.weight.max(1) }
-    fn enabled(&self) -> bool { self.enabled }
+    fn weight(&self) -> i64 {
+        self.weight.max(1)
+    }
+    fn enabled(&self) -> bool {
+        self.enabled
+    }
 }
 
-fn default_weight() -> i64 { 1 }
+fn default_weight() -> i64 {
+    1
+}
 
 impl Provider {
-    /// 按负载均衡策略选择一个 API Key 并解密
-    pub fn decrypted_api_key(
-        &self,
-        master_key: &[u8; 32],
-    ) -> Result<String, crate::crypto::CryptoError> {
+    /// 按负载均衡策略选择一个 API Key。
+    pub fn select_api_key(&self) -> Result<String, crate::crypto::CryptoError> {
         let entries: Vec<ProviderKeyEntry> = serde_json::from_str(&self.keys).unwrap_or_default();
         let strategy = LoadBalanceStrategy::from_str(&self.key_strategy);
         let balancer = LoadBalancer::new(entries, strategy);
-        let selected = balancer.select().ok_or(crate::crypto::CryptoError::InvalidFormat)?;
+        let selected = balancer
+            .select()
+            .ok_or(crate::crypto::CryptoError::InvalidFormat)?;
 
         if selected.enabled && !selected.value.is_empty() {
-            crate::crypto::decrypt_api_key(&selected.value, master_key)
+            // 明文存储，直接返回（旧加密数据视为无效，需用户重新填写）
+            if selected.value.starts_with('{') && selected.value.contains("\"ciphertext\"") {
+                return Err(crate::crypto::CryptoError::InvalidFormat);
+            }
+            Ok(selected.value.clone())
         } else {
             Err(crate::crypto::CryptoError::InvalidFormat)
         }
+    }
+
+    /// 按负载均衡策略选择一个 API Key（明文存储，直接返回）
+    pub fn decrypted_api_key(
+        &self,
+        _master_key: &[u8; 32],
+    ) -> Result<String, crate::crypto::CryptoError> {
+        self.select_api_key()
     }
 
     /// 获取超时时间（秒）
@@ -137,9 +154,52 @@ impl Provider {
     pub fn normalize_api_base_url(url: &str) -> String {
         let trimmed = url.trim_end_matches('/');
         if trimmed.ends_with("/v1") {
-            trimmed[..trimmed.len() - 3].trim_end_matches('/').to_string()
+            trimmed[..trimmed.len() - 3]
+                .trim_end_matches('/')
+                .to_string()
         } else {
             trimmed.to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_provider(keys: &str, strategy: &str) -> Provider {
+        Provider {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            provider_type: "openai".to_string(),
+            protocols: r#"["chat"]"#.to_string(),
+            models: r#"["gpt-4"]"#.to_string(),
+            keys: keys.to_string(),
+            key_strategy: strategy.to_string(),
+            api_base_url: "https://api.openai.com".to_string(),
+            proxy_url: None,
+            timeout_seconds: 30,
+            max_retries: 3,
+            status: "enabled".to_string(),
+            health_status: None,
+            last_health_check_at: None,
+            metadata_json: None,
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        }
+    }
+
+    #[test]
+    fn select_api_key_fails_when_all_keys_disabled() {
+        let provider = make_provider(
+            r#"[{"name":"主密钥","value":"k1","enabled":false,"weight":1}]"#,
+            "round_robin",
+        );
+
+        let err = provider
+            .select_api_key()
+            .expect_err("all disabled keys should fail selection");
+
+        assert!(matches!(err, crate::crypto::CryptoError::InvalidFormat));
     }
 }

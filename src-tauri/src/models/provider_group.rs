@@ -25,8 +25,12 @@ pub struct GroupMember {
 }
 
 impl LoadBalancedItem for GroupMember {
-    fn weight(&self) -> i64 { self.weight }
-    fn enabled(&self) -> bool { self.enabled != 0 }
+    fn weight(&self) -> i64 {
+        self.weight
+    }
+    fn enabled(&self) -> bool {
+        self.enabled != 0
+    }
 }
 
 /// 负载均衡策略
