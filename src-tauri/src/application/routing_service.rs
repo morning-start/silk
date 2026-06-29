@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::error::{require_db, require_found, ServiceError};
 use crate::models::{NewRoutingRule, RoutingRule, UpdateRoutingRule};
 use crate::persistence::RoutingRuleRepo;
 use crate::AppState;
@@ -8,10 +9,12 @@ use crate::AppState;
 pub struct RoutingRuleResponse {
     pub id: String,
     pub name: String,
+    pub match_host: Option<String>,
     pub match_path: String,
     pub match_method: String,
     pub match_content_type: Option<String>,
     pub target_provider_id: String,
+    pub target_group_id: Option<String>,
     pub inbound_protocol: Option<String>,
     pub outbound_protocol: Option<String>,
     pub protocol_conversion: bool,
@@ -25,6 +28,7 @@ pub struct RoutingRuleResponse {
 #[derive(Debug, Deserialize)]
 pub struct CreateRoutingRulePayload {
     pub name: String,
+    pub match_host: Option<String>,
     pub match_path: String,
     pub match_method: Option<String>,
     pub match_content_type: Option<String>,
@@ -41,6 +45,7 @@ pub struct CreateRoutingRulePayload {
 #[derive(Debug, Deserialize)]
 pub struct UpdateRoutingRulePayload {
     pub name: Option<String>,
+    pub match_host: Option<String>,
     pub match_path: Option<String>,
     pub match_method: Option<String>,
     pub match_content_type: Option<String>,
@@ -54,21 +59,16 @@ pub struct UpdateRoutingRulePayload {
     pub enabled: Option<bool>,
 }
 
-pub async fn list() -> Result<Vec<RoutingRuleResponse>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let rules = RoutingRuleRepo::find_all(pool)
-        .await
-        .map_err(|e| format!("查询路由规则失败: {e}"))?;
+pub async fn list() -> Result<Vec<RoutingRuleResponse>, ServiceError> {
+    let pool = require_db()?;
+    let rules = RoutingRuleRepo::find_all(pool).await?;
 
     Ok(rules.into_iter().map(RoutingRuleResponse::from).collect())
 }
 
-pub async fn get(id: String) -> Result<RoutingRuleResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let rule = RoutingRuleRepo::find_by_id(pool, &id)
-        .await
-        .map_err(|e| format!("查询路由规则失败: {e}"))?
-        .ok_or("路由规则不存在")?;
+pub async fn get(id: String) -> Result<RoutingRuleResponse, ServiceError> {
+    let pool = require_db()?;
+    let rule = require_found(RoutingRuleRepo::find_by_id(pool, &id).await?, "路由规则")?;
 
     Ok(RoutingRuleResponse::from(rule))
 }
@@ -76,11 +76,12 @@ pub async fn get(id: String) -> Result<RoutingRuleResponse, String> {
 pub async fn create(
     state: &AppState,
     payload: CreateRoutingRulePayload,
-) -> Result<RoutingRuleResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+) -> Result<RoutingRuleResponse, ServiceError> {
+    let pool = require_db()?;
 
     let new = NewRoutingRule {
         name: payload.name,
+        match_host: payload.match_host,
         match_path: payload.match_path,
         match_method: payload.match_method,
         match_content_type: payload.match_content_type,
@@ -95,18 +96,9 @@ pub async fn create(
         ..Default::default()
     };
 
-    let rule = RoutingRuleRepo::create(pool, &new)
-        .await
-        .map_err(|e| format!("创建路由规则失败: {e}"))?;
+    let rule = RoutingRuleRepo::create(pool, &new).await?;
 
-    state
-        .gateway
-        .read()
-        .await
-        .route_manager
-        .reload(pool)
-        .await
-        .ok();
+    state.reload_routes(pool).await;
 
     Ok(RoutingRuleResponse::from(rule))
 }
@@ -115,11 +107,12 @@ pub async fn update(
     state: &AppState,
     id: String,
     payload: UpdateRoutingRulePayload,
-) -> Result<RoutingRuleResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+) -> Result<RoutingRuleResponse, ServiceError> {
+    let pool = require_db()?;
 
     let update = UpdateRoutingRule {
         name: payload.name,
+        match_host: payload.match_host,
         match_path: payload.match_path,
         match_method: payload.match_method,
         match_content_type: payload.match_content_type,
@@ -134,38 +127,19 @@ pub async fn update(
         ..Default::default()
     };
 
-    let rule = RoutingRuleRepo::update(pool, &id, &update)
-        .await
-        .map_err(|e| format!("更新路由规则失败: {e}"))?
-        .ok_or("路由规则不存在")?;
+    let rule = require_found(RoutingRuleRepo::update(pool, &id, &update).await?, "路由规则")?;
 
-    state
-        .gateway
-        .read()
-        .await
-        .route_manager
-        .reload(pool)
-        .await
-        .ok();
+    state.reload_routes(pool).await;
 
     Ok(RoutingRuleResponse::from(rule))
 }
 
-pub async fn delete(state: &AppState, id: String) -> Result<bool, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let deleted = RoutingRuleRepo::delete(pool, &id)
-        .await
-        .map_err(|e| format!("删除路由规则失败: {e}"))?;
+pub async fn delete(state: &AppState, id: String) -> Result<bool, ServiceError> {
+    let pool = require_db()?;
+    let deleted = RoutingRuleRepo::delete(pool, &id).await?;
 
     if deleted {
-        state
-            .gateway
-            .read()
-            .await
-            .route_manager
-            .reload(pool)
-            .await
-            .ok();
+        state.reload_routes(pool).await;
     }
 
     Ok(deleted)
@@ -176,10 +150,12 @@ impl From<RoutingRule> for RoutingRuleResponse {
         Self {
             id: r.id,
             name: r.name,
+            match_host: r.match_host,
             match_path: r.match_path,
             match_method: r.match_method,
             match_content_type: r.match_content_type,
             target_provider_id: r.target_provider_id,
+            target_group_id: r.target_group_id,
             inbound_protocol: r.inbound_protocol,
             outbound_protocol: r.outbound_protocol,
             protocol_conversion: r.protocol_conversion != 0,

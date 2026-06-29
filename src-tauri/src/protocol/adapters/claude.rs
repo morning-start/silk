@@ -89,7 +89,6 @@ mod tests {
         Provider {
             id: "test".to_string(),
             name: "Test".to_string(),
-            provider_type: "anthropic".to_string(),
             protocols: r#"["message"]"#.to_string(),
             models: r#"["claude-3-opus"]"#.to_string(),
             keys: r#"[{"name":"主密钥","value":"encrypted","enabled":true,"weight":1}]"#

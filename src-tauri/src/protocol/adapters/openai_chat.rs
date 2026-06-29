@@ -90,7 +90,6 @@ mod tests {
         Provider {
             id: "test".to_string(),
             name: "Test".to_string(),
-            provider_type: "openai".to_string(),
             protocols: r#"["chat"]"#.to_string(),
             models: r#"["gpt-4"]"#.to_string(),
             keys: r#"[{"name":"主密钥","value":"encrypted","enabled":true,"weight":1}]"#

@@ -79,7 +79,6 @@ mod tests {
         Provider {
             id: "test".to_string(),
             name: "Test".to_string(),
-            provider_type: "openai".to_string(),
             protocols: r#"["response"]"#.to_string(),
             models: r#"["gpt-4o"]"#.to_string(),
             keys: r#"[{"name":"主密钥","value":"encrypted","enabled":true,"weight":1}]"#

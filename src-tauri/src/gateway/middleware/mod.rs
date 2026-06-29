@@ -4,7 +4,6 @@ pub mod extract;
 pub mod finalize;
 
 pub mod persist_log;
-pub mod rate_limit;
 pub mod resolve_route;
 pub mod select_channel;
 pub mod stream_response;
