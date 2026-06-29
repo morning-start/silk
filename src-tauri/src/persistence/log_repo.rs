@@ -20,13 +20,13 @@ impl LogRepo {
         sqlx::query_as::<_, RequestLog>(
             r#"
             INSERT INTO request_logs (id, request_id, method, path, route_id, inbound_protocol, outbound_protocol,
-                                      request_headers, request_body, response_status, status_code,
+                                      request_headers, request_body, status_code,
                                       response_headers, response_body, duration_ms, provider_id,
                                       error_message, error_code, model_used, retry_count, stream_enabled,
                                       cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output,
                                       cost, auth_key_name)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+                    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
             RETURNING *
             "#,
         )
@@ -39,7 +39,6 @@ impl LogRepo {
         .bind(log.outbound_protocol.as_deref())
         .bind(log.request_headers.as_deref())
         .bind(log.request_body.as_deref())
-        .bind(log.response_status)
         .bind(log.status_code)
         .bind(log.response_headers.as_deref())
         .bind(log.response_body.as_deref())
@@ -81,13 +80,13 @@ impl LogRepo {
             let result = sqlx::query(
                 r#"
                 INSERT INTO request_logs (id, request_id, method, path, route_id, inbound_protocol, outbound_protocol,
-                                          request_headers, request_body, response_status, status_code,
+                                          request_headers, request_body, status_code,
                                           response_headers, response_body, duration_ms, provider_id,
                                           error_message, error_code, model_used, retry_count, stream_enabled,
                                           cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output,
                                           cost, auth_key_name)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                            $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+                            $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
                 "#,
             )
             .bind(id)
@@ -99,7 +98,6 @@ impl LogRepo {
             .bind(log.outbound_protocol.as_deref())
             .bind(log.request_headers.as_deref())
             .bind(log.request_body.as_deref())
-            .bind(log.response_status)
             .bind(log.status_code)
             .bind(log.response_headers.as_deref())
             .bind(log.response_body.as_deref())

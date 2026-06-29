@@ -7,7 +7,6 @@ use crate::load_balancer::{LoadBalanceStrategy, LoadBalancedItem, LoadBalancer};
 pub struct Provider {
     pub id: String,
     pub name: String,
-    pub provider_type: String,
     /// 支持的接口协议列表（JSON 数组），如 ["chat","response","message"]
     pub protocols: String,
     /// 模型列表（JSON 数组），如 ["gpt-4o","gpt-3.5-turbo"]
@@ -92,9 +91,14 @@ fn default_weight() -> i64 {
 }
 
 impl Provider {
+    /// 解析 keys JSON 字段为 ProviderKeyEntry 列表
+    pub fn keys_vec(&self) -> Vec<ProviderKeyEntry> {
+        serde_json::from_str(&self.keys).unwrap_or_default()
+    }
+
     /// 按负载均衡策略选择一个 API Key。
     pub fn select_api_key(&self) -> Result<String, crate::crypto::CryptoError> {
-        let entries: Vec<ProviderKeyEntry> = serde_json::from_str(&self.keys).unwrap_or_default();
+        let entries = self.keys_vec();
         let strategy = LoadBalanceStrategy::from_str(&self.key_strategy);
         let balancer = LoadBalancer::new(entries, strategy);
         let selected = balancer
@@ -156,7 +160,6 @@ mod tests {
         Provider {
             id: "test".to_string(),
             name: "Test".to_string(),
-            provider_type: "openai".to_string(),
             protocols: r#"["chat"]"#.to_string(),
             models: r#"["gpt-4"]"#.to_string(),
             keys: keys.to_string(),

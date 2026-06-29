@@ -6,7 +6,6 @@ use sqlx::FromRow;
 pub struct ModelMapping {
     pub id: String,
     pub model_name: String,
-    pub provider_group_id: Option<String>,
     pub max_input_tokens: Option<i64>,
     pub max_context_tokens: Option<i64>,
     pub max_output_tokens: Option<i64>,

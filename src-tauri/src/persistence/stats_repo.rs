@@ -14,7 +14,8 @@ impl StatsRepo {
         let row = sqlx::query(
             r#"
             SELECT COUNT(*) as count FROM request_logs
-            WHERE date(timestamp) = date('now')
+            WHERE timestamp >= datetime('now', 'start of day')
+              AND timestamp < datetime('now', 'start of day', '+1 day')
             "#,
         )
         .fetch_one(pool)
@@ -27,7 +28,8 @@ impl StatsRepo {
         let row = sqlx::query(
             r#"
             SELECT COUNT(*) as count FROM request_logs
-            WHERE date(timestamp) = date('now')
+            WHERE timestamp >= datetime('now', 'start of day')
+              AND timestamp < datetime('now', 'start of day', '+1 day')
               AND status_code >= 200 AND status_code < 300
             "#,
         )
@@ -41,7 +43,8 @@ impl StatsRepo {
         let row = sqlx::query(
             r#"
             SELECT AVG(duration_ms) as avg_duration FROM request_logs
-            WHERE date(timestamp) = date('now')
+            WHERE timestamp >= datetime('now', 'start of day')
+              AND timestamp < datetime('now', 'start of day', '+1 day')
               AND duration_ms IS NOT NULL
             "#,
         )
@@ -55,7 +58,8 @@ impl StatsRepo {
         let row = sqlx::query(
             r#"
             SELECT COALESCE(SUM(tokens_input + tokens_output), 0) as total FROM request_logs
-            WHERE date(timestamp) = date('now')
+            WHERE timestamp >= datetime('now', 'start of day')
+              AND timestamp < datetime('now', 'start of day', '+1 day')
             "#,
         )
         .fetch_one(pool)
@@ -68,7 +72,8 @@ impl StatsRepo {
         let row = sqlx::query(
             r#"
             SELECT COUNT(DISTINCT provider_id) as count FROM request_logs
-            WHERE date(timestamp) = date('now')
+            WHERE timestamp >= datetime('now', 'start of day')
+              AND timestamp < datetime('now', 'start of day', '+1 day')
               AND provider_id IS NOT NULL
             "#,
         )
@@ -90,7 +95,8 @@ impl StatsRepo {
         let row = sqlx::query(
             r#"
             SELECT COUNT(*) as count FROM request_logs
-            WHERE date(timestamp) = date('now', '-1 day')
+            WHERE timestamp >= datetime('now', '-1 day', 'start of day')
+              AND timestamp < datetime('now', 'start of day')
             "#,
         )
         .fetch_one(pool)
