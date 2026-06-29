@@ -12,7 +12,6 @@ impl GatewaySettingsRepo {
             bind_host: "127.0.0.1".to_string(),
             bind_port: 2013,
             allow_remote: 0,
-            auth_token_hash: None,
             log_retention_days: 30,
             default_provider_id: None,
             default_route_id: None,
@@ -74,14 +73,13 @@ impl GatewaySettingsRepo {
             SET bind_host = COALESCE($2, bind_host),
                 bind_port = COALESCE($3, bind_port),
                 allow_remote = COALESCE($4, allow_remote),
-                auth_token_hash = COALESCE($5, auth_token_hash),
-                log_retention_days = COALESCE($6, log_retention_days),
-                default_provider_id = COALESCE($7, default_provider_id),
-                default_route_id = COALESCE($8, default_route_id),
-                rate_limit_enabled = COALESCE($9, rate_limit_enabled),
-                rate_limit_max_requests_per_minute = COALESCE($10, rate_limit_max_requests_per_minute),
-                rate_limit_max_tokens_per_minute = COALESCE($11, rate_limit_max_tokens_per_minute),
-                updated_at = $12
+                log_retention_days = COALESCE($5, log_retention_days),
+                default_provider_id = COALESCE($6, default_provider_id),
+                default_route_id = COALESCE($7, default_route_id),
+                rate_limit_enabled = COALESCE($8, rate_limit_enabled),
+                rate_limit_max_requests_per_minute = COALESCE($9, rate_limit_max_requests_per_minute),
+                rate_limit_max_tokens_per_minute = COALESCE($10, rate_limit_max_tokens_per_minute),
+                updated_at = $11
             WHERE id = $1
             RETURNING *
             "#,
@@ -90,7 +88,6 @@ impl GatewaySettingsRepo {
         .bind(update.bind_host.as_deref())
         .bind(update.bind_port)
         .bind(allow_remote)
-        .bind(update.auth_token_hash.as_deref())
         .bind(update.log_retention_days)
         .bind(update.default_provider_id.as_deref())
         .bind(update.default_route_id.as_deref())

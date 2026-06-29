@@ -24,19 +24,18 @@ impl ModelMappingRepo {
         let mapping = sqlx::query_as::<_, ModelMapping>(
             r#"
             INSERT INTO model_mappings (
-                id, model_name, provider_group_id,
+                id, model_name,
                 max_input_tokens, max_context_tokens, max_output_tokens,
                 input_price_per_1m, output_price_per_1m,
                 capabilities, description, vendor, knowledge_cutoff, model_family, reference_url,
                 strategy, enabled, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING *
             "#,
         )
         .bind(&id)
         .bind(new.model_name.as_str())
-        .bind(None::<String>) // provider_group_id: always NULL for new records
         .bind(new.max_input_tokens)
         .bind(new.max_context_tokens)
         .bind(new.max_output_tokens)
@@ -130,23 +129,22 @@ impl ModelMappingRepo {
             r#"
             UPDATE model_mappings
             SET model_name = COALESCE($2, model_name),
-                max_input_tokens = COALESCE($4, max_input_tokens),
-                max_context_tokens = COALESCE($5, max_context_tokens),
-                max_output_tokens = COALESCE($6, max_output_tokens),
-                input_price_per_1m = COALESCE($7, input_price_per_1m),
-                output_price_per_1m = COALESCE($8, output_price_per_1m),
-                capabilities = COALESCE($9, capabilities),
-                description = COALESCE($10, description),
-                strategy = COALESCE($15, strategy),
-                enabled = COALESCE($16, enabled),
-                updated_at = $17
+                max_input_tokens = COALESCE($3, max_input_tokens),
+                max_context_tokens = COALESCE($4, max_context_tokens),
+                max_output_tokens = COALESCE($5, max_output_tokens),
+                input_price_per_1m = COALESCE($6, input_price_per_1m),
+                output_price_per_1m = COALESCE($7, output_price_per_1m),
+                capabilities = COALESCE($8, capabilities),
+                description = COALESCE($9, description),
+                strategy = COALESCE($14, strategy),
+                enabled = COALESCE($15, enabled),
+                updated_at = $16
             WHERE id = $1
             RETURNING *
             "#,
         )
         .bind(id)
         .bind(update.model_name.as_deref())
-        .bind(None::<String>) // provider_group_id: $3, always NULL
         .bind(update.max_input_tokens)
         .bind(update.max_context_tokens)
         .bind(update.max_output_tokens)
@@ -154,10 +152,10 @@ impl ModelMappingRepo {
         .bind(update.output_price_per_1m)
         .bind(capabilities.as_deref())
         .bind(update.description.as_deref())
-        .bind("") // vendor: $11
-        .bind(None::<String>) // knowledge_cutoff: $12
-        .bind("") // model_family: $13
-        .bind(None::<String>) // reference_url: $14
+        .bind("") // vendor: $10
+        .bind(None::<String>) // knowledge_cutoff: $11
+        .bind("") // model_family: $12
+        .bind(None::<String>) // reference_url: $13
         .bind(update.strategy.as_deref())
         .bind(enabled)
         .bind(now)

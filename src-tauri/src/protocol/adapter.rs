@@ -32,12 +32,6 @@ pub enum ProtocolError {
     Transform(String),
 }
 
-impl From<ProtocolError> for crate::error::AppError {
-    fn from(err: ProtocolError) -> Self {
-        crate::error::AppError::Protocol(err.to_string())
-    }
-}
-
 impl From<serde_json::Error> for ProtocolError {
     fn from(err: serde_json::Error) -> Self {
         ProtocolError::SerializationError(err.to_string())
