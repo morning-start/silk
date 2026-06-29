@@ -60,9 +60,9 @@ const formValue = ref({
 const fetchingModels = ref(false);
 
 const protocolOptions = [
-  { label: "Chat", value: "chat" },
-  { label: "Response", value: "response" },
-  { label: "Message", value: "message" },
+  { label: "OpenAI Chat", value: "openai_chat" },
+  { label: "Claude Messages", value: "claude_messages" },
+  { label: "OpenAI Response", value: "openai_response" },
 ];
 
 function handleAdd() {
@@ -160,6 +160,24 @@ function handleDelete(row: Provider) {
       }
     },
   });
+}
+
+const testingStates = ref<Record<string, boolean>>({});
+
+async function handleTest(row: Provider) {
+  testingStates.value[row.id] = true;
+  try {
+    const result = await api.testProvider(row.id);
+    if (result.health_status === "healthy") {
+      message.success(`连接成功 · ${result.response_time_ms}ms`);
+    } else {
+      message.error(`连接失败 · ${result.error || "未知错误"}`);
+    }
+  } catch (e: any) {
+    message.error(e.message || "测试失败");
+  } finally {
+    testingStates.value[row.id] = false;
+  }
 }
 
 async function handleSubmit() {
@@ -267,6 +285,7 @@ onMounted(() => {
 
           <div class="pc-actions">
             <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
+            <NButton size="tiny" quaternary :loading="testingStates[item.id]" @click="handleTest(item)">测试</NButton>
             <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
           </div>
         </div>

@@ -26,13 +26,9 @@ const formValue = ref({
   bind_host: "127.0.0.1",
   bind_port: 2013,
   allow_remote: false,
-  auth_token_hash: "",
   log_retention_days: 30,
   default_provider_id: "",
   default_route_id: "",
-  rate_limit_enabled: true,
-  rate_limit_max_requests_per_minute: 1000,
-  rate_limit_max_tokens_per_minute: 10000000,
 });
 
 // Gateway Keys
@@ -123,13 +119,9 @@ watch(
         bind_host: s.bind_host,
         bind_port: s.bind_port,
         allow_remote: s.allow_remote,
-        auth_token_hash: s.auth_token_hash || "",
         log_retention_days: s.log_retention_days,
         default_provider_id: s.default_provider_id || "",
         default_route_id: s.default_route_id || "",
-        rate_limit_enabled: s.rate_limit_enabled,
-        rate_limit_max_requests_per_minute: s.rate_limit_max_requests_per_minute,
-        rate_limit_max_tokens_per_minute: s.rate_limit_max_tokens_per_minute,
       };
     }
   },
@@ -172,31 +164,6 @@ onMounted(() => {
             <NInputNumber v-model:value="formValue.log_retention_days" :min="1" :max="3650" style="width: 100%" />
           </NFormItem>
         </div>
-        <NFormItem label="网关认证 Token">
-          <NInput
-            v-model:value="formValue.auth_token_hash"
-            placeholder="可选，设置后请求需携带此 Token"
-            type="password"
-            show-password-on="click"
-          />
-        </NFormItem>
-      </NForm>
-    </NCard>
-
-    <!-- 限流配额 -->
-    <NCard :bordered="false" class="settings-card" size="small" title="限流配额">
-      <NForm :model="formValue" label-placement="left" label-width="100">
-        <div class="form-row">
-          <NFormItem label="每分钟请求上限" style="flex: 1">
-            <NInputNumber v-model:value="formValue.rate_limit_max_requests_per_minute" :min="1" :max="100000" style="width: 100%" />
-          </NFormItem>
-          <NFormItem label="每分钟 Token 上限" style="flex: 1">
-            <NInputNumber v-model:value="formValue.rate_limit_max_tokens_per_minute" :min="1" :max="100000000" style="width: 100%" />
-          </NFormItem>
-        </div>
-        <NFormItem label="启用限流">
-          <NSwitch v-model:value="formValue.rate_limit_enabled" />
-        </NFormItem>
       </NForm>
     </NCard>
 
