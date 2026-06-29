@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::models::{GatewaySettings, UpdateGatewaySettings};
 use crate::persistence::GatewaySettingsRepo;
@@ -11,7 +10,6 @@ pub struct GatewaySettingsResponse {
     pub bind_host: String,
     pub bind_port: i64,
     pub allow_remote: bool,
-    pub auth_token_hash: Option<String>,
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
@@ -27,7 +25,6 @@ pub struct UpdateSettingsPayload {
     pub bind_host: Option<String>,
     pub bind_port: Option<i64>,
     pub allow_remote: Option<bool>,
-    pub auth_token_hash: Option<String>,
     pub log_retention_days: Option<i64>,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
@@ -36,7 +33,7 @@ pub struct UpdateSettingsPayload {
     pub rate_limit_max_tokens_per_minute: Option<i64>,
 }
 
-pub async fn get(_state: State<'_, AppState>) -> Result<GatewaySettingsResponse, String> {
+pub async fn get() -> Result<GatewaySettingsResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let settings = GatewaySettingsRepo::load_effective(pool)
         .await
@@ -46,7 +43,7 @@ pub async fn get(_state: State<'_, AppState>) -> Result<GatewaySettingsResponse,
 }
 
 pub async fn update(
-    state: State<'_, AppState>,
+    state: &AppState,
     payload: UpdateSettingsPayload,
 ) -> Result<GatewaySettingsResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -55,7 +52,6 @@ pub async fn update(
         bind_host: payload.bind_host,
         bind_port: payload.bind_port,
         allow_remote: payload.allow_remote,
-        auth_token_hash: payload.auth_token_hash,
         log_retention_days: payload.log_retention_days,
         default_provider_id: payload.default_provider_id,
         default_route_id: payload.default_route_id,
@@ -84,7 +80,6 @@ impl From<GatewaySettings> for GatewaySettingsResponse {
             bind_host: s.bind_host,
             bind_port: s.bind_port,
             allow_remote: s.allow_remote != 0,
-            auth_token_hash: s.auth_token_hash,
             log_retention_days: s.log_retention_days,
             default_provider_id: s.default_provider_id,
             default_route_id: s.default_route_id,

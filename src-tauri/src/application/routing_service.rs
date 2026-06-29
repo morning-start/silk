@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::models::{NewRoutingRule, RoutingRule, UpdateRoutingRule};
 use crate::persistence::RoutingRuleRepo;
@@ -55,7 +54,7 @@ pub struct UpdateRoutingRulePayload {
     pub enabled: Option<bool>,
 }
 
-pub async fn list(_state: State<'_, AppState>) -> Result<Vec<RoutingRuleResponse>, String> {
+pub async fn list() -> Result<Vec<RoutingRuleResponse>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let rules = RoutingRuleRepo::find_all(pool)
         .await
@@ -64,7 +63,7 @@ pub async fn list(_state: State<'_, AppState>) -> Result<Vec<RoutingRuleResponse
     Ok(rules.into_iter().map(RoutingRuleResponse::from).collect())
 }
 
-pub async fn get(_state: State<'_, AppState>, id: String) -> Result<RoutingRuleResponse, String> {
+pub async fn get(id: String) -> Result<RoutingRuleResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let rule = RoutingRuleRepo::find_by_id(pool, &id)
         .await
@@ -75,7 +74,7 @@ pub async fn get(_state: State<'_, AppState>, id: String) -> Result<RoutingRuleR
 }
 
 pub async fn create(
-    state: State<'_, AppState>,
+    state: &AppState,
     payload: CreateRoutingRulePayload,
 ) -> Result<RoutingRuleResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -113,7 +112,7 @@ pub async fn create(
 }
 
 pub async fn update(
-    state: State<'_, AppState>,
+    state: &AppState,
     id: String,
     payload: UpdateRoutingRulePayload,
 ) -> Result<RoutingRuleResponse, String> {
@@ -152,7 +151,7 @@ pub async fn update(
     Ok(RoutingRuleResponse::from(rule))
 }
 
-pub async fn delete(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+pub async fn delete(state: &AppState, id: String) -> Result<bool, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let deleted = RoutingRuleRepo::delete(pool, &id)
         .await

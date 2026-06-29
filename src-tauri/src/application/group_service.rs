@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::models::{
     GroupMember, NewGroupMember, NewProviderGroup, ProviderGroup, UpdateGroupMember,
@@ -62,27 +61,21 @@ pub struct UpdateMemberPayload {
     pub enabled: Option<bool>,
 }
 
-pub async fn list(_state: State<'_, AppState>) -> Result<Vec<ProviderGroup>, String> {
+pub async fn list() -> Result<Vec<ProviderGroup>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     GroupRepo::find_all_groups(pool)
         .await
         .map_err(|e| format!("查询分组失败: {e}"))
 }
 
-pub async fn find_by_model(
-    _state: State<'_, AppState>,
-    model_name: String,
-) -> Result<Vec<ProviderGroup>, String> {
+pub async fn find_by_model(model_name: String) -> Result<Vec<ProviderGroup>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     GroupRepo::find_groups_by_model(pool, &model_name)
         .await
         .map_err(|e| format!("查询分组失败: {e}"))
 }
 
-pub async fn get(
-    _state: State<'_, AppState>,
-    id: String,
-) -> Result<GroupWithMembersResponse, String> {
+pub async fn get(id: String) -> Result<GroupWithMembersResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
     let group = GroupRepo::find_group_by_id(pool, &id)
@@ -101,7 +94,7 @@ pub async fn get(
 }
 
 pub async fn create(
-    state: State<'_, AppState>,
+    state: &AppState,
     payload: CreateGroupPayload,
 ) -> Result<ProviderGroup, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -128,7 +121,7 @@ pub async fn create(
 }
 
 pub async fn update(
-    state: State<'_, AppState>,
+    state: &AppState,
     id: String,
     payload: UpdateGroupPayload,
 ) -> Result<ProviderGroup, String> {
@@ -156,7 +149,7 @@ pub async fn update(
     Ok(group)
 }
 
-pub async fn delete(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+pub async fn delete(state: &AppState, id: String) -> Result<bool, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let deleted = GroupRepo::delete_group(pool, &id)
         .await
@@ -177,7 +170,7 @@ pub async fn delete(state: State<'_, AppState>, id: String) -> Result<bool, Stri
 }
 
 pub async fn add_member(
-    state: State<'_, AppState>,
+    state: &AppState,
     group_id: String,
     payload: AddMemberPayload,
 ) -> Result<GroupMember, String> {
@@ -204,7 +197,7 @@ pub async fn add_member(
 }
 
 pub async fn update_member(
-    state: State<'_, AppState>,
+    state: &AppState,
     id: String,
     payload: UpdateMemberPayload,
 ) -> Result<GroupMember, String> {
@@ -230,7 +223,7 @@ pub async fn update_member(
     Ok(member)
 }
 
-pub async fn remove_member(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+pub async fn remove_member(state: &AppState, id: String) -> Result<bool, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
     let member = sqlx::query_as::<_, GroupMember>(

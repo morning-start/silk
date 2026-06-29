@@ -33,11 +33,10 @@ impl GatewayPipeline {
     pub async fn execute(&self, req: Request<Body>) -> Response {
         let (parts, body) = req.into_parts();
         let base_ctx = extract::initialize(parts);
-        let result = self.run_main(base_ctx, body).await;
 
-        match result {
-            Ok(ctx) => {
-                // persist_log 已在 pipeline 内部执行
+        match self.run_main(base_ctx, body).await {
+            Ok(mut ctx) => {
+                let _ = persist_log::run(&self.runtime.log_sender, &mut ctx).await;
                 finalize::success(ctx)
             }
             Err(mut stage_error) => {
@@ -66,11 +65,10 @@ impl GatewayPipeline {
         let ctx = authenticate::run(ctx).await?;
         // 认证后 IP 级限流检查
         let ctx = rate_limit::run(ctx, &self.runtime).await?;
-        let mut ctx = resolve_route::run(&self.runtime, ctx).await?;
+        let ctx = resolve_route::run(&self.runtime, ctx).await?;
 
-        // 如果路由阶段已构建响应（如 /v1/models），记录日志后跳过后续流程
+        // 如果路由阶段已构建响应（如 /v1/models），跳过后续流程
         if ctx.response.is_some() {
-            let _ = persist_log::run(&self.runtime.log_sender, &mut ctx).await;
             return Ok(ctx);
         }
 
@@ -99,9 +97,8 @@ impl GatewayPipeline {
                 // dispatch_upstream 内部包含 Level 1（重试）
                 match dispatch_upstream::run(&self.runtime, ctx).await {
                     Ok(new_ctx) => {
-                        // 成功！继续到响应转换 + 日志
-                        let mut ctx = transform_response::run(new_ctx).await?;
-                        let _ = persist_log::run(&self.runtime.log_sender, &mut ctx).await;
+                        // 成功！继续到响应转换
+                        let ctx = transform_response::run(new_ctx).await?;
                         return Ok(ctx);
                     }
                     Err(stage_err) => {
@@ -117,9 +114,7 @@ impl GatewayPipeline {
                             .provider
                             .as_ref()
                             .map(|provider| {
-                                let all_entries: Vec<crate::models::ProviderKeyEntry> =
-                                    serde_json::from_str(&provider.keys).unwrap_or_default();
-                                all_entries.iter().any(|e| {
+                                provider.keys_vec().iter().any(|e| {
                                     e.enabled && !e.value.is_empty() && !ctx.failed_keys.contains(&e.value)
                                 })
                             })
