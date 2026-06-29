@@ -101,6 +101,8 @@ pub async fn run(
     let response_headers = ctx.upstream_headers.as_ref().and_then(headers_to_json);
     let request_headers = headers_to_json(&ctx.headers);
 
+    let retry_total = ctx.failed_keys.len() as i64 + ctx.failed_providers.len() as i64;
+
     let log = crate::models::NewRequestLog {
         request_id: ctx.request_id.clone(),
         method: ctx.method.to_string(),
@@ -111,7 +113,6 @@ pub async fn run(
         outbound_protocol: ctx.outbound_protocol.clone(),
         request_headers,
         request_body,
-        response_status: status,
         status_code: status,
         response_headers,
         response_body,
@@ -120,7 +121,7 @@ pub async fn run(
         error_message: ctx.error_message.clone(),
         error_code: ctx.error_code.clone(),
         model_used,
-        retry_count: Some(0),
+        retry_count: Some(retry_total),
         stream_enabled: Some(is_streaming),
         cache_hit: Some(false),
         request_size_bytes: Some(ctx.request_size_bytes()),

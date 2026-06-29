@@ -8,24 +8,18 @@ use crate::models::{GroupMember, ProviderGroup};
 use crate::AppState;
 
 #[tauri::command]
-pub async fn list_groups(_state: State<'_, AppState>) -> Result<Vec<ProviderGroup>, String> {
-    group_service::list(_state).await
+pub async fn list_groups() -> Result<Vec<ProviderGroup>, String> {
+    group_service::list().await
 }
 
 #[tauri::command]
-pub async fn find_groups_by_model(
-    state: State<'_, AppState>,
-    model_name: String,
-) -> Result<Vec<ProviderGroup>, String> {
-    group_service::find_by_model(state, model_name).await
+pub async fn find_groups_by_model(model_name: String) -> Result<Vec<ProviderGroup>, String> {
+    group_service::find_by_model(model_name).await
 }
 
 #[tauri::command]
-pub async fn get_group(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<GroupWithMembersResponse, String> {
-    group_service::get(state, id).await
+pub async fn get_group(id: String) -> Result<GroupWithMembersResponse, String> {
+    group_service::get(id).await
 }
 
 #[tauri::command]
@@ -33,7 +27,7 @@ pub async fn create_group(
     state: State<'_, AppState>,
     payload: CreateGroupPayload,
 ) -> Result<ProviderGroup, String> {
-    group_service::create(state, payload).await
+    group_service::create(state.inner(), payload).await
 }
 
 #[tauri::command]
@@ -42,12 +36,12 @@ pub async fn update_group(
     id: String,
     payload: UpdateGroupPayload,
 ) -> Result<ProviderGroup, String> {
-    group_service::update(state, id, payload).await
+    group_service::update(state.inner(), id, payload).await
 }
 
 #[tauri::command]
 pub async fn delete_group(state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    group_service::delete(state, id).await
+    group_service::delete(state.inner(), id).await
 }
 
 #[tauri::command]
@@ -56,7 +50,7 @@ pub async fn add_group_member(
     group_id: String,
     payload: AddMemberPayload,
 ) -> Result<GroupMember, String> {
-    group_service::add_member(state, group_id, payload).await
+    group_service::add_member(state.inner(), group_id, payload).await
 }
 
 #[tauri::command]
@@ -65,10 +59,10 @@ pub async fn update_group_member(
     id: String,
     payload: UpdateMemberPayload,
 ) -> Result<GroupMember, String> {
-    group_service::update_member(state, id, payload).await
+    group_service::update_member(state.inner(), id, payload).await
 }
 
 #[tauri::command]
 pub async fn remove_group_member(state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    group_service::remove_member(state, id).await
+    group_service::remove_member(state.inner(), id).await
 }

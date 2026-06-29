@@ -1,7 +1,16 @@
-use serde::{Deserialize, Serialize};
-use tauri::State;
+use std::sync::Arc;
+use std::time::Duration;
 
-use crate::gateway::{load_gateway_context, spawn_gateway_server};
+use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
+use tokio::sync::RwLock;
+
+use crate::gateway::context::{GatewayContext, ProviderCache, RouteManager};
+use crate::gateway::group_manager::GroupManager;
+use crate::gateway::middleware::rate_limit::RateLimitState;
+use crate::gateway::{spawn_gateway_server};
+use crate::persistence::GatewaySettingsRepo;
+use crate::protocol::AdapterRegistry;
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -17,7 +26,6 @@ pub struct GatewaySettingsInfo {
     pub bind_host: String,
     pub bind_port: i64,
     pub allow_remote: bool,
-    pub auth_token_hash: Option<String>,
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
@@ -40,7 +48,7 @@ pub struct GatewayStopResponse {
     pub message: String,
 }
 
-pub async fn status(state: State<'_, AppState>) -> Result<GatewayStatusResponse, String> {
+pub async fn status(state: &AppState) -> Result<GatewayStatusResponse, String> {
     let running = {
         let server = state.gateway_server.read().await;
         server.is_some()
@@ -64,41 +72,17 @@ pub async fn status(state: State<'_, AppState>) -> Result<GatewayStatusResponse,
     })
 }
 
-pub async fn start(state: State<'_, AppState>) -> Result<GatewayStartResponse, String> {
+pub async fn start(state: &AppState) -> Result<GatewayStartResponse, String> {
     {
         let server = state.gateway_server.read().await;
         if server.is_some() {
             return Err("网关已在运行中".to_string());
         }
     }
-
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let (log_sender, log_receiver) =
-        tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
-    let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
-
-    let gateway = load_gateway_context(pool.clone(), log_sender)
-        .await
-        .map_err(|e| format!("加载网关上下文失败: {e}"))?;
-    let gateway_server = spawn_gateway_server(gateway.clone())
-        .await
-        .map_err(|e| format!("启动网关失败: {e}"))?;
-
-    {
-        let mut state_gateway = state.gateway.write().await;
-        *state_gateway = gateway.clone();
-        let mut server = state.gateway_server.write().await;
-        *server = Some(gateway_server);
-    }
-
-    let settings = gateway.settings.read().await;
-    Ok(GatewayStartResponse {
-        success: true,
-        address: format!("{}:{}", settings.bind_host, settings.bind_port),
-    })
+    start_gateway_inner(state).await
 }
 
-pub async fn stop(state: State<'_, AppState>) -> Result<GatewayStopResponse, String> {
+pub async fn stop(state: &AppState) -> Result<GatewayStopResponse, String> {
     let mut server = state.gateway_server.write().await;
 
     if let Some(handle) = server.take() {
@@ -112,38 +96,14 @@ pub async fn stop(state: State<'_, AppState>) -> Result<GatewayStopResponse, Str
     }
 }
 
-pub async fn restart(state: State<'_, AppState>) -> Result<GatewayStartResponse, String> {
+pub async fn restart(state: &AppState) -> Result<GatewayStartResponse, String> {
     {
         let mut server = state.gateway_server.write().await;
         if let Some(handle) = server.take() {
             handle.stop().await;
         }
     }
-
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let (log_sender, log_receiver) =
-        tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
-    let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
-
-    let gateway = load_gateway_context(pool.clone(), log_sender)
-        .await
-        .map_err(|e| format!("加载网关上下文失败: {e}"))?;
-    let gateway_server = spawn_gateway_server(gateway.clone())
-        .await
-        .map_err(|e| format!("启动网关失败: {e}"))?;
-
-    {
-        let mut state_gateway = state.gateway.write().await;
-        *state_gateway = gateway.clone();
-        let mut server = state.gateway_server.write().await;
-        *server = Some(gateway_server);
-    }
-
-    let settings = gateway.settings.read().await;
-    Ok(GatewayStartResponse {
-        success: true,
-        address: format!("{}:{}", settings.bind_host, settings.bind_port),
-    })
+    start_gateway_inner(state).await
 }
 
 pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResponse, String> {
@@ -171,6 +131,65 @@ pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResp
     })
 }
 
+/// start() 和 restart() 的公共启动逻辑
+async fn start_gateway_inner(state: &AppState) -> Result<GatewayStartResponse, String> {
+    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+    let (log_sender, log_receiver) =
+        tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
+    let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
+
+    let gateway = load_gateway_context(pool.clone(), log_sender)
+        .await
+        .map_err(|e| format!("加载网关上下文失败: {e}"))?;
+    let gateway_server = spawn_gateway_server(gateway.clone())
+        .await
+        .map_err(|e| format!("启动网关失败: {e}"))?;
+
+    {
+        let mut state_gateway = state.gateway.write().await;
+        *state_gateway = gateway.clone();
+        let mut server = state.gateway_server.write().await;
+        *server = Some(gateway_server);
+    }
+
+    let settings = gateway.settings.read().await;
+    Ok(GatewayStartResponse {
+        success: true,
+        address: format!("{}:{}", settings.bind_host, settings.bind_port),
+    })
+}
+
+/// 加载网关上下文（从 DB 读取设置、路由规则、分组等）
+pub async fn load_gateway_context(
+    pool: SqlitePool,
+    log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
+) -> Result<GatewayContext, sqlx::Error> {
+    let settings = GatewaySettingsRepo::load_effective(&pool).await?;
+    let route_manager = RouteManager::load(&pool).await?;
+    let provider_cache = Arc::new(ProviderCache::new(Duration::from_secs(300)));
+    let adapter_registry = Arc::new(AdapterRegistry::new());
+    let group_manager = Arc::new(GroupManager::new());
+    group_manager.load(&pool).await?;
+
+    // 从设置中构建限流状态
+    let rate_limit_state = Arc::new(RateLimitState::new(
+        settings.rate_limit_enabled != 0,
+        settings.rate_limit_max_requests_per_minute as u64,
+        settings.rate_limit_max_tokens_per_minute as u64,
+    ));
+
+    Ok(GatewayContext::new(
+        pool,
+        Arc::new(RwLock::new(settings)),
+        Arc::new(route_manager),
+        provider_cache,
+        log_sender,
+        adapter_registry,
+        group_manager,
+        rate_limit_state,
+    ))
+}
+
 impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
     fn from(settings: &crate::models::GatewaySettings) -> Self {
         Self {
@@ -178,7 +197,6 @@ impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
             bind_host: settings.bind_host.clone(),
             bind_port: settings.bind_port,
             allow_remote: settings.allow_remote != 0,
-            auth_token_hash: settings.auth_token_hash.clone(),
             log_retention_days: settings.log_retention_days,
             default_provider_id: settings.default_provider_id.clone(),
             default_route_id: settings.default_route_id.clone(),
@@ -198,10 +216,10 @@ mod tests {
 
     use tokio::sync::RwLock;
 
-    use crate::gateway::load_gateway_context;
     use crate::persistence::GatewaySettingsRepo;
     use crate::{init_database, AppState};
 
+    use super::load_gateway_context;
     use super::start_existing_gateway;
     use crate::models::UpdateGatewaySettings;
 

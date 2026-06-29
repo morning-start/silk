@@ -1,10 +1,17 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use tracing::{error, info, warn};
 
 use crate::models::{NewProvider, Provider, ProviderKeyEntry, UpdateProvider};
 use crate::persistence::ProviderRepo;
 use crate::AppState;
+
+/// 从 DB 重新加载渠道名称缓存
+async fn refresh_name_cache(state: &AppState) {
+    if let Some(pool) = crate::get_db_pool() {
+        let cache = crate::load_provider_name_cache(pool).await;
+        *state.provider_name_cache.write().await = cache;
+    }
+}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct ProviderResponse {
@@ -81,7 +88,7 @@ pub struct ProviderModelInfo {
     pub supported_endpoint_types: Vec<String>,
 }
 
-pub async fn list(_state: State<'_, AppState>) -> Result<Vec<ProviderResponse>, String> {
+pub async fn list() -> Result<Vec<ProviderResponse>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let providers = ProviderRepo::find_all(pool)
         .await
@@ -93,7 +100,7 @@ pub async fn list(_state: State<'_, AppState>) -> Result<Vec<ProviderResponse>, 
         .collect())
 }
 
-pub async fn get(_state: State<'_, AppState>, id: String) -> Result<ProviderResponse, String> {
+pub async fn get(id: String) -> Result<ProviderResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let provider = ProviderRepo::find_by_id(pool, &id)
         .await
@@ -104,7 +111,7 @@ pub async fn get(_state: State<'_, AppState>, id: String) -> Result<ProviderResp
 }
 
 pub async fn create(
-    _state: State<'_, AppState>,
+    state: &AppState,
     payload: CreateProviderPayload,
 ) -> Result<ProviderResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
@@ -129,11 +136,13 @@ pub async fn create(
         .await
         .map_err(|e| format!("创建 Provider 失败: {e}"))?;
 
+    refresh_name_cache(state).await;
+
     Ok(ProviderResponse::from_provider(provider))
 }
 
 pub async fn update(
-    state: State<'_, AppState>,
+    state: &AppState,
     id: String,
     payload: UpdateProviderPayload,
 ) -> Result<ProviderResponse, String> {
@@ -143,7 +152,7 @@ pub async fn update(
         name: payload.name,
         protocols: payload.protocols,
         models: payload.models,
-        keys: payload.keys, // 明文存储，不再加密
+        keys: payload.keys,
         key_strategy: payload.key_strategy,
         api_base_url: payload
             .api_base_url
@@ -170,10 +179,12 @@ pub async fn update(
         .invalidate(&id)
         .await;
 
+    refresh_name_cache(state).await;
+
     Ok(ProviderResponse::from_provider(provider))
 }
 
-pub async fn test(state: State<'_, AppState>, id: String) -> Result<ProviderTestResponse, String> {
+pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
     let provider = ProviderRepo::find_by_id(pool, &id)
@@ -250,7 +261,7 @@ pub async fn test(state: State<'_, AppState>, id: String) -> Result<ProviderTest
     })
 }
 
-pub async fn delete(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+pub async fn delete(state: &AppState, id: String) -> Result<bool, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let deleted = ProviderRepo::delete(pool, &id)
         .await
@@ -264,13 +275,13 @@ pub async fn delete(state: State<'_, AppState>, id: String) -> Result<bool, Stri
             .provider_cache
             .invalidate(&id)
             .await;
+        refresh_name_cache(state).await;
     }
 
     Ok(deleted)
 }
 
 pub async fn fetch_models(
-    _state: State<'_, AppState>,
     payload: FetchModelsPayload,
 ) -> Result<Vec<ProviderModelInfo>, String> {
     let base_url = crate::models::Provider::normalize_api_base_url(&payload.api_base_url);

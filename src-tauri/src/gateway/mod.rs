@@ -14,7 +14,8 @@ use axum::Router;
 use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
 
-pub use context::{load_gateway_context, GatewayContext, RequestContext, RouteManager};pub use error::GatewayError;
+pub use context::{GatewayContext, RequestContext, RouteManager};
+pub use error::GatewayError;
 pub use pipeline::{GatewayPipeline, StageError};
 
 pub struct GatewayServerHandle {
