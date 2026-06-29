@@ -1,6 +1,7 @@
 pub mod application;
 pub mod commands;
 pub mod crypto;
+pub mod error;
 pub mod gateway;
 pub mod load_balancer;
 pub mod models;
@@ -30,6 +31,36 @@ pub struct AppState {
     pub gateway_server: Arc<RwLock<Option<GatewayServerHandle>>>,
     /// 渠道 id → name 映射表，用于日志展示时解析渠道名称
     pub provider_name_cache: Arc<RwLock<HashMap<String, String>>>,
+}
+
+impl AppState {
+    /// 使指定 Provider 的缓存失效
+    pub async fn invalidate_cache(&self, id: &str) {
+        self.gateway.read().await.provider_cache.invalidate(id).await;
+    }
+
+    /// 从 DB 重载路由规则到网关
+    pub async fn reload_routes(&self, pool: &SqlitePool) {
+        self.gateway.read().await.route_manager.reload(pool).await.ok();
+    }
+
+    /// 重载指定分组的成员到网关
+    pub async fn reload_group(&self, pool: &SqlitePool, group_id: &str) {
+        self.gateway.read().await.group_manager.reload_group(pool, group_id).await.ok();
+    }
+
+    /// 重载所有分组到网关
+    pub async fn reload_all_groups(&self, pool: &SqlitePool) {
+        self.gateway.read().await.group_manager.reload_all(pool).await.ok();
+    }
+
+    /// 刷新渠道名称缓存（从 providers 表重新加载）
+    pub async fn refresh_name_cache(&self) {
+        if let Some(pool) = crate::get_db_pool() {
+            let cache = crate::load_provider_name_cache(pool).await;
+            *self.provider_name_cache.write().await = cache;
+        }
+    }
 }
 
 /// 从 providers 表加载 id → name 映射
