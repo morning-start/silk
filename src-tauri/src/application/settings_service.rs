@@ -15,6 +15,9 @@ pub struct GatewaySettingsResponse {
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
+    pub rate_limit_enabled: bool,
+    pub rate_limit_max_requests_per_minute: i64,
+    pub rate_limit_max_tokens_per_minute: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -27,6 +30,9 @@ pub struct UpdateSettingsPayload {
     pub log_retention_days: Option<i64>,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
+    pub rate_limit_enabled: Option<bool>,
+    pub rate_limit_max_requests_per_minute: Option<i64>,
+    pub rate_limit_max_tokens_per_minute: Option<i64>,
 }
 
 pub async fn get() -> Result<GatewaySettingsResponse, ServiceError> {
@@ -54,6 +60,9 @@ pub async fn update(
         log_retention_days: payload.log_retention_days,
         default_provider_id: payload.default_provider_id,
         default_route_id: payload.default_route_id,
+        rate_limit_enabled: payload.rate_limit_enabled,
+        rate_limit_max_requests_per_minute: payload.rate_limit_max_requests_per_minute,
+        rate_limit_max_tokens_per_minute: payload.rate_limit_max_tokens_per_minute,
     };
 
     let settings = GatewaySettingsRepo::update(pool, &update).await?;
@@ -83,6 +92,9 @@ impl From<GatewaySettings> for GatewaySettingsResponse {
             log_retention_days: s.log_retention_days,
             default_provider_id: s.default_provider_id,
             default_route_id: s.default_route_id,
+            rate_limit_enabled: s.rate_limit_enabled != 0,
+            rate_limit_max_requests_per_minute: s.rate_limit_max_requests_per_minute,
+            rate_limit_max_tokens_per_minute: s.rate_limit_max_tokens_per_minute,
             created_at: s.created_at.to_string(),
             updated_at: s.updated_at.to_string(),
         }
@@ -159,6 +171,9 @@ mod tests {
             log_retention_days: None,
             default_provider_id: None,
             default_route_id: None,
+            rate_limit_enabled: None,
+            rate_limit_max_requests_per_minute: None,
+            rate_limit_max_tokens_per_minute: None,
         };
 
         update(&state, payload).await.expect("update settings");

@@ -108,6 +108,9 @@ export interface GatewaySettings {
   log_retention_days: number;
   default_provider_id: string | null;
   default_route_id: string | null;
+  rate_limit_enabled: boolean;
+  rate_limit_max_requests_per_minute: number;
+  rate_limit_max_tokens_per_minute: number;
   created_at: string;
   updated_at: string;
 }

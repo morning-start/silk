@@ -177,11 +177,17 @@ impl SseParser {
 
     /// 喂入数据块，返回解析出的事件
     pub fn feed(&mut self, chunk: &[u8]) -> Vec<SseEvent> {
-        let Ok(text) = std::str::from_utf8(chunk) else {
-            return Vec::new();
-        };
+        // 使用 lossy 转换避免非 UTF-8 字节静默丢弃
+        let text = String::from_utf8_lossy(chunk);
 
-        self.buffer.push_str(text);
+        self.buffer.push_str(&text);
+
+        // 防止 buffer 无限增长：超过 1MB 时截断
+        const MAX_BUFFER_SIZE: usize = 1024 * 1024;
+        if self.buffer.len() > MAX_BUFFER_SIZE {
+            self.buffer = self.buffer.split_off(self.buffer.len() - MAX_BUFFER_SIZE / 2);
+        }
+
         let mut events = Vec::new();
 
         while let Some(pos) = self.buffer.find("\n\n") {
@@ -249,7 +255,10 @@ pub fn is_sse_response(headers: &HeaderMap) -> bool {
 fn should_forward_sse_header(name: &HeaderName) -> bool {
     !matches!(
         name,
-        &axum::http::header::CONTENT_LENGTH | &axum::http::header::CONTENT_ENCODING
+        &axum::http::header::CONTENT_LENGTH
+            | &axum::http::header::CONTENT_ENCODING
+            | &axum::http::header::TRANSFER_ENCODING
+            | &axum::http::header::CONNECTION
     )
 }
 

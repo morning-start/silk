@@ -61,6 +61,12 @@ async function sendRequest() {
   responseBody.value = "";
 
   try {
+    // URL 安全校验：仅允许 http/https 协议
+    const parsedUrl = new URL(requestUrl.value);
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      throw new Error("仅支持 http 和 https 协议");
+    }
+
     const startTime = performance.now();
 
     const res = await fetch(requestUrl.value, {

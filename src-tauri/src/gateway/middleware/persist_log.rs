@@ -10,9 +10,11 @@ const MAX_BODY_STORAGE: usize = 65536; // 64KB
 fn truncate_body(text: Option<String>) -> Option<String> {
     text.map(|s| {
         if s.len() > MAX_BODY_STORAGE {
+            // 使用 floor_char_boundary 避免在多字节 UTF-8 字符边界处 panic
+            let safe_end = s.floor_char_boundary(MAX_BODY_STORAGE);
             format!(
                 "{}... [truncated, original_size: {}]",
-                &s[..MAX_BODY_STORAGE],
+                &s[..safe_end],
                 s.len()
             )
         } else {
