@@ -1,4 +1,7 @@
 -- P0: 删除废弃字段
+DROP INDEX IF EXISTS idx_providers_type;
+DROP INDEX IF EXISTS idx_model_mappings_group;
+DROP INDEX IF EXISTS idx_logs_status;
 ALTER TABLE providers DROP COLUMN provider_type;
 ALTER TABLE model_mappings DROP COLUMN provider_group_id;
 ALTER TABLE request_logs DROP COLUMN response_status;
