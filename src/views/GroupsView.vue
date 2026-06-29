@@ -14,10 +14,12 @@ import {
   NTag,
   useMessage,
   useDialog,
+  NIcon,
   type DataTableColumns,
 } from "naive-ui";
 import { useGroupsStore } from "../stores/groups";
 import { useProvidersStore } from "../stores/providers";
+import { AlertCircleOutline } from "@vicons/ionicons5";
 import { storeToRefs } from "pinia";
 import type { ProviderGroup } from "../api";
 
@@ -210,7 +212,7 @@ onMounted(() => {
     <template v-if="error">
       <div class="error-state" style="margin-top: 32px">
         <div class="error-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <NIcon size="48" color="#ef4444"><AlertCircleOutline /></NIcon>
         </div>
         <h3 class="error-title">数据加载失败</h3>
         <p class="error-desc">{{ error }}</p>
@@ -280,7 +282,7 @@ onMounted(() => {
           <n-button type="primary" @click="handleAddMember">添加</n-button>
         </div>
 
-        <n-data-table :columns="memberColumns" :data="(groupsStore.currentGroup as any).members || []" :bordered="false" />
+        <n-data-table :columns="memberColumns" :data="groupsStore.currentGroup?.members || []" :bordered="false" />
       </div>
       <template #action>
         <n-button @click="showMemberModal = false">关闭</n-button>

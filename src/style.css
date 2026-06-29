@@ -105,11 +105,6 @@ body {
   font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace !important;
 }
 
-.text-mono-sm {
-  font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace !important;
-  font-size: 12px !important;
-}
-
 /* ===== Num styling ===== */
 .num {
   font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace !important;
@@ -225,12 +220,7 @@ body.dark ::-webkit-scrollbar-thumb:hover {
 }
 
 /* ===== Toolbar helpers ===== */
-.mb-8 { margin-bottom: 8px; }
-.mb-12 { margin-bottom: 12px; }
 .mb-16 { margin-bottom: 16px; }
-.mt-8 { margin-top: 8px; }
-.mt-12 { margin-top: 12px; }
-.mt-16 { margin-top: 16px; }
 
 /* ===== Empty State (各页面的空数据引导) ===== */
 .empty-state {

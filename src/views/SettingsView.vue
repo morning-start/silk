@@ -11,7 +11,6 @@ import {
   NTag,
   NCard,
   NSpace,
-  NSelect,
   useMessage,
 } from "naive-ui";
 import { useGatewayStore } from "../stores/gateway";
@@ -275,59 +274,6 @@ onMounted(() => {
           暂无 Key，点击上方"+ 添加 Key"创建
         </NText>
       </div>
-    </NCard>
-
-    <!-- 日志规则 -->
-    <NCard :bordered="false" class="settings-card" size="small" title="日志规则">
-      <NForm :model="formValue" label-placement="left" label-width="100">
-        <NFormItem label="日志保留天数" style="max-width: 360px">
-          <NInputNumber v-model:value="formValue.log_retention_days" :min="1" :max="3650" style="width: 100%" />
-        </NFormItem>
-        <NFormItem label="自动清理">
-          <NSwitch :value="true" />
-          <span style="margin-left: 8px; font-size: 13px; color: var(--text-color-3, #94a3b8)">自动清理超过保留天数的日志</span>
-        </NFormItem>
-      </NForm>
-    </NCard>
-
-    <!-- 全局负载均衡 -->
-    <NCard :bordered="false" class="settings-card" size="small" title="全局负载均衡">
-      <NForm :model="formValue" label-placement="left" label-width="100">
-        <div class="form-row">
-          <NFormItem label="默认调度策略" style="flex: 1">
-            <NSelect
-              :value="'weighted_round_robin'"
-              :options="[
-                { label: '加权轮询', value: 'weighted_round_robin' },
-                { label: '轮询', value: 'round_robin' },
-                { label: '最少连接', value: 'least_conn' },
-              ]"
-            />
-          </NFormItem>
-          <NFormItem label="健康检查间隔" style="flex: 1">
-            <NSelect
-              :value="'30s'"
-              :options="[
-                { label: '10 秒', value: '10s' },
-                { label: '30 秒', value: '30s' },
-                { label: '1 分钟', value: '1m' },
-                { label: '5 分钟', value: '5m' },
-              ]"
-            />
-          </NFormItem>
-        </div>
-        <div class="form-row">
-          <NFormItem label="失败切换阈值" style="flex: 1">
-            <NInputNumber :value="3" :min="1" :max="20" style="width: 100%" />
-          </NFormItem>
-          <NFormItem label="恢复检测次数" style="flex: 1">
-            <NInputNumber :value="2" :min="1" :max="20" style="width: 100%" />
-          </NFormItem>
-        </div>
-        <NText depth="3" style="font-size: 13px; display: block; margin-top: 8px">
-          此设置为全局默认，可在<strong>模型池</strong>中为单个模型覆盖调度策略和健康检查配置。
-        </NText>
-      </NForm>
     </NCard>
   </div>
 </template>

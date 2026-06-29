@@ -82,17 +82,21 @@ export interface RequestLog {
   inbound_protocol: string | null;
   outbound_protocol: string | null;
   response_status: number | null;
-  status_code: number | null;
   duration_ms: number | null;
   provider_id: string | null;
+  provider_name: string | null;
   error_message: string | null;
+  error_code: string | null;
   model_used: string | null;
   retry_count: number;
   stream_enabled: boolean;
+  cache_hit: boolean;
   request_size_bytes: number | null;
   response_size_bytes: number | null;
   tokens_input: number | null;
   tokens_output: number | null;
+  cost: number | null;
+  auth_key_name: string | null;
 }
 
 export interface GatewaySettings {

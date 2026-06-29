@@ -14,9 +14,11 @@ import {
   NCard,
   useMessage,
   useDialog,
+  NIcon,
   type DataTableColumns,
 } from "naive-ui";
 import { useRoutingRulesStore } from "../stores/routingRules";
+import { AlertCircleOutline } from "@vicons/ionicons5";
 import { useProvidersStore } from "../stores/providers";
 import { useGroupsStore } from "../stores/groups";
 import { storeToRefs } from "pinia";
@@ -214,7 +216,7 @@ onMounted(() => {
       <template v-if="error">
         <div class="error-state">
           <div class="error-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <NIcon size="48" color="#ef4444"><AlertCircleOutline /></NIcon>
           </div>
           <h3 class="error-title">数据加载失败</h3>
           <p class="error-desc">{{ error }}</p>

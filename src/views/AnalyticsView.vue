@@ -9,9 +9,11 @@ import {
   NText,
   NSpace,
   NSpin,
+  NIcon,
   type DataTableColumns,
 } from "naive-ui";
 import { api, type ProviderStats } from "../api";
+import { AlertCircleOutline } from "@vicons/ionicons5";
 
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -108,7 +110,7 @@ onMounted(() => loadData(30));
       <!-- Error State -->
       <div v-if="error" class="error-state">
         <div class="error-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <NIcon size="48" color="#ef4444"><AlertCircleOutline /></NIcon>
         </div>
         <h3 class="error-title">用量数据加载失败</h3>
         <p class="error-desc">{{ error }}</p>
