@@ -1,5 +1,5 @@
 use crate::crypto::hash_api_key;
-use crate::gateway::context::RequestContext;
+use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
 use crate::persistence::GatewayKeyRepo;
@@ -9,7 +9,10 @@ use crate::persistence::GatewayKeyRepo;
 /// 支持的认证方式：
 /// - Authorization: Bearer <sk-gw-xxx>  (OpenAI 风格)
 /// - x-api-key: <sk-gw-xxx>              (Anthropic 风格)
-pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> {
+pub async fn run(
+    mut ctx: RequestContext,
+    runtime: &GatewayContext,
+) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
 
     // 仅校验 /v1/* 路径
@@ -47,16 +50,10 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         }
     };
 
-    // 哈希 token 并在数据库中查找
-    let pool = crate::get_db_pool().ok_or_else(|| {
-        StageError::new(
-            error_ctx.clone(),
-            GatewayError::Internal("数据库未初始化".to_string()),
-        )
-    })?;
+    // 哈希 token 并在数据库中查找（使用 GatewayContext 中的 pool）
     let key_hash = hash_api_key(&bearer_token);
 
-    match GatewayKeyRepo::find_by_hash(pool, &key_hash).await {
+    match GatewayKeyRepo::find_by_hash(&runtime.pool, &key_hash).await {
         Ok(Some(key)) => {
             if !key.is_active() {
                 return Err(StageError::new(

@@ -5,8 +5,8 @@ use axum::response::Response;
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::middleware::{
-    authenticate, dispatch_upstream, extract, finalize, persist_log, resolve_route, select_channel,
-    transform_request, transform_response,
+    authenticate, dispatch_upstream, extract, finalize, persist_log, rate_limit, resolve_route,
+    select_channel, transform_request, transform_response,
 };
 
 pub struct StageError {
@@ -62,7 +62,8 @@ impl GatewayPipeline {
         body: Body,
     ) -> Result<RequestContext, StageError> {
         let ctx = extract::read_body(ctx, body).await?;
-        let ctx = authenticate::run(ctx).await?;
+        let ctx = authenticate::run(ctx, &self.runtime).await?;
+        let ctx = rate_limit::run(ctx, &self.runtime).await?;
         let ctx = resolve_route::run(&self.runtime, ctx).await?;
 
         // 如果路由阶段已构建响应（如 /v1/models），跳过后续流程

@@ -9,11 +9,13 @@ use crate::models::{
 pub struct ModelMappingRepo;
 
 impl ModelMappingRepo {
-    /// 创建新模型映射（含关联渠道）
+    /// 创建新模型映射（含关联渠道，事务保证原子性）
     pub async fn create(
         pool: &SqlitePool,
         new: &NewModelMapping,
     ) -> Result<ModelMapping, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().naive_utc();
         let enabled = if new.enabled.unwrap_or(true) { 1 } else { 0 };
@@ -27,10 +29,10 @@ impl ModelMappingRepo {
                 id, model_name,
                 max_input_tokens, max_context_tokens, max_output_tokens,
                 input_price_per_1m, output_price_per_1m,
-                capabilities, description, vendor, knowledge_cutoff, model_family, reference_url,
+                capabilities, description,
                 strategy, enabled, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING *
             "#,
         )
@@ -43,22 +45,19 @@ impl ModelMappingRepo {
         .bind(new.output_price_per_1m)
         .bind(capabilities)
         .bind(new.description.as_deref().unwrap_or(""))
-        .bind("") // vendor: always empty
-        .bind(None::<String>) // knowledge_cutoff: always NULL
-        .bind("") // model_family: always empty
-        .bind(None::<String>) // reference_url: always NULL
         .bind(strategy)
         .bind(enabled)
         .bind(now)
         .bind(now)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
 
-        // 插入关联渠道
+        // 事务内插入关联渠道
         if let Some(ref channels) = new.channels {
-            Self::replace_channels_internal(pool, &id, channels).await?;
+            Self::replace_channels_internal(&mut *tx, &id, channels).await?;
         }
 
+        tx.commit().await?;
         Ok(mapping)
     }
 
@@ -102,12 +101,14 @@ impl ModelMappingRepo {
         .await
     }
 
-    /// 更新模型映射（含关联渠道替换）
+    /// 更新模型映射（含关联渠道替换，事务保证原子性）
     pub async fn update(
         pool: &SqlitePool,
         id: &str,
         update: &UpdateModelMapping,
     ) -> Result<Option<ModelMapping>, sqlx::Error> {
+        let mut tx = pool.begin().await?;
+
         let now = chrono::Utc::now().naive_utc();
         let enabled = update.enabled.map(|v| if v { 1 } else { 0 });
 
@@ -116,10 +117,11 @@ impl ModelMappingRepo {
             .as_ref()
             .map(|caps| serde_json::to_string(caps).unwrap_or_else(|_| "[]".to_string()));
 
+        // 先检查存在性
         let Some(_) =
             sqlx::query_as::<_, ModelMapping>(r#"SELECT * FROM model_mappings WHERE id = $1"#)
                 .bind(id)
-                .fetch_optional(pool)
+                .fetch_optional(&mut *tx)
                 .await?
         else {
             return Ok(None);
@@ -136,9 +138,9 @@ impl ModelMappingRepo {
                 output_price_per_1m = COALESCE($7, output_price_per_1m),
                 capabilities = COALESCE($8, capabilities),
                 description = COALESCE($9, description),
-                strategy = COALESCE($14, strategy),
-                enabled = COALESCE($15, enabled),
-                updated_at = $16
+                strategy = COALESCE($10, strategy),
+                enabled = COALESCE($11, enabled),
+                updated_at = $12
             WHERE id = $1
             RETURNING *
             "#,
@@ -152,21 +154,18 @@ impl ModelMappingRepo {
         .bind(update.output_price_per_1m)
         .bind(capabilities.as_deref())
         .bind(update.description.as_deref())
-        .bind("") // vendor: $10
-        .bind(None::<String>) // knowledge_cutoff: $11
-        .bind("") // model_family: $12
-        .bind(None::<String>) // reference_url: $13
         .bind(update.strategy.as_deref())
         .bind(enabled)
         .bind(now)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?;
 
-        // 替换关联渠道
+        // 在事务内替换关联渠道
         if let Some(ref channels) = update.channels {
-            Self::replace_channels_internal(pool, id, channels).await?;
+            Self::replace_channels_internal(&mut *tx, id, channels).await?;
         }
 
+        tx.commit().await?;
         Ok(mapping)
     }
 
@@ -249,16 +248,16 @@ impl ModelMappingRepo {
         .await
     }
 
-    /// 批量替换关联渠道（事务内删旧插新）
+    /// 批量替换关联渠道（使用连接，可在事务外调用）
     async fn replace_channels_internal(
-        pool: &SqlitePool,
+        conn: &mut sqlx::SqliteConnection,
         mapping_id: &str,
         channels: &[NewMappingChannel],
     ) -> Result<(), sqlx::Error> {
         // 先删除旧的
         sqlx::query(r#"DELETE FROM model_mapping_channels WHERE mapping_id = ?1"#)
             .bind(mapping_id)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
 
         // 再批量插入
@@ -285,7 +284,7 @@ impl ModelMappingRepo {
             .bind(selected_models)
             .bind(enabled)
             .bind(now)
-            .execute(pool)
+            .execute(&mut *conn)
             .await?;
         }
 
