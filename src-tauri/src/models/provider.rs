@@ -118,7 +118,7 @@ impl Provider {
 
     /// 获取超时时间（秒）
     pub fn timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(self.timeout_seconds as u64)
+        std::time::Duration::from_secs(self.timeout_seconds.max(0) as u64)
     }
 
     /// 解析 protocols JSON 字段为 Vec<String>

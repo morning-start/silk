@@ -2,13 +2,15 @@ use sqlx::SqlitePool;
 
 use crate::models::{GatewaySettings, UpdateGatewaySettings};
 
+const SETTINGS_ID: &str = "default";
+
 pub struct GatewaySettingsRepo;
 
 impl GatewaySettingsRepo {
     /// 运行时默认网关设置（数据库不存在配置时使用）
     pub fn runtime_default(now: chrono::NaiveDateTime) -> GatewaySettings {
         GatewaySettings {
-            id: "default".to_string(),
+            id: SETTINGS_ID.to_string(),
             bind_host: "127.0.0.1".to_string(),
             bind_port: 2013,
             allow_remote: 0,
@@ -35,8 +37,9 @@ impl GatewaySettingsRepo {
     /// 查询当前全局网关设置
     pub async fn find(pool: &SqlitePool) -> Result<Option<GatewaySettings>, sqlx::Error> {
         sqlx::query_as::<_, GatewaySettings>(
-            r#"SELECT * FROM gateway_settings WHERE id = 'default'"#,
+            r#"SELECT * FROM gateway_settings WHERE id = ?1"#,
         )
+        .bind(SETTINGS_ID)
         .fetch_optional(pool)
         .await
     }
@@ -59,10 +62,11 @@ impl GatewaySettingsRepo {
                 rate_limit_enabled, rate_limit_max_requests_per_minute, rate_limit_max_tokens_per_minute,
                 created_at, updated_at
             )
-            VALUES ('default', '127.0.0.1', 2013, 0, 30, 0, 1000, 500000, $1, $1)
+            VALUES (?1, '127.0.0.1', 2013, 0, 30, 0, 1000, 500000, $1, $1)
             "#,
         )
         .bind(now)
+        .bind(SETTINGS_ID)
         .execute(&mut *tx)
         .await?;
 
@@ -83,7 +87,7 @@ impl GatewaySettingsRepo {
             RETURNING *
             "#,
         )
-        .bind("default")
+        .bind(SETTINGS_ID)
         .bind(update.bind_host.as_deref())
         .bind(update.bind_port)
         .bind(allow_remote)

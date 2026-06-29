@@ -115,9 +115,8 @@ src-tauri/src/
 │       ├── persist_log.rs
 │       └── finalize.rs
 ├── protocol/
-│   ├── adapter.rs            # ProviderAdapter trait
+│   ├── adapter.rs            # ProviderAdapter trait + shared helpers
 │   ├── registry.rs           # Adapter registry
-│   ├── canonical.rs          # Canonical format
 │   └── adapters/
 │       ├── openai_chat.rs
 │       ├── claude.rs
