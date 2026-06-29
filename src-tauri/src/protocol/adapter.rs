@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderValue};
 use thiserror::Error;
 
 use crate::models::Provider;
@@ -36,6 +36,56 @@ impl From<serde_json::Error> for ProtocolError {
     fn from(err: serde_json::Error) -> Self {
         ProtocolError::SerializationError(err.to_string())
     }
+}
+
+// ---------------------------------------------------------------------------
+// 共享工具函数
+// ---------------------------------------------------------------------------
+
+/// 从上游错误响应中提取错误信息
+pub fn extract_error_message(body: &serde_json::Value) -> String {
+    body["error"]["message"]
+        .as_str()
+        .or_else(|| body["error"]["type"].as_str())
+        .unwrap_or("unknown error")
+        .to_string()
+}
+
+/// 构建 OpenAI 风格的认证头（Authorization: Bearer）
+pub fn build_bearer_headers(api_key: &str) -> Result<HeaderMap, ProtocolError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|e| {
+            ProtocolError::InvalidValue {
+                field: "Authorization".to_string(),
+                reason: e.to_string(),
+            }
+        })?,
+    );
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    Ok(headers)
+}
+
+/// 构建 Anthropic 风格的认证头（x-api-key）
+pub fn build_anthropic_headers(api_key: &str) -> Result<HeaderMap, ProtocolError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-api-key",
+        HeaderValue::from_str(api_key).map_err(|e| ProtocolError::InvalidValue {
+            field: "x-api-key".to_string(),
+            reason: e.to_string(),
+        })?,
+    );
+    headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    Ok(headers)
 }
 
 // ---------------------------------------------------------------------------

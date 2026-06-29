@@ -1,12 +1,13 @@
 use async_trait::async_trait;
-use axum::http::{HeaderMap, HeaderValue};
 
 use linguafranca::anthropic::request::AnthropicRequest;
 use linguafranca::anthropic::response::AnthropicResponse;
 use linguafranca::traits::IntoOpenResponses;
 
 use crate::models::Provider;
-use crate::protocol::adapter::{ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse};
+use crate::protocol::adapter::{
+    build_anthropic_headers, ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse,
+};
 
 pub struct ClaudeMessagesAdapter;
 
@@ -22,30 +23,16 @@ impl ProviderAdapter for ClaudeMessagesAdapter {
         provider: &Provider,
         selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError> {
-        let _anthropic_req: AnthropicRequest = serde_json::from_slice(req_body)
+        // 反序列化一次，用于验证 + 生成 body
+        let anthropic_req: AnthropicRequest = serde_json::from_slice(req_body)
             .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-api-key",
-            HeaderValue::from_str(selected_api_key).map_err(|e| ProtocolError::InvalidValue {
-                field: "x-api-key".to_string(),
-                reason: e.to_string(),
-            })?,
-        );
-        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-        headers.insert(
-            axum::http::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-
-        let body: serde_json::Value = serde_json::from_slice(req_body)
+        let body = serde_json::to_value(&anthropic_req)
             .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
 
         Ok(UpstreamRequest {
             url: format!("{}/v1/messages", provider.api_base_url),
             method: "POST".to_string(),
-            headers,
+            headers: build_anthropic_headers(selected_api_key)?,
             body,
         })
     }
@@ -54,13 +41,6 @@ impl ProviderAdapter for ClaudeMessagesAdapter {
         &self,
         resp: &UpstreamResponse,
     ) -> Result<serde_json::Value, ProtocolError> {
-        if resp.status >= 400 {
-            return Err(ProtocolError::UpstreamError {
-                status: resp.status,
-                message: json_err_msg(&resp.body),
-            });
-        }
-
         let anthropic_resp: AnthropicResponse = serde_json::from_value(resp.body.clone())
             .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
 
@@ -74,16 +54,10 @@ impl ProviderAdapter for ClaudeMessagesAdapter {
     }
 }
 
-fn json_err_msg(body: &serde_json::Value) -> String {
-    body["error"]["message"]
-        .as_str()
-        .unwrap_or_else(|| body["error"]["type"].as_str().unwrap_or("unknown error"))
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderMap;
 
     fn test_provider() -> Provider {
         Provider {

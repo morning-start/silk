@@ -12,6 +12,7 @@ import {
   NCard,
   NSpace,
   useMessage,
+  useDialog,
 } from "naive-ui";
 import { useGatewayStore } from "../stores/gateway";
 import { storeToRefs } from "pinia";
@@ -20,6 +21,7 @@ import { api, type GatewayKey } from "../api";
 const gatewayStore = useGatewayStore();
 const { status, loading } = storeToRefs(gatewayStore);
 const message = useMessage();
+const dialog = useDialog();
 
 const formRef = ref<any>(null);
 const formValue = ref({
@@ -58,13 +60,21 @@ async function toggleKey(key: GatewayKey) {
 }
 
 async function deleteKey(id: string) {
-  try {
-    await api.deleteGatewayKey(id);
-    keys.value = keys.value.filter((k) => k.id !== id);
-    message.success("已删除");
-  } catch {
-    message.error("删除失败");
-  }
+  dialog.warning({
+    title: "确认删除",
+    content: "删除后无法恢复，确定要删除此 Key 吗？",
+    positiveText: "删除",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        await api.deleteGatewayKey(id);
+        keys.value = keys.value.filter((k) => k.id !== id);
+        message.success("已删除");
+      } catch {
+        message.error("删除失败");
+      }
+    },
+  });
 }
 
 async function addKey() {

@@ -43,32 +43,9 @@ impl LogResponse {
             .as_ref()
             .and_then(|id| cache.get(id))
             .cloned();
-        Self {
-            id: log.id,
-            request_id: log.request_id,
-            timestamp: log.timestamp.to_string(),
-            method: log.method,
-            path: log.path,
-            route_id: log.route_id,
-            inbound_protocol: log.inbound_protocol,
-            outbound_protocol: log.outbound_protocol,
-            response_status: log.status_code,
-            duration_ms: log.duration_ms,
-            provider_id: log.provider_id,
-            provider_name,
-            error_message: log.error_message,
-            error_code: log.error_code,
-            model_used: log.model_used,
-            retry_count: log.retry_count,
-            stream_enabled: log.stream_enabled != 0,
-            cache_hit: log.cache_hit != 0,
-            request_size_bytes: log.request_size_bytes,
-            response_size_bytes: log.response_size_bytes,
-            tokens_input: log.tokens_input,
-            tokens_output: log.tokens_output,
-            cost: log.cost,
-            auth_key_name: log.auth_key_name,
-        }
+        let mut resp = Self::from(log);
+        resp.provider_name = provider_name;
+        resp
     }
 }
 
