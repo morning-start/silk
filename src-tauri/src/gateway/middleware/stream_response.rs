@@ -214,8 +214,10 @@ impl SseParser {
         let mut has_data = false;
 
         for line in raw.lines() {
-            if line.starts_with(": ") {
-                event.comment = Some(line[2..].to_string());
+            if line.starts_with(':') {
+                // SSE 规范：注释以 : 开头，可选空格
+                let comment = line.strip_prefix(": ").or_else(|| line.strip_prefix(':'));
+                event.comment = comment.map(|s| s.to_string());
             } else if let Some(rest) = line.strip_prefix("event: ") {
                 event.event = Some(rest.to_string());
                 has_data = true;
@@ -227,8 +229,11 @@ impl SseParser {
                 };
                 has_data = true;
             } else if let Some(rest) = line.strip_prefix("id: ") {
-                event.id = Some(rest.to_string());
-                has_data = true;
+                // SSE 规范：id 字段包含 null 字符时应忽略
+                if !rest.contains('\0') {
+                    event.id = Some(rest.to_string());
+                    has_data = true;
+                }
             } else if let Some(rest) = line.strip_prefix("retry: ") {
                 event.retry = rest.parse().ok();
                 has_data = true;

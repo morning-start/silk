@@ -39,6 +39,12 @@ impl From<serde_json::Error> for ProtocolError {
 }
 
 // ---------------------------------------------------------------------------
+// 共享常量
+// ---------------------------------------------------------------------------
+
+const ANTHROPIC_API_VERSION: &str = "2023-06-01";
+
+// ---------------------------------------------------------------------------
 // 共享工具函数
 // ---------------------------------------------------------------------------
 
@@ -80,7 +86,7 @@ pub fn build_anthropic_headers(api_key: &str) -> Result<HeaderMap, ProtocolError
             reason: e.to_string(),
         })?,
     );
-    headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+    headers.insert("anthropic-version", HeaderValue::from_static(ANTHROPIC_API_VERSION));
     headers.insert(
         axum::http::header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
