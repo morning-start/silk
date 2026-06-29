@@ -1,13 +1,13 @@
 pub mod application;
 pub mod commands;
 pub mod crypto;
-pub mod error;
 pub mod gateway;
 pub mod load_balancer;
 pub mod models;
 pub mod persistence;
 pub mod protocol;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -17,8 +17,7 @@ use sqlx::SqlitePool;
 use tauri::Manager;
 use tokio::sync::RwLock;
 
-use crate::application::gateway_service::start_existing_gateway;
-use crate::gateway::load_gateway_context;
+use crate::application::gateway_service::{load_gateway_context, start_existing_gateway};
 use crate::gateway::{GatewayContext, GatewayServerHandle};
 
 /// 数据库连接池（全局唯一）
@@ -29,6 +28,24 @@ static DB_POOL: tokio::sync::OnceCell<SqlitePool> = tokio::sync::OnceCell::const
 pub struct AppState {
     pub gateway: Arc<RwLock<GatewayContext>>,
     pub gateway_server: Arc<RwLock<Option<GatewayServerHandle>>>,
+    /// 渠道 id → name 映射表，用于日志展示时解析渠道名称
+    pub provider_name_cache: Arc<RwLock<HashMap<String, String>>>,
+}
+
+/// 从 providers 表加载 id → name 映射
+pub async fn load_provider_name_cache(pool: &SqlitePool) -> HashMap<String, String> {
+    use sqlx::Row;
+    let rows = sqlx::query("SELECT id, name FROM providers")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    rows.iter()
+        .filter_map(|row| {
+            let id: String = row.get("id");
+            let name: String = row.get("name");
+            Some((id, name))
+        })
+        .collect()
 }
 
 /// 初始化数据库连接池并运行迁移
@@ -49,6 +66,30 @@ pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx:
                 .min_connections(1)
                 .acquire_timeout(std::time::Duration::from_secs(5))
                 .connect_with(conn_opts)
+                .await?;
+
+            // SQLite 运行时 PRAGMA 优化
+            sqlx::query("PRAGMA journal_mode = WAL")
+                .execute(&pool)
+                .await
+                .map_err(|e| {
+                    eprintln!("[silk] 启用 WAL 模式失败: {e}");
+                    e
+                })?;
+            sqlx::query("PRAGMA synchronous = NORMAL")
+                .execute(&pool)
+                .await?;
+            sqlx::query("PRAGMA temp_store = MEMORY")
+                .execute(&pool)
+                .await?;
+            sqlx::query("PRAGMA cache_size = -8000")
+                .execute(&pool)
+                .await?;
+            sqlx::query("PRAGMA busy_timeout = 5000")
+                .execute(&pool)
+                .await?;
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&pool)
                 .await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
@@ -110,6 +151,10 @@ pub fn run() {
                 // 加载网关上下文（不启动 HTTP 服务，由用户手动启动）
                 let gateway = load_gateway_context(pool.clone(), log_sender).await?;
 
+                // 加载渠道名称缓存
+                let provider_name_cache =
+                    Arc::new(RwLock::new(load_provider_name_cache(pool).await));
+
                 // 启动后台日志清理任务
                 let cleanup_handle = crate::gateway::log_cleanup::spawn_log_cleanup_task(
                     pool.clone(),
@@ -120,6 +165,7 @@ pub fn run() {
                 app.manage(AppState {
                     gateway: Arc::new(RwLock::new(gateway)),
                     gateway_server: Arc::new(RwLock::new(None)),
+                    provider_name_cache,
                 });
 
                 let state = app.state::<AppState>();
@@ -155,9 +201,6 @@ pub fn run() {
             commands::delete_routing_rule,
             // 日志管理
             commands::list_logs,
-            commands::logs_by_provider,
-            commands::logs_by_request_id,
-            commands::count_logs,
             commands::cleanup_logs,
             commands::clear_all_logs,
             commands::export_logs_csv,
