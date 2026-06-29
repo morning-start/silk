@@ -83,8 +83,31 @@ const columns: DataTableColumns<RequestLog> = [
       return h("span", { class: "num" }, total ? `${total}` : "-");
     },
   },
+  {
+    title: "费用",
+    key: "cost",
+    width: 80,
+    render(row) {
+      if (row.cost == null) return h("span", { class: "num" }, "-");
+      return h("span", { class: "num" }, `$${row.cost.toFixed(6)}`);
+    },
+  },
   { title: "模型", key: "model_used", width: 110 },
-  { title: "渠道", key: "provider_id", width: 100 },
+  { title: "渠道", key: "provider_name", width: 120,
+    render(row) {
+      const label = row.provider_name || row.provider_id || "-";
+      return h("span", { class: "text-sm" }, label);
+    },
+  },
+  {
+    title: "重试",
+    key: "retry_count",
+    width: 60,
+    render(row) {
+      if (row.retry_count === 0) return h("span", { class: "num" }, "-");
+      return h(NTag, { size: "small", type: "warning" }, { default: () => row.retry_count });
+    },
+  },
   {
     title: "流式",
     key: "stream_enabled",
@@ -106,7 +129,14 @@ const columns: DataTableColumns<RequestLog> = [
 ];
 
 const filteredLogs = computed(() => {
-  return logs.value;
+  if (statusFilter.value === "all") return logs.value;
+  const prefix = statusFilter.value.charAt(0);
+  return logs.value.filter((log) => {
+    const status = log.response_status;
+    if (status == null) return false;
+    const statusStr = String(status);
+    return statusStr.startsWith(prefix);
+  });
 });
 
 function handleViewDetail(row: RequestLog) {
@@ -271,17 +301,28 @@ onMounted(() => {
           <span class="detail-label">耗时：</span>
           <span class="detail-value">{{ selectedLog.duration_ms }}ms</span>
         </div>
+        <div class="detail-row" v-if="selectedLog.inbound_protocol || selectedLog.outbound_protocol">
+          <span class="detail-label">协议(入→出)：</span>
+          <NTag size="small">{{ selectedLog.inbound_protocol || '-' }}</NTag>
+          <span style="margin: 0 4px">→</span>
+          <NTag size="small">{{ selectedLog.outbound_protocol || '-' }}</NTag>
+        </div>
+        <div class="detail-row" v-if="selectedLog.route_id">
+          <span class="detail-label">路由规则：</span>
+          <span class="detail-value text-mono">{{ selectedLog.route_id }}</span>
+        </div>
         <div class="detail-row" v-if="selectedLog.provider_id">
           <span class="detail-label">渠道：</span>
-          <span class="detail-value">{{ selectedLog.provider_id }}</span>
+          <span class="detail-value">{{ selectedLog.provider_name || selectedLog.provider_id }}</span>
+          <span v-if="selectedLog.provider_name && selectedLog.provider_name !== selectedLog.provider_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.provider_id }})</span>
         </div>
         <div class="detail-row" v-if="selectedLog.model_used">
           <span class="detail-label">模型：</span>
           <span class="detail-value">{{ selectedLog.model_used }}</span>
         </div>
-        <div class="detail-row" v-if="selectedLog.error_message">
-          <span class="detail-label" style="color: #ef4444">错误：</span>
-          <span class="detail-value" style="color: #ef4444">{{ selectedLog.error_message }}</span>
+        <div class="detail-row" v-if="selectedLog.auth_key_name">
+          <span class="detail-label">认证 Key：</span>
+          <NTag size="small" type="success">{{ selectedLog.auth_key_name }}</NTag>
         </div>
         <div class="detail-row">
           <span class="detail-label">请求大小：</span>
@@ -294,6 +335,30 @@ onMounted(() => {
         <div class="detail-row">
           <span class="detail-label">Token (输入/输出)：</span>
           <span class="detail-value">{{ selectedLog.tokens_input || 0 }} / {{ selectedLog.tokens_output || 0 }}</span>
+        </div>
+        <div class="detail-row" v-if="selectedLog.cost != null">
+          <span class="detail-label">费用：</span>
+          <span class="detail-value num">${{ selectedLog.cost.toFixed(8) }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">流式：</span>
+          <NTag size="small" :type="selectedLog.stream_enabled ? 'info' : 'default'">{{ selectedLog.stream_enabled ? '是' : '否' }}</NTag>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">缓存命中：</span>
+          <NTag size="small" :type="selectedLog.cache_hit ? 'success' : 'default'">{{ selectedLog.cache_hit ? '是' : '否' }}</NTag>
+        </div>
+        <div class="detail-row" v-if="selectedLog.retry_count > 0">
+          <span class="detail-label">重试次数：</span>
+          <NTag size="small" type="warning">{{ selectedLog.retry_count }}</NTag>
+        </div>
+        <div class="detail-row" v-if="selectedLog.error_message">
+          <span class="detail-label" style="color: #ef4444">错误：</span>
+          <span class="detail-value" style="color: #ef4444">{{ selectedLog.error_message }}</span>
+        </div>
+        <div class="detail-row" v-if="selectedLog.error_code">
+          <span class="detail-label">错误码：</span>
+          <NTag size="small" type="error">{{ selectedLog.error_code }}</NTag>
         </div>
       </div>
       <template #footer>
