@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::error::{require_db, require_found, ServiceError};
 use crate::models::{
     GroupMember, NewGroupMember, NewProviderGroup, ProviderGroup, UpdateGroupMember,
     UpdateProviderGroup,
@@ -61,31 +62,24 @@ pub struct UpdateMemberPayload {
     pub enabled: Option<bool>,
 }
 
-pub async fn list() -> Result<Vec<ProviderGroup>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    GroupRepo::find_all_groups(pool)
-        .await
-        .map_err(|e| format!("查询分组失败: {e}"))
+pub async fn list() -> Result<Vec<ProviderGroup>, ServiceError> {
+    let pool = require_db()?;
+    GroupRepo::find_all_groups(pool).await.map_err(ServiceError::from)
 }
 
-pub async fn find_by_model(model_name: String) -> Result<Vec<ProviderGroup>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+pub async fn find_by_model(model_name: String) -> Result<Vec<ProviderGroup>, ServiceError> {
+    let pool = require_db()?;
     GroupRepo::find_groups_by_model(pool, &model_name)
         .await
-        .map_err(|e| format!("查询分组失败: {e}"))
+        .map_err(ServiceError::from)
 }
 
-pub async fn get(id: String) -> Result<GroupWithMembersResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+pub async fn get(id: String) -> Result<GroupWithMembersResponse, ServiceError> {
+    let pool = require_db()?;
 
-    let group = GroupRepo::find_group_by_id(pool, &id)
-        .await
-        .map_err(|e| format!("查询分组失败: {e}"))?
-        .ok_or("分组不存在")?;
+    let group = require_found(GroupRepo::find_group_by_id(pool, &id).await?, "分组")?;
 
-    let members = GroupRepo::find_members_by_group(pool, &id)
-        .await
-        .map_err(|e| format!("查询成员失败: {e}"))?;
+    let members = GroupRepo::find_members_by_group(pool, &id).await?;
 
     Ok(GroupWithMembersResponse {
         group: group.into(),
@@ -96,8 +90,8 @@ pub async fn get(id: String) -> Result<GroupWithMembersResponse, String> {
 pub async fn create(
     state: &AppState,
     payload: CreateGroupPayload,
-) -> Result<ProviderGroup, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+) -> Result<ProviderGroup, ServiceError> {
+    let pool = require_db()?;
 
     let new = NewProviderGroup {
         name: payload.name,
@@ -106,16 +100,9 @@ pub async fn create(
         enabled: payload.enabled,
     };
 
-    let group = GroupRepo::create_group(pool, &new)
-        .await
-        .map_err(|e| format!("创建分组失败: {e}"))?;
+    let group = GroupRepo::create_group(pool, &new).await?;
 
-    let gateway_guard = state.gateway.read().await;
-    gateway_guard
-        .group_manager
-        .reload_group(pool, &group.id)
-        .await
-        .ok();
+    state.reload_group(pool, &group.id).await;
 
     Ok(group)
 }
@@ -124,8 +111,8 @@ pub async fn update(
     state: &AppState,
     id: String,
     payload: UpdateGroupPayload,
-) -> Result<ProviderGroup, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+) -> Result<ProviderGroup, ServiceError> {
+    let pool = require_db()?;
 
     let update = UpdateProviderGroup {
         name: payload.name,
@@ -134,36 +121,19 @@ pub async fn update(
         enabled: payload.enabled,
     };
 
-    let group = GroupRepo::update_group(pool, &id, &update)
-        .await
-        .map_err(|e| format!("更新分组失败: {e}"))?
-        .ok_or("分组不存在")?;
+    let group = require_found(GroupRepo::update_group(pool, &id, &update).await?, "分组")?;
 
-    let gateway_guard = state.gateway.read().await;
-    gateway_guard
-        .group_manager
-        .reload_group(pool, &id)
-        .await
-        .ok();
+    state.reload_group(pool, &id).await;
 
     Ok(group)
 }
 
-pub async fn delete(state: &AppState, id: String) -> Result<bool, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let deleted = GroupRepo::delete_group(pool, &id)
-        .await
-        .map_err(|e| format!("删除分组失败: {e}"))?;
+pub async fn delete(state: &AppState, id: String) -> Result<bool, ServiceError> {
+    let pool = require_db()?;
+    let deleted = GroupRepo::delete_group(pool, &id).await?;
 
     if deleted {
-        state
-            .gateway
-            .read()
-            .await
-            .group_manager
-            .reload_all(pool)
-            .await
-            .ok();
+        state.reload_all_groups(pool).await;
     }
 
     Ok(deleted)
@@ -173,8 +143,8 @@ pub async fn add_member(
     state: &AppState,
     group_id: String,
     payload: AddMemberPayload,
-) -> Result<GroupMember, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+) -> Result<GroupMember, ServiceError> {
+    let pool = require_db()?;
 
     let new = NewGroupMember {
         group_id: group_id.clone(),
@@ -182,16 +152,9 @@ pub async fn add_member(
         weight: payload.weight,
     };
 
-    let member = GroupRepo::add_member(pool, &new)
-        .await
-        .map_err(|e| format!("添加成员失败: {e}"))?;
+    let member = GroupRepo::add_member(pool, &new).await?;
 
-    let gateway_guard = state.gateway.read().await;
-    gateway_guard
-        .group_manager
-        .reload_group(pool, &member.group_id)
-        .await
-        .ok();
+    state.reload_group(pool, &member.group_id).await;
 
     Ok(member)
 }
@@ -200,8 +163,8 @@ pub async fn update_member(
     state: &AppState,
     id: String,
     payload: UpdateMemberPayload,
-) -> Result<GroupMember, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+) -> Result<GroupMember, ServiceError> {
+    let pool = require_db()?;
 
     let update = UpdateGroupMember {
         weight: payload.weight,
@@ -209,47 +172,31 @@ pub async fn update_member(
     };
 
     let member = GroupRepo::update_member(pool, &id, &update)
-        .await
-        .map_err(|e| format!("更新成员失败: {e}"))?
-        .ok_or("成员不存在")?;
+        .await?
+        .ok_or(ServiceError::NotFound("成员".to_string()))?;
 
-    let gateway_guard = state.gateway.read().await;
-    gateway_guard
-        .group_manager
-        .reload_group(pool, &member.group_id)
-        .await
-        .ok();
+    state.reload_group(pool, &member.group_id).await;
 
     Ok(member)
 }
 
-pub async fn remove_member(state: &AppState, id: String) -> Result<bool, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+pub async fn remove_member(state: &AppState, id: String) -> Result<bool, ServiceError> {
+    let pool = require_db()?;
 
     let member = sqlx::query_as::<_, GroupMember>(
         r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE id = ?1"#,
     )
     .bind(&id)
     .fetch_optional(pool)
-    .await
-    .map_err(|e| format!("查询成员失败: {e}"))?;
+    .await?;
 
     let group_id = member.map(|m| m.group_id.clone());
 
-    let deleted = GroupRepo::remove_member(pool, &id)
-        .await
-        .map_err(|e| format!("移除成员失败: {e}"))?;
+    let deleted = GroupRepo::remove_member(pool, &id).await?;
 
     if deleted {
         if let Some(gid) = group_id {
-            state
-                .gateway
-                .read()
-                .await
-                .group_manager
-                .reload_group(pool, &gid)
-                .await
-                .ok();
+            state.reload_group(pool, &gid).await;
         }
     }
 

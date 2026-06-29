@@ -116,14 +116,6 @@ impl Provider {
         }
     }
 
-    /// 按负载均衡策略选择一个 API Key（明文存储，直接返回）
-    pub fn decrypted_api_key(
-        &self,
-        _master_key: &[u8; 32],
-    ) -> Result<String, crate::crypto::CryptoError> {
-        self.select_api_key()
-    }
-
     /// 获取超时时间（秒）
     pub fn timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.timeout_seconds as u64)

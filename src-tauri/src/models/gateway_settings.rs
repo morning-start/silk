@@ -10,12 +10,6 @@ pub struct GatewaySettings {
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
-    /// 是否启用限流
-    pub rate_limit_enabled: i64,
-    /// 每分钟请求上限
-    pub rate_limit_max_requests_per_minute: i64,
-    /// 每分钟 token 上限
-    pub rate_limit_max_tokens_per_minute: i64,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
@@ -28,9 +22,6 @@ pub struct UpdateGatewaySettings {
     pub log_retention_days: Option<i64>,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
-    pub rate_limit_enabled: Option<bool>,
-    pub rate_limit_max_requests_per_minute: Option<i64>,
-    pub rate_limit_max_tokens_per_minute: Option<i64>,
 }
 
 impl Default for UpdateGatewaySettings {
@@ -42,9 +33,6 @@ impl Default for UpdateGatewaySettings {
             log_retention_days: None,
             default_provider_id: None,
             default_route_id: None,
-            rate_limit_enabled: None,
-            rate_limit_max_requests_per_minute: None,
-            rate_limit_max_tokens_per_minute: None,
         }
     }
 }

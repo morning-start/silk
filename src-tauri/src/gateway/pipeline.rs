@@ -5,8 +5,8 @@ use axum::response::Response;
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::middleware::{
-    authenticate, dispatch_upstream, extract, finalize, persist_log, rate_limit, resolve_route,
-    select_channel, transform_request, transform_response,
+    authenticate, dispatch_upstream, extract, finalize, persist_log, resolve_route, select_channel,
+    transform_request, transform_response,
 };
 
 pub struct StageError {
@@ -63,8 +63,6 @@ impl GatewayPipeline {
     ) -> Result<RequestContext, StageError> {
         let ctx = extract::read_body(ctx, body).await?;
         let ctx = authenticate::run(ctx).await?;
-        // 认证后 IP 级限流检查
-        let ctx = rate_limit::run(ctx, &self.runtime).await?;
         let ctx = resolve_route::run(&self.runtime, ctx).await?;
 
         // 如果路由阶段已构建响应（如 /v1/models），跳过后续流程
@@ -85,9 +83,6 @@ impl GatewayPipeline {
         loop {
             // 清理上次渠道的 Key 失败记录
             ctx.failed_keys.clear();
-
-            // 每换一个渠道做一次 per-provider 限流检查
-            ctx = rate_limit::run(ctx, &self.runtime).await?;
 
             // 中层循环：换 Key（Level 2）
             loop {

@@ -1,17 +1,10 @@
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
+use crate::error::{require_db, require_found, ServiceError};
 use crate::models::{NewProvider, Provider, ProviderKeyEntry, UpdateProvider};
 use crate::persistence::ProviderRepo;
 use crate::AppState;
-
-/// 从 DB 重新加载渠道名称缓存
-async fn refresh_name_cache(state: &AppState) {
-    if let Some(pool) = crate::get_db_pool() {
-        let cache = crate::load_provider_name_cache(pool).await;
-        *state.provider_name_cache.write().await = cache;
-    }
-}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct ProviderResponse {
@@ -88,11 +81,9 @@ pub struct ProviderModelInfo {
     pub supported_endpoint_types: Vec<String>,
 }
 
-pub async fn list() -> Result<Vec<ProviderResponse>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let providers = ProviderRepo::find_all(pool)
-        .await
-        .map_err(|e| format!("查询 Provider 失败: {e}"))?;
+pub async fn list() -> Result<Vec<ProviderResponse>, ServiceError> {
+    let pool = require_db()?;
+    let providers = ProviderRepo::find_all(pool).await?;
 
     Ok(providers
         .into_iter()
@@ -100,21 +91,17 @@ pub async fn list() -> Result<Vec<ProviderResponse>, String> {
         .collect())
 }
 
-pub async fn get(id: String) -> Result<ProviderResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let provider = ProviderRepo::find_by_id(pool, &id)
-        .await
-        .map_err(|e| format!("查询 Provider 失败: {e}"))?
-        .ok_or("Provider 不存在")?;
-
+pub async fn get(id: String) -> Result<ProviderResponse, ServiceError> {
+    let pool = require_db()?;
+    let provider = require_found(ProviderRepo::find_by_id(pool, &id).await?, "Provider")?;
     Ok(ProviderResponse::from_provider(provider))
 }
 
 pub async fn create(
     state: &AppState,
     payload: CreateProviderPayload,
-) -> Result<ProviderResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+) -> Result<ProviderResponse, ServiceError> {
+    let pool = require_db()?;
 
     let new = NewProvider {
         name: payload.name,
@@ -132,11 +119,9 @@ pub async fn create(
         metadata_json: payload.metadata_json,
     };
 
-    let provider = ProviderRepo::create(pool, &new)
-        .await
-        .map_err(|e| format!("创建 Provider 失败: {e}"))?;
+    let provider = ProviderRepo::create(pool, &new).await?;
 
-    refresh_name_cache(state).await;
+    state.refresh_name_cache().await;
 
     Ok(ProviderResponse::from_provider(provider))
 }
@@ -145,8 +130,8 @@ pub async fn update(
     state: &AppState,
     id: String,
     payload: UpdateProviderPayload,
-) -> Result<ProviderResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+) -> Result<ProviderResponse, ServiceError> {
+    let pool = require_db()?;
 
     let update = UpdateProvider {
         name: payload.name,
@@ -166,31 +151,18 @@ pub async fn update(
         metadata_json: payload.metadata_json,
     };
 
-    let provider = ProviderRepo::update(pool, &id, &update)
-        .await
-        .map_err(|e| format!("更新 Provider 失败: {e}"))?
-        .ok_or("Provider 不存在")?;
+    let provider = require_found(ProviderRepo::update(pool, &id, &update).await?, "Provider")?;
 
-    state
-        .gateway
-        .read()
-        .await
-        .provider_cache
-        .invalidate(&id)
-        .await;
-
-    refresh_name_cache(state).await;
+    state.invalidate_cache(&id).await;
+    state.refresh_name_cache().await;
 
     Ok(ProviderResponse::from_provider(provider))
 }
 
-pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, ServiceError> {
+    let pool = require_db()?;
 
-    let provider = ProviderRepo::find_by_id(pool, &id)
-        .await
-        .map_err(|e| format!("查询 Provider 失败: {e}"))?
-        .ok_or("Provider 不存在")?;
+    let provider = require_found(ProviderRepo::find_by_id(pool, &id).await?, "Provider")?;
 
     let base_url = crate::models::Provider::normalize_api_base_url(&provider.api_base_url);
     let test_url = format!("{}/v1/models", base_url);
@@ -199,13 +171,13 @@ pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
-        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
+        .map_err(|e| ServiceError::Internal(format!("构建 HTTP 客户端失败: {e}")))?;
 
     let start = std::time::Instant::now();
 
     let api_key = provider
-        .decrypted_api_key(&[0u8; 32]) // 明文存储，主密钥不再使用
-        .map_err(|e| format!("获取 API Key 失败: {e}"))?;
+        .select_api_key()
+        .map_err(|e| ServiceError::Internal(format!("获取 API Key 失败: {e}")))?;
 
     let result = client
         .get(&test_url)
@@ -241,17 +213,9 @@ pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, 
     };
 
     let now = chrono::Utc::now().naive_utc();
-    ProviderRepo::update_health_status(pool, &id, health_status, now)
-        .await
-        .map_err(|e| format!("更新健康状态失败: {e}"))?;
+    ProviderRepo::update_health_status(pool, &id, health_status, now).await?;
 
-    state
-        .gateway
-        .read()
-        .await
-        .provider_cache
-        .invalidate(&id)
-        .await;
+    state.invalidate_cache(&id).await;
 
     Ok(ProviderTestResponse {
         status_code,
@@ -261,21 +225,13 @@ pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, 
     })
 }
 
-pub async fn delete(state: &AppState, id: String) -> Result<bool, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let deleted = ProviderRepo::delete(pool, &id)
-        .await
-        .map_err(|e| format!("删除 Provider 失败: {e}"))?;
+pub async fn delete(state: &AppState, id: String) -> Result<bool, ServiceError> {
+    let pool = require_db()?;
+    let deleted = ProviderRepo::delete(pool, &id).await?;
 
     if deleted {
-        state
-            .gateway
-            .read()
-            .await
-            .provider_cache
-            .invalidate(&id)
-            .await;
-        refresh_name_cache(state).await;
+        state.invalidate_cache(&id).await;
+        state.refresh_name_cache().await;
     }
 
     Ok(deleted)
@@ -283,7 +239,7 @@ pub async fn delete(state: &AppState, id: String) -> Result<bool, String> {
 
 pub async fn fetch_models(
     payload: FetchModelsPayload,
-) -> Result<Vec<ProviderModelInfo>, String> {
+) -> Result<Vec<ProviderModelInfo>, ServiceError> {
     let base_url = crate::models::Provider::normalize_api_base_url(&payload.api_base_url);
     let test_url = format!("{}/v1/models", base_url);
     let timeout_secs = payload.timeout_seconds.unwrap_or(10).min(30).max(1) as u64;
@@ -295,7 +251,7 @@ pub async fn fetch_models(
         .build()
         .map_err(|e| {
             error!("[fetch_provider_models] 构建客户端失败: {e}");
-            format!("构建 HTTP 客户端失败: {e}")
+            ServiceError::Internal(format!("构建 HTTP 客户端失败: {e}"))
         })?;
 
     let mut req = client
@@ -312,7 +268,7 @@ pub async fn fetch_models(
 
     let resp = req.send().await.map_err(|e| {
         error!("[fetch_provider_models] 网络请求失败: {e}");
-        format!("请求模型列表失败: {e}")
+        ServiceError::Internal(format!("请求模型列表失败: {e}"))
     })?;
 
     if !resp.status().is_success() {
@@ -324,12 +280,12 @@ pub async fn fetch_models(
             format!("{}: {}", status, body)
         };
         warn!("[fetch_provider_models] HTTP {status} 非成功状态码: {msg}");
-        return Err(msg);
+        return Err(ServiceError::BadRequest(msg));
     }
 
     let text = resp.text().await.map_err(|e| {
         error!("[fetch_provider_models] 读取响应体失败: {e}");
-        format!("读取响应失败: {e}")
+        ServiceError::Internal(format!("读取响应失败: {e}"))
     })?;
 
     info!("[fetch_provider_models] 响应体长度: {} bytes", text.len());
@@ -339,14 +295,14 @@ pub async fn fetch_models(
             "[fetch_provider_models] JSON 解析失败: {e}, 原始响应前200字符: {}",
             &text[..text.len().min(200)]
         );
-        format!("解析响应 JSON 失败: {e}")
+        ServiceError::Internal(format!("解析响应 JSON 失败: {e}"))
     })?;
 
     if let Some(success) = json.get("success").and_then(|v| v.as_bool()) {
         if !success {
             let msg = json["message"].as_str().unwrap_or("未知错误");
             warn!("[fetch_provider_models] API 返回 success: false, message: {msg}");
-            return Err(msg.to_string());
+            return Err(ServiceError::BadRequest(msg.to_string()));
         }
     }
 
@@ -356,7 +312,7 @@ pub async fn fetch_models(
             "[fetch_provider_models] {msg}, 完整响应体: {}",
             serde_json::to_string_pretty(&json).unwrap_or_default()
         );
-        msg
+        ServiceError::BadRequest(msg)
     })?;
 
     let mut result: Vec<ProviderModelInfo> = Vec::new();
@@ -381,7 +337,7 @@ pub async fn fetch_models(
 
     if result.is_empty() {
         warn!("[fetch_provider_models] data 数组存在但未解析到任何模型 id");
-        return Err("未获取到任何模型".to_string());
+        return Err(ServiceError::BadRequest("未获取到任何模型".to_string()));
     }
 
     result.sort_by(|a, b| a.id.cmp(&b.id));

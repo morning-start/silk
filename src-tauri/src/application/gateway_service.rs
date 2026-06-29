@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
+use crate::error::ServiceError;
 use crate::gateway::context::{GatewayContext, ProviderCache, RouteManager};
 use crate::gateway::group_manager::GroupManager;
-use crate::gateway::middleware::rate_limit::RateLimitState;
 use crate::gateway::{spawn_gateway_server};
 use crate::persistence::GatewaySettingsRepo;
 use crate::protocol::AdapterRegistry;
@@ -29,9 +29,6 @@ pub struct GatewaySettingsInfo {
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
-    pub rate_limit_enabled: bool,
-    pub rate_limit_max_requests_per_minute: i64,
-    pub rate_limit_max_tokens_per_minute: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -48,7 +45,7 @@ pub struct GatewayStopResponse {
     pub message: String,
 }
 
-pub async fn status(state: &AppState) -> Result<GatewayStatusResponse, String> {
+pub async fn status(state: &AppState) -> Result<GatewayStatusResponse, ServiceError> {
     let running = {
         let server = state.gateway_server.read().await;
         server.is_some()
@@ -72,17 +69,17 @@ pub async fn status(state: &AppState) -> Result<GatewayStatusResponse, String> {
     })
 }
 
-pub async fn start(state: &AppState) -> Result<GatewayStartResponse, String> {
+pub async fn start(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
     {
         let server = state.gateway_server.read().await;
         if server.is_some() {
-            return Err("网关已在运行中".to_string());
+            return Err(ServiceError::BadRequest("网关已在运行中".to_string()));
         }
     }
     start_gateway_inner(state).await
 }
 
-pub async fn stop(state: &AppState) -> Result<GatewayStopResponse, String> {
+pub async fn stop(state: &AppState) -> Result<GatewayStopResponse, ServiceError> {
     let mut server = state.gateway_server.write().await;
 
     if let Some(handle) = server.take() {
@@ -92,11 +89,11 @@ pub async fn stop(state: &AppState) -> Result<GatewayStopResponse, String> {
             message: "网关已停止".to_string(),
         })
     } else {
-        Err("网关未运行".to_string())
+        Err(ServiceError::BadRequest("网关未运行".to_string()))
     }
 }
 
-pub async fn restart(state: &AppState) -> Result<GatewayStartResponse, String> {
+pub async fn restart(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
     {
         let mut server = state.gateway_server.write().await;
         if let Some(handle) = server.take() {
@@ -106,18 +103,18 @@ pub async fn restart(state: &AppState) -> Result<GatewayStartResponse, String> {
     start_gateway_inner(state).await
 }
 
-pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResponse, String> {
+pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
     {
         let server = state.gateway_server.read().await;
         if server.is_some() {
-            return Err("网关已在运行中".to_string());
+            return Err(ServiceError::BadRequest("网关已在运行中".to_string()));
         }
     }
 
     let gateway = state.gateway.read().await.clone();
     let gateway_server = spawn_gateway_server(gateway.clone())
         .await
-        .map_err(|e| format!("启动网关失败: {e}"))?;
+        .map_err(|e| ServiceError::Internal(format!("启动网关失败: {e}")))?;
 
     {
         let mut server = state.gateway_server.write().await;
@@ -132,18 +129,18 @@ pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResp
 }
 
 /// start() 和 restart() 的公共启动逻辑
-async fn start_gateway_inner(state: &AppState) -> Result<GatewayStartResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
+async fn start_gateway_inner(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
+    let pool = crate::get_db_pool().ok_or(ServiceError::DbNotInitialized)?;
     let (log_sender, log_receiver) =
         tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
     let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
 
     let gateway = load_gateway_context(pool.clone(), log_sender)
         .await
-        .map_err(|e| format!("加载网关上下文失败: {e}"))?;
+        .map_err(|e| ServiceError::Internal(format!("加载网关上下文失败: {e}")))?;
     let gateway_server = spawn_gateway_server(gateway.clone())
         .await
-        .map_err(|e| format!("启动网关失败: {e}"))?;
+        .map_err(|e| ServiceError::Internal(format!("启动网关失败: {e}")))?;
 
     {
         let mut state_gateway = state.gateway.write().await;
@@ -171,13 +168,6 @@ pub async fn load_gateway_context(
     let group_manager = Arc::new(GroupManager::new());
     group_manager.load(&pool).await?;
 
-    // 从设置中构建限流状态
-    let rate_limit_state = Arc::new(RateLimitState::new(
-        settings.rate_limit_enabled != 0,
-        settings.rate_limit_max_requests_per_minute as u64,
-        settings.rate_limit_max_tokens_per_minute as u64,
-    ));
-
     Ok(GatewayContext::new(
         pool,
         Arc::new(RwLock::new(settings)),
@@ -186,7 +176,6 @@ pub async fn load_gateway_context(
         log_sender,
         adapter_registry,
         group_manager,
-        rate_limit_state,
     ))
 }
 
@@ -200,9 +189,6 @@ impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
             log_retention_days: settings.log_retention_days,
             default_provider_id: settings.default_provider_id.clone(),
             default_route_id: settings.default_route_id.clone(),
-            rate_limit_enabled: settings.rate_limit_enabled != 0,
-            rate_limit_max_requests_per_minute: settings.rate_limit_max_requests_per_minute,
-            rate_limit_max_tokens_per_minute: settings.rate_limit_max_tokens_per_minute,
             created_at: settings.created_at.to_string(),
             updated_at: settings.updated_at.to_string(),
         }
@@ -211,6 +197,7 @@ impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -245,6 +232,7 @@ mod tests {
         let state = AppState {
             gateway: Arc::new(RwLock::new(gateway)),
             gateway_server: Arc::new(RwLock::new(None)),
+            provider_name_cache: Arc::new(RwLock::new(HashMap::new())),
         };
 
         start_existing_gateway(&state)

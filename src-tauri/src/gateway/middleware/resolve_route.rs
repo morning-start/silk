@@ -8,10 +8,16 @@ use crate::persistence::{ModelMappingRepo, ProviderRepo};
 use axum::response::IntoResponse;
 
 /// Provider 协议 → 适配器名称映射
+///
+/// 同时支持短名（chat/response/message）和完整适配器名（openai_chat 等），
+/// 完整名直接 identity 映射，避免前端传完整名时无法识别。
 const PROTOCOL_ADAPTER_MAP: &[(&str, &str)] = &[
     ("chat", "openai_chat"),
     ("response", "openai_response"),
     ("message", "claude_messages"),
+    ("openai_chat", "openai_chat"),
+    ("openai_response", "openai_response"),
+    ("claude_messages", "claude_messages"),
 ];
 
 /// 用于负载均衡选渠道的轻量条目
@@ -170,7 +176,7 @@ pub async fn run(
     }
 
     // 2. 降级：通过 RoutingRule 匹配（按 path + method）
-    let route = runtime
+    let route_result = runtime
         .route_manager
         .resolve(
             ctx.host.as_deref(),
@@ -178,13 +184,61 @@ pub async fn run(
             &ctx.path,
             ctx.content_type.as_deref(),
         )
-        .await
-        .ok_or_else(|| {
-            StageError::new(
+        .await;
+
+    let route = match route_result {
+        Some(r) => r,
+        None => {
+            // 2.1 路由未命中时，尝试使用 settings 中的默认路由/Provider 兜底
+            let settings = runtime.settings.read().await;
+
+            // 优先尝试 default_route_id
+            if let Some(ref default_route_id) = settings.default_route_id {
+                if !default_route_id.is_empty() {
+                    if let Ok(Some(fallback_route)) =
+                        crate::persistence::RoutingRuleRepo::find_by_id(&runtime.pool, default_route_id).await
+                    {
+                        let provider_id = runtime
+                            .route_manager
+                            .resolve_provider_id(&fallback_route, &runtime.group_manager)
+                            .await;
+
+                        if let Some(pid) = provider_id {
+                            let provider = load_provider_with_cache(runtime, &pid, error_ctx.clone()).await?;
+                            ctx.route = Some(fallback_route.clone());
+                            ctx.provider = Some(provider);
+                            ctx.inbound_protocol = fallback_route.inbound_protocol.clone();
+                            ctx.outbound_protocol = fallback_route.outbound_protocol.clone();
+                            ctx.adapter_registry = runtime.adapter_registry.clone();
+                            return Ok(ctx);
+                        }
+                    }
+                }
+            }
+
+            // 再尝试 default_provider_id
+            if let Some(ref default_provider_id) = settings.default_provider_id {
+                if !default_provider_id.is_empty() {
+                    let provider = load_provider_with_cache(runtime, default_provider_id, error_ctx.clone()).await?;
+                    // 使用 Provider 的第一个协议做 outbound
+                    let outbound = resolve_protocol_adapter(&provider);
+                    // 用真实请求体推断入站协议（避免误判为 openai_chat）
+                    let body_json = serde_json::from_slice::<serde_json::Value>(&ctx.request_body).unwrap_or(serde_json::Value::Null);
+                    let inbound = detect_inbound_protocol(&ctx.path, &body_json);
+                    ctx.provider = Some(provider);
+                    ctx.inbound_protocol = Some(inbound.to_string());
+                    ctx.outbound_protocol = Some(outbound);
+                    ctx.adapter_registry = runtime.adapter_registry.clone();
+                    return Ok(ctx);
+                }
+            }
+
+            return Err(StageError::new(
                 error_ctx.clone(),
                 GatewayError::NotFound(format!("未找到匹配路由: {} {}", ctx.method, ctx.path)),
-            )
-        })?;
+            ));
+        }
+    };
 
     let provider_id = runtime
         .route_manager
@@ -303,6 +357,13 @@ fn detect_inbound_protocol(path: &str, body: &serde_json::Value) -> &'static str
     if body.get("input").is_some() {
         "openai_response"
     } else if body.get("messages").is_some() {
+        // messages 字段可能来自 OpenAI Chat 或 Claude Messages
+        // 通过 model 前缀区分：claude- 开头 → claude_messages，否则 → openai_chat
+        if let Some(model) = body.get("model").and_then(|v| v.as_str()) {
+            if model.starts_with("claude-") {
+                return "claude_messages";
+            }
+        }
         "openai_chat"
     } else {
         "openai_chat"
