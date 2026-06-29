@@ -70,13 +70,37 @@ pub async fn status(state: &AppState) -> Result<GatewayStatusResponse, ServiceEr
 }
 
 pub async fn start(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
-    {
-        let server = state.gateway_server.read().await;
-        if server.is_some() {
-            return Err(ServiceError::BadRequest("网关已在运行中".to_string()));
-        }
+    // 在写锁内完成检查和启动，避免 TOCTOU 竞态
+    let mut server = state.gateway_server.write().await;
+    if server.is_some() {
+        return Err(ServiceError::BadRequest("网关已在运行中".to_string()));
     }
-    start_gateway_inner(state).await
+    // server 仍持有写锁，防止并发 start()
+
+    let pool = crate::get_db_pool().ok_or(ServiceError::DbNotInitialized)?;
+    let (log_sender, log_receiver) =
+        tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
+    let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
+
+    let gateway = load_gateway_context(pool.clone(), log_sender)
+        .await
+        .map_err(|e| ServiceError::Internal(format!("加载网关上下文失败: {e}")))?;
+    let gateway_server = spawn_gateway_server(gateway.clone())
+        .await
+        .map_err(|e| ServiceError::Internal(format!("启动网关失败: {e}")))?;
+
+    // 先更新 gateway context（锁顺序：gateway -> gateway_server）
+    {
+        let mut state_gateway = state.gateway.write().await;
+        *state_gateway = gateway.clone();
+    }
+    *server = Some(gateway_server);
+
+    let settings = gateway.settings.read().await;
+    Ok(GatewayStartResponse {
+        success: true,
+        address: format!("{}:{}", settings.bind_host, settings.bind_port),
+    })
 }
 
 pub async fn stop(state: &AppState) -> Result<GatewayStopResponse, ServiceError> {
@@ -94,21 +118,22 @@ pub async fn stop(state: &AppState) -> Result<GatewayStopResponse, ServiceError>
 }
 
 pub async fn restart(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
+    // 停止旧服务器
     {
         let mut server = state.gateway_server.write().await;
         if let Some(handle) = server.take() {
             handle.stop().await;
         }
     }
-    start_gateway_inner(state).await
+    // 重新启动
+    start(state).await
 }
 
 pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
-    {
-        let server = state.gateway_server.read().await;
-        if server.is_some() {
-            return Err(ServiceError::BadRequest("网关已在运行中".to_string()));
-        }
+    // 在写锁内完成检查和启动
+    let mut server = state.gateway_server.write().await;
+    if server.is_some() {
+        return Err(ServiceError::BadRequest("网关已在运行中".to_string()));
     }
 
     let gateway = state.gateway.read().await.clone();
@@ -116,38 +141,7 @@ pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResp
         .await
         .map_err(|e| ServiceError::Internal(format!("启动网关失败: {e}")))?;
 
-    {
-        let mut server = state.gateway_server.write().await;
-        *server = Some(gateway_server);
-    }
-
-    let settings = gateway.settings.read().await;
-    Ok(GatewayStartResponse {
-        success: true,
-        address: format!("{}:{}", settings.bind_host, settings.bind_port),
-    })
-}
-
-/// start() 和 restart() 的公共启动逻辑
-async fn start_gateway_inner(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
-    let pool = crate::get_db_pool().ok_or(ServiceError::DbNotInitialized)?;
-    let (log_sender, log_receiver) =
-        tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
-    let _log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
-
-    let gateway = load_gateway_context(pool.clone(), log_sender)
-        .await
-        .map_err(|e| ServiceError::Internal(format!("加载网关上下文失败: {e}")))?;
-    let gateway_server = spawn_gateway_server(gateway.clone())
-        .await
-        .map_err(|e| ServiceError::Internal(format!("启动网关失败: {e}")))?;
-
-    {
-        let mut state_gateway = state.gateway.write().await;
-        *state_gateway = gateway.clone();
-        let mut server = state.gateway_server.write().await;
-        *server = Some(gateway_server);
-    }
+    *server = Some(gateway_server);
 
     let settings = gateway.settings.read().await;
     Ok(GatewayStartResponse {
@@ -167,6 +161,11 @@ pub async fn load_gateway_context(
     let adapter_registry = Arc::new(AdapterRegistry::new());
     let group_manager = Arc::new(GroupManager::new());
     group_manager.load(&pool).await?;
+    let rate_limit_state = Arc::new(crate::gateway::middleware::rate_limit::RateLimitState::new(
+        settings.rate_limit_enabled != 0,
+        settings.rate_limit_max_requests_per_minute as u64,
+        settings.rate_limit_max_tokens_per_minute as u64,
+    ));
 
     Ok(GatewayContext::new(
         pool,
@@ -176,6 +175,7 @@ pub async fn load_gateway_context(
         log_sender,
         adapter_registry,
         group_manager,
+        rate_limit_state,
     ))
 }
 
