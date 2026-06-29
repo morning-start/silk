@@ -19,7 +19,12 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
     // 解析所有 Key 条目，排除已失败的 Key
     let all_entries: Vec<ProviderKeyEntry> =
-        serde_json::from_str(&provider.keys).unwrap_or_default();
+        serde_json::from_str(&provider.keys).map_err(|e| {
+            StageError::new(
+                error_ctx.clone(),
+                GatewayError::Internal(format!("Provider keys JSON 格式错误: {e}")),
+            )
+        })?;
 
     let available: Vec<&ProviderKeyEntry> = all_entries
         .iter()

@@ -1,10 +1,11 @@
 use async_trait::async_trait;
-use axum::http::{HeaderMap, HeaderValue};
 
 use linguafranca::open_responses::request::OpenResponsesRequest;
 
 use crate::models::Provider;
-use crate::protocol::adapter::{ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse};
+use crate::protocol::adapter::{
+    build_bearer_headers, ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse,
+};
 
 pub struct OpenAIResponseAdapter;
 
@@ -20,31 +21,16 @@ impl ProviderAdapter for OpenAIResponseAdapter {
         provider: &Provider,
         selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError> {
-        let _openai_req: OpenResponsesRequest = serde_json::from_slice(req_body)
+        // 反序列化一次，用于验证 + 生成 body
+        let openai_req: OpenResponsesRequest = serde_json::from_slice(req_body)
             .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            axum::http::header::AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", selected_api_key)).map_err(|e| {
-                ProtocolError::InvalidValue {
-                    field: "Authorization".to_string(),
-                    reason: e.to_string(),
-                }
-            })?,
-        );
-        headers.insert(
-            axum::http::header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-
-        let body: serde_json::Value = serde_json::from_slice(req_body)
+        let body = serde_json::to_value(&openai_req)
             .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
 
         Ok(UpstreamRequest {
             url: format!("{}/v1/responses", provider.api_base_url),
             method: "POST".to_string(),
-            headers,
+            headers: build_bearer_headers(selected_api_key)?,
             body,
         })
     }
@@ -53,27 +39,15 @@ impl ProviderAdapter for OpenAIResponseAdapter {
         &self,
         resp: &UpstreamResponse,
     ) -> Result<serde_json::Value, ProtocolError> {
-        if resp.status >= 400 {
-            return Err(ProtocolError::UpstreamError {
-                status: resp.status,
-                message: json_err_msg(&resp.body),
-            });
-        }
-
+        // OpenAI Response 格式直通，无需转换
         Ok(resp.body.clone())
     }
-}
-
-fn json_err_msg(body: &serde_json::Value) -> String {
-    body["error"]["message"]
-        .as_str()
-        .unwrap_or_else(|| body["error"]["type"].as_str().unwrap_or("unknown error"))
-        .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderMap;
 
     fn test_provider() -> Provider {
         Provider {

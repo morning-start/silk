@@ -1,4 +1,4 @@
-import { ref, type Ref } from "vue";
+import { ref } from "vue";
 
 /**
  * 异步操作的状态包装器（loading、error、run）
@@ -16,8 +16,8 @@ export function useAsyncOperation() {
     error.value = null;
     try {
       return await fn();
-    } catch (e: any) {
-      error.value = e?.message || errorMessage || "操作失败";
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : errorMessage || "操作失败";
       return undefined;
     } finally {
       loading.value = false;
@@ -33,8 +33,8 @@ export function useAsyncOperation() {
     error.value = null;
     try {
       return await fn();
-    } catch (e: any) {
-      error.value = e?.message || errorMessage || "操作失败";
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : errorMessage || "操作失败";
       throw e;
     } finally {
       loading.value = false;
@@ -42,56 +42,4 @@ export function useAsyncOperation() {
   }
 
   return { loading, error, run, runOrThrow };
-}
-
-/**
- * 基于 ref 数据数组的异步 store 辅助函数
- * 适用于典型的 CRUD store 模式
- */
-export function useAsyncDataList<T extends { id: string }>(
-  fetchFn: () => Promise<T[]>
-) {
-  const { loading, error, run } = useAsyncOperation();
-  const data = ref<T[]>([]) as Ref<T[]>;
-
-  async function fetchAll(): Promise<void> {
-    const result = await run(fetchFn, "获取数据失败");
-    if (result) data.value = result;
-  }
-
-  async function create(
-    createFn: () => Promise<T>
-  ): Promise<T | undefined> {
-    const result = await run(createFn, "创建失败");
-    if (result) {
-      data.value.unshift(result);
-    }
-    return result;
-  }
-
-  async function update(
-    id: string,
-    updateFn: () => Promise<T>
-  ): Promise<T | undefined> {
-    const result = await run(updateFn, "更新失败");
-    if (result) {
-      const idx = data.value.findIndex((item) => item.id === id);
-      if (idx >= 0) data.value[idx] = result;
-    }
-    return result;
-  }
-
-  async function remove(
-    id: string,
-    removeFn: () => Promise<void>
-  ): Promise<boolean> {
-    const result = await run(removeFn, "删除失败");
-    if (result !== undefined) {
-      data.value = data.value.filter((item) => item.id !== id);
-      return true;
-    }
-    return false;
-  }
-
-  return { data, loading, error, fetchAll, create, update, remove, run };
 }

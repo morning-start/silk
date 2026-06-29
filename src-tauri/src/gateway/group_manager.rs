@@ -88,7 +88,7 @@ impl GroupManager {
         inner
             .groups
             .get(group_id)
-            .map(|s| s.balancer.items())
+            .map(|s| s.balancer.items().to_vec())
             .unwrap_or_default()
     }
 

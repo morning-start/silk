@@ -19,9 +19,16 @@ impl LoadBalanceStrategy {
     pub fn from_str(s: &str) -> Self {
         match s {
             "weighted" => Self::Weighted,
-            "least_conn" => Self::LeastConn,
+            "least_conn" => {
+                tracing::warn!("LeastConn 策略暂未实现连接追踪，退化为 RoundRobin");
+                Self::LeastConn
+            }
             "failover" => Self::Failover,
-            _ => Self::RoundRobin,
+            "round_robin" => Self::RoundRobin,
+            other => {
+                tracing::warn!("未知负载均衡策略 '{other}'，默认使用 RoundRobin");
+                Self::RoundRobin
+            }
         }
     }
 
@@ -62,8 +69,8 @@ impl<T: LoadBalancedItem + Clone> LoadBalancer<T> {
         self.items.is_empty()
     }
 
-    pub fn items(&self) -> Vec<T> {
-        self.items.clone()
+    pub fn items(&self) -> &[T] {
+        &self.items
     }
 
     /// 按策略选择一个条目（只考虑启用的条目）
@@ -74,15 +81,12 @@ impl<T: LoadBalancedItem + Clone> LoadBalancer<T> {
         }
 
         match self.strategy {
-            LoadBalanceStrategy::RoundRobin => {
+            LoadBalanceStrategy::RoundRobin | LoadBalanceStrategy::LeastConn => {
                 let idx = self.counter.fetch_add(1, Ordering::Relaxed);
                 Some(enabled[(idx as usize) % enabled.len()])
             }
             LoadBalanceStrategy::Weighted => {
                 let total_weight: i64 = enabled.iter().map(|i| i.weight().max(1)).sum();
-                if total_weight == 0 {
-                    return Some(enabled[0]);
-                }
                 let rng = rand::random::<u64>();
                 let mut cumulative = 0i64;
                 let target = (rng as i64).abs() % total_weight;
@@ -93,11 +97,6 @@ impl<T: LoadBalancedItem + Clone> LoadBalancer<T> {
                     }
                 }
                 enabled.last().copied()
-            }
-            LoadBalanceStrategy::LeastConn => {
-                // 最少连接退化到 round_robin（需要连接追踪）
-                let idx = self.counter.fetch_add(1, Ordering::Relaxed);
-                Some(enabled[(idx as usize) % enabled.len()])
             }
             LoadBalanceStrategy::Failover => enabled.first().copied(),
         }
