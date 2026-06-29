@@ -86,7 +86,7 @@ Authorization: Bearer <gateway-key>
 
 ### GET `/v1/models`
 
-返回本地数据库中启用的模型映射列表。该接口不会请求上游 Provider。
+从本地数据库 `model_mappings` 表中查询所有启用的模型映射记录，以 OpenAI `/v1/models` 响应格式返回本地模型池。该接口不会请求上游 Provider。
 
 #### 请求头
 
@@ -114,10 +114,10 @@ Authorization: Bearer <gateway-key>
 
 | 字段 | 说明 |
 |---|---|
-| `id` | 本地模型名 |
+| `id` | 模型映射名（`model_mappings.model_name`） |
 | `object` | 固定为 `model` |
-| `created` | 本地记录创建时间戳 |
-| `owned_by` | 供应商名称；未配置时回退为 `silk` |
+| `created` | `model_mappings.created_at` 的时间戳 |
+| `owned_by` | 模型映射的 `vendor` 字段；未配置时回退为 `silk` |
 
 ## 7. 网关代理入口
 
@@ -127,12 +127,21 @@ Authorization: Bearer <gateway-key>
 
 ### 7.1 路由优先级
 
-当前路由决策顺序如下：
+`resolve_route` 阶段的路由决策顺序如下：
 
-1. 先尝试读取请求体里的 `model` 字段
-2. 如果命中本地模型映射，按模型映射和渠道负载均衡选 Provider
-3. 如果没有命中模型映射，再按路由规则匹配 `host + path + method + content-type`
-4. 路由成功后，根据 Provider 支持的协议和路由配置确定上游目标
+1. **特殊路径短路**：如果请求路径为 `/v1/models`，直接返回本地模型池数据，不进入后续路由和上游转发。
+
+2. **模型映射优先**：先读取请求体 JSON 中的 `model` 字段，在 `model_mappings` 表中查找启用映射。
+   - 如果命中模型映射，通过关联渠道表加载所有可用的 Provider 渠道，按映射配置的负载均衡策略（如 `round_robin`）选中一个 Provider。
+   - 同时根据 Provider 的 `protocols` 字段确定出站协议，根据请求路径和体结构确定入站协议。
+   - 如果渠道后续请求失败，支持自动回退到下一个可用渠道。
+
+3. **路由规则降级**：如果模型映射未命中，再按 `RoutingRule` 匹配（匹配维度：Host + Path + Method + ContentType）。
+   - 如果路由规则命中且指定了 `target_provider_id`，直接使用该 Provider。
+   - 如果路由规则指定了 `target_group_id`，通过 GroupManager 做 Provider 分组负载均衡。
+   - 路由规则也决定了入站/出站协议映射。
+
+4. **最终结果**：路由成功后，`resolve_route` 阶段设置 `ctx.provider`、`inbound_protocol`、`outbound_protocol` 和 `adapter_registry`，后续阶段使用这些信息进行协议转换和上游转发。
 
 ### 7.2 支持的入站协议
 
@@ -150,15 +159,17 @@ Authorization: Bearer <gateway-key>
 | `messages` | `openai_chat` |
 | 其它 | 默认 `openai_chat` |
 
-### 7.3 支持的上游路径
+### 7.3 上游目标路径
 
-协议适配器会把请求转发到 Provider 的 `api_base_url` 下的固定路径：
+适配器在 `transform_request` 阶段将目标路径拼接到 Provider 的 `api_base_url` 上，构造完整上游 URL。不同适配器对应不同的目标路径：
 
-| 适配器 | 上游路径 |
-|---|---|
-| `openai_chat` | `/v1/chat/completions` |
-| `claude_messages` | `/v1/messages` |
-| `openai_response` | `/v1/responses` |
+| 适配器 | 目标路径 | 请求方法 |
+|---|---|---|
+| `openai_chat` | `/v1/chat/completions` | POST |
+| `claude_messages` | `/v1/messages` | POST |
+| `openai_response` | `/v1/responses` | POST |
+
+例如，Provider 的 `api_base_url` 为 `https://api.openai.com` 且使用 `openai_chat` 适配器时，最终上游 URL 为 `https://api.openai.com/v1/chat/completions`。
 
 ### 7.4 请求体限制
 
@@ -209,10 +220,12 @@ Authorization: Bearer <gateway-key>
 | 404 | `not_found` | 路由、模型或 Provider 未命中 |
 | 429 | `too_many_requests` | 触发限流 |
 | 500 | `database_error` | 数据库访问失败 |
-| 500 | `internal_error` | 内部错误 |
-| 500 | `serialization_error` | 序列化失败 |
-| 502 | `upstream_error` | 请求上游失败 |
+| 500 | `internal_error` | 内部错误（所有渠道和 Key 均已失败等） |
+| 500 | `serialization_error` | 序列化/反序列化失败 |
+| 502 | `upstream_error` | 请求上游 Provider 失败（HTTP 请求错误） |
 | 504 | `timeout` | SSE 或上游请求超时 |
+
+> 注：`UpstreamError` 变体会透传上游返回的原始 HTTP 状态码和错误体，不由上表固定映射。详见 [9.3](#93-上游错误透传)。
 
 ### 9.3 上游错误透传
 
@@ -294,5 +307,6 @@ curl http://127.0.0.1:1234/v1/responses \
 
 - 当前网关是本地代理，不是多租户公网服务
 - `/v1/*` 是否最终转发，取决于本地模型映射和路由规则
+- `/v1/*` 路径的请求需要认证。网关同时支持 `Authorization: Bearer <key>`（OpenAI 风格）和 `x-api-key: <key>`（Anthropic 风格）两种认证方式，认证令牌会做哈希后在本地 `gateway_keys` 表中校验
 - 本文档以当前代码实现为准
 
