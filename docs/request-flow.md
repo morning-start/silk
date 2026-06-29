@@ -1,56 +1,51 @@
 # 网关请求转换路径
 
 ```mermaid
-flowchart LR
-    UI[本地请求\n系统设置页] --> CMD[ Tauri Commands ]
-    CMD --> KEY[(gateway_keys)]
-    CMD --> SET[(gateway_settings)]
+flowchart TD
+    REQ[外部请求\nHTTP Client] --> EXT[extract\n读取请求体 2MB 限制]
+    EXT --> AUTH[authenticate\n网关鉴权\nBearer key → gateway_keys]
+    AUTH --> RL[rate_limit\nIP 级限流检查]
+    RL --> RR[resolve_route\n路由解析\n匹配 routing_rules / 模型映射]
 
-    APP[应用启动] --> DB[(SQLite)]
-    APP --> LOG[日志写入任务]
-    APP --> GW[HTTP Gateway]
+    RR -->|路径 /v1/models| MM[(ModelMappingRepo\n本地启用模型)]
+    MM --> RSP[提前构建响应]
 
-    UI --> GW
-    GW --> H[/health/]
-    GW --> M[/v1/models/]
-    GW --> P[Proxy Handler]
+    RR -->|匹配到路由| SC[select_channel\n选择渠道 & Key\nKey 负载均衡]
 
-    M --> MM[(ModelMappingRepo\n本地启用模型)]
+    RR --> PR[(ProviderRepo\n渠道配置)]
+    RR --> GR[(GatewaySettings\n路由规则)]
 
-    P --> A[中转站鉴权]
-    A -->|Bearer key| KEY
-    A -->|hash lookup| DB
+    SC --> TR[transform_request\n请求协议转换\nOpenAI/Claude → 上游格式]
+    TR --> DU[dispatch_upstream\n发送上游请求\n含重试+退避+SSE管理]
+    DU --> UP[上游 Provider\nOpenAI / Claude / 其他]
+    UP --> TRESP[transform_response\n响应协议转换\n上游格式 → OpenAI Response]
+    TRESP --> PL[persist_log\n异步写入 SQLite]
+    RSP --> PL
+    PL --> FIN[finalize\n构建最终 HTTP 响应]
 
-    A --> R[请求路由]
-    R --> MP[(模型池映射\n模型负载均衡)]
-    MP --> CP[(渠道映射\nkey 负载均衡)]
-    CP --> PR[(ProviderRepo)]
+    AUTH --> GK[(gateway_keys\n网关鉴权 Key)]
+    SC --> CP[渠道内 Key 轮询\n失败自动切换]
 
-    R --> N[协议转化]
-    N --> T[请求转换]
-    T --> D[发送请求]
-    D --> U[上游 Provider]
-    U --> S[协议转换]
-    S --> L[写入日志]
-    L --> LOG
-    S --> RESP[返回本地]
-
-    H --> RESP
-    M --> RESP
+    subgraph 三级失败回退
+        DU -->|Level 1 重试耗尽| SC
+        SC -->|Level 2 换 Key| TR
+        RR -->|Level 3 换渠道| SC
+    end
 
     classDef db fill:#f8fafc,stroke:#64748b,stroke-width:1px;
     classDef proc fill:#eff6ff,stroke:#2563eb,stroke-width:1px;
     classDef io fill:#fefce8,stroke:#ca8a04,stroke-width:1px;
 
-    class KEY,SET,DB,MM,MR,RR,PR db;
-    class UI,APP,GW,H,M,P,A,R,N,T,D,U,S,L,RESP proc;
-    class CMD,LOG io;
+    class GK,MM,PR,GR db;
+    class REQ,EXT,AUTH,RL,RR,SC,TR,DU,TRESP,PL,FIN,RSP,UP proc;
+    class CP io;
 ```
 
 ## 关键点
 
 - `/v1/models` 读取的是本地启用的模型映射，不是上游目录。
 - `/v1/*` 的实际鉴权是 `gateway_keys`，不是 `gateway_settings.auth_token_hash`。
-- 请求主链是：本地请求 -> 中转站鉴权 -> 中转站接收 -> 模型池映射（模型负载均衡） -> 渠道映射（key 负载均衡） -> 协议转化 -> 发送请求 -> 获得响应 -> 协议转换 -> 返回本地。
-- 请求优先按 body 里的 `model` 走模型映射，失败后再走路由规则兜底。
+- 请求主链是：`extract → authenticate → rate_limit → resolve_route → select_channel → transform_request → dispatch_upstream → transform_response → persist_log → finalize`。
+- 请求先按 `routing_rules`（Host/Path/Method/ContentType）匹配路由，匹配成功后选择对应 Provider；若未匹配到路由规则，再按 body 里的 `model` 走模型映射兜底。
 - 日志是异步写入 SQLite，不阻塞主请求。
+- 三级失败回退：单次请求重试 → 换 Key → 换渠道。
