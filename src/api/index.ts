@@ -57,6 +57,7 @@ export interface GroupMemberInfo {
 export interface RoutingRule {
   id: string;
   name: string;
+  match_host: string | null;
   match_path: string;
   match_method: string;
   match_content_type: string | null;
@@ -104,13 +105,9 @@ export interface GatewaySettings {
   bind_host: string;
   bind_port: number;
   allow_remote: boolean;
-  auth_token_hash: string | null;
   log_retention_days: number;
   default_provider_id: string | null;
   default_route_id: string | null;
-  rate_limit_enabled: boolean;
-  rate_limit_max_requests_per_minute: number;
-  rate_limit_max_tokens_per_minute: number;
   created_at: string;
   updated_at: string;
 }
@@ -152,6 +149,13 @@ export interface ProviderModelInfo {
   created: number | null;
   owned_by: string | null;
   supported_endpoint_types: string[];
+}
+
+export interface ProviderTestResponse {
+  status_code: number;
+  response_time_ms: number;
+  health_status: string;
+  error: string | null;
 }
 
 export interface MappingChannelInfo {
@@ -215,11 +219,13 @@ export const api = {
 
   // Providers
   listProviders: () => invoke<Provider[]>("list_providers"),
+  getProvider: (id: string) => invoke<Provider>("get_provider", { id }),
   createProvider: (data: Partial<Provider> & { api_key: string }) =>
     invoke<Provider>("create_provider", { payload: data }),
   updateProvider: (id: string, data: Partial<Provider>) =>
     invoke<Provider>("update_provider", { id, payload: data }),
   deleteProvider: (id: string) => invoke<boolean>("delete_provider", { id }),
+  testProvider: (id: string) => invoke<ProviderTestResponse>("test_provider", { id }),
 
   // Groups
   listGroups: () => invoke<ProviderGroup[]>("list_groups"),
@@ -235,6 +241,7 @@ export const api = {
 
   // Routing Rules
   listRoutingRules: () => invoke<RoutingRule[]>("list_routing_rules"),
+  getRoutingRule: (id: string) => invoke<RoutingRule>("get_routing_rule", { id }),
   createRoutingRule: (data: Partial<RoutingRule>) =>
     invoke<RoutingRule>("create_routing_rule", { payload: data }),
   updateRoutingRule: (id: string, data: Partial<RoutingRule>) =>
@@ -262,6 +269,9 @@ export const api = {
 
   // Model Mappings
   listModelMappings: () => invoke<ModelMapping[]>("list_model_mappings"),
+  getModelMapping: (id: string) => invoke<ModelMapping>("get_model_mapping", { id }),
+  findModelMappingByName: (name: string) => invoke<ModelMapping | null>("find_model_mapping_by_name", { model_name: name }),
+  getGroupProviders: (groupId: string) => invoke<MappingChannelInfo[]>("get_group_providers", { group_id: groupId }),
   createModelMapping: (data: {
     model_name: string;
     strategy?: string;
