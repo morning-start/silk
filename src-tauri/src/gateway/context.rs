@@ -24,6 +24,11 @@ pub struct GatewayContext {
     pub log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
     pub adapter_registry: Arc<AdapterRegistry>,
     pub group_manager: Arc<GroupManager>,
+    pub rate_limit_state: Arc<crate::gateway::middleware::rate_limit::RateLimitState>,
+    /// 共享的 HTTP 客户端（非流式，带超时）
+    pub http_client: reqwest::Client,
+    /// 共享的 HTTP 客户端（流式，无超时）
+    pub http_client_streaming: reqwest::Client,
 }
 
 impl GatewayContext {
@@ -35,7 +40,19 @@ impl GatewayContext {
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
         adapter_registry: Arc<AdapterRegistry>,
         group_manager: Arc<GroupManager>,
+        rate_limit_state: Arc<crate::gateway::middleware::rate_limit::RateLimitState>,
     ) -> Self {
+        // 创建共享 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .expect("Failed to create HTTP client");
+
+        let http_client_streaming = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .expect("Failed to create streaming HTTP client");
+
         Self {
             pool,
             settings,
@@ -44,6 +61,9 @@ impl GatewayContext {
             log_sender,
             adapter_registry,
             group_manager,
+            rate_limit_state,
+            http_client,
+            http_client_streaming,
         }
     }
 }

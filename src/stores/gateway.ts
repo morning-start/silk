@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { api, type GatewayStatus } from "../api";
+import { api, type GatewaySettings, type GatewayStatus } from "../api";
 
 export const useGatewayStore = defineStore("gateway", () => {
   const status = ref<GatewayStatus | null>(null);
@@ -12,8 +12,8 @@ export const useGatewayStore = defineStore("gateway", () => {
     error.value = null;
     try {
       status.value = await api.gatewayStatus();
-    } catch (e: any) {
-      error.value = e.message || "获取状态失败";
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : "获取状态失败";
     } finally {
       loading.value = false;
     }
@@ -34,8 +34,8 @@ export const useGatewayStore = defineStore("gateway", () => {
     try {
       await api.gatewayStart();
       await fetchStatus();
-    } catch (e: any) {
-      error.value = e.message || "启动失败";
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : "启动失败";
       throw e;
     } finally {
       loading.value = false;
@@ -48,8 +48,8 @@ export const useGatewayStore = defineStore("gateway", () => {
     try {
       await api.gatewayStop();
       await fetchStatus();
-    } catch (e: any) {
-      error.value = e.message || "停止失败";
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : "停止失败";
       throw e;
     } finally {
       loading.value = false;
@@ -62,22 +62,22 @@ export const useGatewayStore = defineStore("gateway", () => {
     try {
       await api.gatewayRestart();
       await fetchStatus();
-    } catch (e: any) {
-      error.value = e.message || "重启失败";
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : "重启失败";
       throw e;
     } finally {
       loading.value = false;
     }
   }
 
-  async function updateSettings(data: any) {
+  async function updateSettings(data: Partial<GatewaySettings>) {
     loading.value = true;
     error.value = null;
     try {
       await api.updateGatewaySettings(data);
       await fetchStatus();
-    } catch (e: any) {
-      error.value = e.message || "更新设置失败";
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : "更新设置失败";
       throw e;
     } finally {
       loading.value = false;

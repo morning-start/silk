@@ -267,7 +267,7 @@ pub async fn export_logs_csv(
     payload: ExportLogsPayload,
 ) -> Result<ExportLogsResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let limit = payload.limit.unwrap_or(10000);
+    let limit = payload.limit.unwrap_or(10000).clamp(1, 50000);
     let offset = payload.offset.unwrap_or(0);
 
     let logs = if let Some(provider_id) = &payload.provider_id {
@@ -283,27 +283,42 @@ pub async fn export_logs_csv(
     let mut csv_content = String::new();
     csv_content.push_str("id,request_id,timestamp,method,path,status_code,duration_ms,provider_id,model_used,tokens_input,tokens_output,error_message\n");
 
+    // CSV 字段转义：含逗号/换行/引号的字段用双引号包裹
+    fn csv_escape(field: &str) -> String {
+        if field.contains(',') || field.contains('\n') || field.contains('"') {
+            format!("\"{}\"", field.replace('"', "\"\""))
+        } else {
+            field.to_string()
+        }
+    }
+
     for log in &logs {
         csv_content.push_str(&format!(
             "{},{},{},{},{},{},{},{},{},{},{},{}\n",
-            log.id,
-            log.request_id,
-            log.timestamp,
-            log.method,
-            log.path,
+            csv_escape(&log.id),
+            csv_escape(&log.request_id),
+            csv_escape(&log.timestamp.to_string()),
+            csv_escape(&log.method),
+            csv_escape(&log.path),
             log.status_code.unwrap_or(0),
             log.duration_ms.unwrap_or(0),
-            log.provider_id.as_deref().unwrap_or(""),
-            log.model_used.as_deref().unwrap_or(""),
+            csv_escape(log.provider_id.as_deref().unwrap_or("")),
+            csv_escape(log.model_used.as_deref().unwrap_or("")),
             log.tokens_input.unwrap_or(0),
             log.tokens_output.unwrap_or(0),
-            log.error_message.as_deref().unwrap_or(""),
+            csv_escape(log.error_message.as_deref().unwrap_or("")),
         ));
     }
 
     let file_path = payload.file_path.unwrap_or_else(|| {
         format!("silk_logs_{}.csv", chrono::Utc::now().format("%Y%m%d_%H%M%S"))
     });
+
+    // 路径安全校验：拒绝包含 .. 的路径和绝对路径（防止路径遍历）
+    if file_path.contains("..") || file_path.starts_with('/') || file_path.contains(":\\") {
+        return Err("文件路径不安全: 不允许包含 .. 或使用绝对路径".to_string());
+    }
+
     tokio::fs::write(&file_path, &csv_content)
         .await
         .map_err(|e| format!("写入 CSV 文件失败: {e}"))?;
@@ -321,29 +336,18 @@ pub async fn dashboard_stats(
 ) -> Result<DashboardStatsResponse, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
 
-    let today_requests = StatsRepo::today_request_count(pool)
-        .await.map_err(|e| format!("查询今日请求数失败: {e}"))?;
-    let today_success = StatsRepo::today_success_count(pool)
-        .await.map_err(|e| format!("查询今日成功数失败: {e}"))?;
-    let today_avg_duration = StatsRepo::today_avg_duration_ms(pool)
-        .await.map_err(|e| format!("查询今日平均响应时间失败: {e}"))?;
-    let today_tokens = StatsRepo::today_total_tokens(pool)
-        .await.map_err(|e| format!("查询今日 Token 消耗失败: {e}"))?;
-    let active_providers = StatsRepo::today_active_providers(pool)
-        .await.map_err(|e| format!("查询活跃服务商数失败: {e}"))?;
-    let total_requests = StatsRepo::total_request_count(pool)
-        .await.map_err(|e| format!("查询总请求数失败: {e}"))?;
-    let yesterday_requests = StatsRepo::yesterday_request_count(pool)
-        .await.map_err(|e| format!("查询昨日请求数失败: {e}"))?;
+    let agg = StatsRepo::dashboard_aggregate(pool)
+        .await
+        .map_err(|e| format!("查询仪表盘统计失败: {e}"))?;
 
     Ok(DashboardStatsResponse {
-        today_requests,
-        today_success,
-        today_avg_duration_ms: today_avg_duration.unwrap_or(0.0),
-        today_tokens,
-        active_providers,
-        total_requests,
-        yesterday_requests,
+        today_requests: agg.today_requests,
+        today_success: agg.today_success,
+        today_avg_duration_ms: agg.today_avg_duration_ms.unwrap_or(0.0),
+        today_tokens: agg.today_tokens,
+        active_providers: agg.active_providers,
+        total_requests: agg.total_requests,
+        yesterday_requests: agg.yesterday_requests,
     })
 }
 

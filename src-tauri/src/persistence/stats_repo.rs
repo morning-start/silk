@@ -8,7 +8,63 @@ use crate::models::RequestLog;
 /// 仪表盘统计数据聚合仓库
 pub struct StatsRepo;
 
+/// 仪表盘统计结果（单次查询聚合）
+#[derive(Debug, Clone)]
+pub struct DashboardAggregate {
+    pub today_requests: i64,
+    pub today_success: i64,
+    pub today_avg_duration_ms: Option<f64>,
+    pub today_tokens: i64,
+    pub active_providers: i64,
+    pub total_requests: i64,
+    pub yesterday_requests: i64,
+}
+
 impl StatsRepo {
+    /// 单次查询获取所有仪表盘统计数据（替代 6 次独立查询）
+    pub async fn dashboard_aggregate(pool: &SqlitePool) -> Result<DashboardAggregate, sqlx::Error> {
+        use sqlx::Row;
+
+        let row = sqlx::query(
+            r#"
+            SELECT
+                (SELECT COUNT(*) FROM request_logs
+                 WHERE timestamp >= datetime('now', 'start of day')
+                   AND timestamp < datetime('now', 'start of day', '+1 day')) as today_requests,
+                (SELECT COUNT(*) FROM request_logs
+                 WHERE timestamp >= datetime('now', 'start of day')
+                   AND timestamp < datetime('now', 'start of day', '+1 day')
+                   AND status_code >= 200 AND status_code < 300) as today_success,
+                (SELECT AVG(duration_ms) FROM request_logs
+                 WHERE timestamp >= datetime('now', 'start of day')
+                   AND timestamp < datetime('now', 'start of day', '+1 day')
+                   AND duration_ms IS NOT NULL) as today_avg_duration,
+                (SELECT COALESCE(SUM(tokens_input + tokens_output), 0) FROM request_logs
+                 WHERE timestamp >= datetime('now', 'start of day')
+                   AND timestamp < datetime('now', 'start of day', '+1 day')) as today_tokens,
+                (SELECT COUNT(DISTINCT provider_id) FROM request_logs
+                 WHERE timestamp >= datetime('now', 'start of day')
+                   AND timestamp < datetime('now', 'start of day', '+1 day')
+                   AND provider_id IS NOT NULL) as active_providers,
+                (SELECT COUNT(*) FROM request_logs) as total_requests,
+                (SELECT COUNT(*) FROM request_logs
+                 WHERE timestamp >= datetime('now', '-1 day', 'start of day')
+                   AND timestamp < datetime('now', 'start of day')) as yesterday_requests
+            "#,
+        )
+        .fetch_one(pool)
+        .await?;
+
+        Ok(DashboardAggregate {
+            today_requests: row.get::<i64, _>("today_requests"),
+            today_success: row.get::<i64, _>("today_success"),
+            today_avg_duration_ms: row.get::<Option<f64>, _>("today_avg_duration"),
+            today_tokens: row.get::<i64, _>("today_tokens"),
+            active_providers: row.get::<i64, _>("active_providers"),
+            total_requests: row.get::<i64, _>("total_requests"),
+            yesterday_requests: row.get::<i64, _>("yesterday_requests"),
+        })
+    }
     /// 获取今日请求总数
     pub async fn today_request_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
         let row = sqlx::query(

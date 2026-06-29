@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
-use reqwest::Client;
 use tokio::sync::RwLock;
 
 use crate::gateway::context::{GatewayContext, RequestContext, StreamSharedState};
@@ -25,7 +24,7 @@ fn is_streaming_body(ctx: &RequestContext) -> bool {
 
 /// 请求转发入口：自动判断流式/非流式
 pub async fn run(
-    _runtime: &GatewayContext,
+    runtime: &GatewayContext,
     ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
@@ -48,18 +47,13 @@ pub async fn run(
             .map_err(|error| StageError::new(error_ctx.clone(), error))?
     };
 
+    // 使用 GatewayContext 中的共享客户端，避免每请求创建新 TLS 连接
     let is_streaming = is_streaming_body(&ctx);
     let client = if is_streaming {
-        Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .build()
+        &runtime.http_client_streaming
     } else {
-        Client::builder()
-            .timeout(provider.timeout())
-            .connect_timeout(Duration::from_secs(10))
-            .build()
-    }
-    .map_err(|err| StageError::new(error_ctx.clone(), GatewayError::Upstream(err)))?;
+        &runtime.http_client
+    };
 
     let reqwest_method = if let Some(ref method) = ctx.upstream_method {
         reqwest::Method::from_bytes(method.as_bytes()).map_err(|err| {
