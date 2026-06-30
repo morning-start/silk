@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check *)",
+      "Bash(Set-Location \"D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri\")",
+      "Bash(Set-Location D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri)",
+      "Bash(Command -Name cargo -ErrorAction SilentlyContinue)",
+      "Bash(Format-List)",
+      "Bash(where cargo *)",
+      "Bash(Set-Location E:\\\\scoop\\\\apps\\\\rustup\\\\current\\\\bin)",
+      "Bash(rustc --version)",
+      "Bash(where sqlx *)",
+      "Bash(where cargo-sqlx *)",
+      "Bash(cargo install *)",
+      "Bash(sqlx prepare *)",
+      "Bash(cargo sqlx *)",
+      "Bash(Test-Path *)",
+      "Bash(sqlx migrate *)",
+      "Bash(New-Item *)",
+      "Bash(sqlx database *)",
+      "Bash(dir D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri\\\\migrations *)",
+      "Bash(dir D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri\\\\src *)",
+      "Bash(dir D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri\\\\src\\\\models *)",
+      "Bash(dir D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri\\\\src\\\\persistence *)",
+      "Bash(mkdir -p \"D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri\\\\sqlx_temp\")",
+      "Bash(export DATABASE_URL=\"sqlite://D:/Workplace/APP/Tauri/silk/src-tauri/sqlx_temp/silk_dev.db\")",
+      "Bash(dir D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri\\\\src\\\\gateway *)",
+      "Bash(git commit *)",
+      "Bash(dir D:\\\\Workplace\\\\APP\\\\Tauri\\\\silk\\\\src-tauri\\\\src\\\\gateway\\\\middleware *)",
+      "Bash(bash *)",
+      "Bash(git add *)",
+      "Bash(Remove-Item *)",
+      "Bash(bun add *)"
+    ]
+  }
+}

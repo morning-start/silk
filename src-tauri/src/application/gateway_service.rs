@@ -161,11 +161,6 @@ pub async fn load_gateway_context(
     let adapter_registry = Arc::new(AdapterRegistry::new());
     let group_manager = Arc::new(GroupManager::new());
     group_manager.load(&pool).await?;
-    let rate_limit_state = Arc::new(crate::gateway::middleware::rate_limit::RateLimitState::new(
-        settings.rate_limit_enabled != 0,
-        settings.rate_limit_max_requests_per_minute as u64,
-        settings.rate_limit_max_tokens_per_minute as u64,
-    ));
 
     Ok(GatewayContext::new(
         pool,
@@ -175,7 +170,6 @@ pub async fn load_gateway_context(
         log_sender,
         adapter_registry,
         group_manager,
-        rate_limit_state,
     ))
 }
 
