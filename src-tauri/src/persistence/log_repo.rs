@@ -151,6 +151,7 @@ impl LogRepo {
         provider_id: &str,
         limit: i64,
     ) -> Result<Vec<RequestLog>, sqlx::Error> {
+        let limit = limit.clamp(1, defaults::PAGINATION_MAX_LIMIT);
         sqlx::query_as::<_, RequestLog>(
             r#"
             SELECT * FROM request_logs

@@ -83,6 +83,24 @@ impl ModelMappingRepo {
             .await
     }
 
+    /// 根据多个模型名称批量查询（用于日志 cost 计算）
+    pub async fn find_by_model_names(
+        pool: &SqlitePool,
+        model_names: &[String],
+    ) -> Result<Vec<ModelMapping>, sqlx::Error> {
+        if model_names.is_empty() {
+            return Ok(Vec::new());
+        }
+        // 使用 json_each 将 Rust 数组传递为 JSON 数组，避免动态拼接占位符
+        let names_json = serde_json::to_string(model_names).unwrap_or_default();
+        sqlx::query_as::<_, ModelMapping>(
+            r#"SELECT * FROM model_mappings WHERE model_name IN (SELECT value FROM json_each($1))"#,
+        )
+        .bind(names_json)
+        .fetch_all(pool)
+        .await
+    }
+
     /// 查询所有模型映射
     pub async fn find_all(pool: &SqlitePool) -> Result<Vec<ModelMapping>, sqlx::Error> {
         sqlx::query_as::<_, ModelMapping>(

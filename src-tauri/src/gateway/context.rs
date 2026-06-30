@@ -39,19 +39,19 @@ impl GatewayContext {
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
         adapter_registry: Arc<AdapterRegistry>,
         group_manager: Arc<GroupManager>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         // 创建共享 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
         let http_client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
         let http_client_streaming = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .build()
-            .expect("Failed to create streaming HTTP client");
+            .map_err(|e| format!("创建流式 HTTP 客户端失败: {e}"))?;
 
-        Self {
+        Ok(Self {
             pool,
             settings,
             route_manager,
