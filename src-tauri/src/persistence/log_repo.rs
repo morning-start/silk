@@ -130,6 +130,7 @@ impl LogRepo {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<RequestLog>, sqlx::Error> {
+        let limit = limit.clamp(1, 1000);
         sqlx::query_as::<_, RequestLog>(
             r#"
             SELECT * FROM request_logs

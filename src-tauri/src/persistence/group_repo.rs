@@ -24,7 +24,7 @@ impl GroupRepo {
         sqlx::query_as::<_, ProviderGroup>(
             r#"
             INSERT INTO provider_groups (id, name, model_name, strategy, enabled, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+            VALUES ($1, $2, $3, $4, $5, $6, $6)
             RETURNING id, name, model_name, strategy, enabled, created_at, updated_at
             "#,
         )
@@ -43,7 +43,7 @@ impl GroupRepo {
         id: &str,
     ) -> Result<Option<ProviderGroup>, sqlx::Error> {
         sqlx::query_as::<_, ProviderGroup>(
-            r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE id = ?1"#,
+            r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE id = $1"#,
         )
         .bind(id)
         .fetch_optional(pool)
@@ -55,7 +55,7 @@ impl GroupRepo {
         model_name: &str,
     ) -> Result<Vec<ProviderGroup>, sqlx::Error> {
         sqlx::query_as::<_, ProviderGroup>(
-            r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE model_name = ?1 AND enabled = 1 ORDER BY created_at DESC"#,
+            r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE model_name = $1 AND enabled = 1 ORDER BY created_at DESC"#,
         )
         .bind(model_name)
         .fetch_all(pool)
@@ -78,7 +78,7 @@ impl GroupRepo {
         let now = chrono::Utc::now().naive_utc();
 
         let existing = sqlx::query_as::<_, ProviderGroup>(
-            r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE id = ?1"#,
+            r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE id = $1"#,
         )
         .bind(id)
         .fetch_optional(pool)
@@ -91,12 +91,12 @@ impl GroupRepo {
         sqlx::query_as::<_, ProviderGroup>(
             r#"
             UPDATE provider_groups
-            SET name = COALESCE(?2, name),
-                model_name = COALESCE(?3, model_name),
-                strategy = COALESCE(?4, strategy),
-                enabled = COALESCE(?5, enabled),
-                updated_at = ?6
-            WHERE id = ?1
+            SET name = COALESCE($2, name),
+                model_name = COALESCE($3, model_name),
+                strategy = COALESCE($4, strategy),
+                enabled = COALESCE($5, enabled),
+                updated_at = $6
+            WHERE id = $1
             RETURNING id, name, model_name, strategy, enabled, created_at, updated_at
             "#,
         )
@@ -111,7 +111,7 @@ impl GroupRepo {
     }
 
     pub async fn delete_group(pool: &SqlitePool, id: &str) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query("DELETE FROM provider_groups WHERE id = ?1")
+        let result = sqlx::query("DELETE FROM provider_groups WHERE id = $1")
             .bind(id)
             .execute(pool)
             .await?;
@@ -134,7 +134,7 @@ impl GroupRepo {
         sqlx::query_as::<_, GroupMember>(
             r#"
             INSERT INTO group_members (id, group_id, provider_id, weight, enabled, created_at)
-            VALUES (?1, ?2, ?3, ?4, 1, ?5)
+            VALUES ($1, $2, $3, $4, 1, $5)
             RETURNING id, group_id, provider_id, weight, enabled, created_at
             "#,
         )
@@ -152,7 +152,7 @@ impl GroupRepo {
         group_id: &str,
     ) -> Result<Vec<GroupMember>, sqlx::Error> {
         sqlx::query_as::<_, GroupMember>(
-            r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE group_id = ?1 ORDER BY created_at ASC"#,
+            r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE group_id = $1 ORDER BY created_at ASC"#,
         )
         .bind(group_id)
         .fetch_all(pool)
@@ -165,7 +165,7 @@ impl GroupRepo {
         update: &UpdateGroupMember,
     ) -> Result<Option<GroupMember>, sqlx::Error> {
         let existing = sqlx::query_as::<_, GroupMember>(
-            r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE id = ?1"#,
+            r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE id = $1"#,
         )
         .bind(id)
         .fetch_optional(pool)
@@ -178,9 +178,9 @@ impl GroupRepo {
         sqlx::query_as::<_, GroupMember>(
             r#"
             UPDATE group_members
-            SET weight = COALESCE(?2, weight),
-                enabled = COALESCE(?3, enabled)
-            WHERE id = ?1
+            SET weight = COALESCE($2, weight),
+                enabled = COALESCE($3, enabled)
+            WHERE id = $1
             RETURNING id, group_id, provider_id, weight, enabled, created_at
             "#,
         )
@@ -192,7 +192,7 @@ impl GroupRepo {
     }
 
     pub async fn remove_member(pool: &SqlitePool, id: &str) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query("DELETE FROM group_members WHERE id = ?1")
+        let result = sqlx::query("DELETE FROM group_members WHERE id = $1")
             .bind(id)
             .execute(pool)
             .await?;
