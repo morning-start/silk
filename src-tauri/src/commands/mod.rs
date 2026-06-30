@@ -314,8 +314,8 @@ pub async fn export_logs_csv(
         format!("silk_logs_{}.csv", chrono::Utc::now().format("%Y%m%d_%H%M%S"))
     });
 
-    // 路径安全校验：拒绝包含 .. 的路径和绝对路径（防止路径遍历）
-    if file_path.contains("..") || file_path.starts_with('/') || file_path.contains(":\\") {
+    // 路径安全校验：使用跨平台 is_absolute() 防止路径遍历
+    if file_path.contains("..") || std::path::Path::new(&file_path).is_absolute() {
         return Err("文件路径不安全: 不允许包含 .. 或使用绝对路径".to_string());
     }
 

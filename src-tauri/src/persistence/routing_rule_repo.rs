@@ -1,6 +1,7 @@
 use sqlx::SqlitePool;
 
 use crate::models::{NewRoutingRule, RoutingRule, UpdateRoutingRule};
+use crate::persistence::defaults;
 
 pub struct RoutingRuleRepo;
 
@@ -43,7 +44,7 @@ impl RoutingRuleRepo {
         .bind(protocol_conversion)
         .bind(new.model_name_override.as_deref())
         .bind(new.metadata_json.as_deref())
-        .bind(new.priority.unwrap_or(100))
+        .bind(new.priority.unwrap_or(defaults::DEFAULT_ROUTING_PRIORITY as i32))
         .bind(enabled)
         .bind(now)
         .bind(now)
@@ -93,15 +94,6 @@ impl RoutingRuleRepo {
         let now = chrono::Utc::now().naive_utc();
         let protocol_conversion = update.protocol_conversion.map(|v| if v { 1 } else { 0 });
         let enabled = update.enabled.map(|v| if v { 1 } else { 0 });
-
-        let Some(_) =
-            sqlx::query_as::<_, RoutingRule>(r#"SELECT * FROM routing_rules WHERE id = $1"#)
-                .bind(id)
-                .fetch_optional(pool)
-                .await?
-        else {
-            return Ok(None);
-        };
 
         sqlx::query_as::<_, RoutingRule>(
             r#"

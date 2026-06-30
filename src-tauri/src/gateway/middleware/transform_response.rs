@@ -4,6 +4,7 @@ use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
 use crate::protocol::UpstreamResponse;
+use super::mask_api_key;
 
 /// 响应转换中间件
 ///
@@ -47,13 +48,7 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
                     status = upstream_status,
                     reason = reason_phrase,
                     upstream_url = %ctx.upstream_url.as_deref().unwrap_or("(none)"),
-                    selected_key_preview = %ctx.selected_api_key.as_deref().map(|k| {
-                        if k.len() > 8 {
-                            format!("{}...{}", &k[..4], &k[k.len()-4..])
-                        } else {
-                            "***".to_string()
-                        }
-                    }).unwrap_or_default(),
+                    selected_key_preview = %ctx.selected_api_key.as_deref().map(mask_api_key).unwrap_or_default(),
                     body_preview = %preview,
                     parse_error = %parse_err,
                     "上游返回非 JSON 错误响应 — 请检查上游 URL 和 API Key"

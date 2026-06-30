@@ -1,6 +1,7 @@
 use sqlx::SqlitePool;
 
 use crate::models::{NewProvider, Provider, UpdateProvider};
+use crate::persistence::defaults;
 
 pub struct ProviderRepo;
 
@@ -27,8 +28,8 @@ impl ProviderRepo {
         .bind(new.key_strategy.as_deref().unwrap_or("round_robin"))
         .bind(new.api_base_url.as_str())
         .bind(new.proxy_url.as_deref())
-        .bind(new.timeout_seconds.unwrap_or(30))
-        .bind(new.max_retries.unwrap_or(3))
+        .bind(new.timeout_seconds.unwrap_or(defaults::DEFAULT_PROVIDER_TIMEOUT_SECONDS))
+        .bind(new.max_retries.unwrap_or(defaults::DEFAULT_PROVIDER_MAX_RETRIES))
         .bind(new.status.as_deref().unwrap_or("enabled"))
         .bind(new.health_status.as_deref().unwrap_or("unknown"))
         .bind(new.last_health_check_at)
@@ -70,14 +71,6 @@ impl ProviderRepo {
         update: &UpdateProvider,
     ) -> Result<Option<Provider>, sqlx::Error> {
         let now = chrono::Utc::now().naive_utc();
-
-        let Some(_) = sqlx::query_as::<_, Provider>(r#"SELECT * FROM providers WHERE id = $1"#)
-            .bind(id)
-            .fetch_optional(pool)
-            .await?
-        else {
-            return Ok(None);
-        };
 
         sqlx::query_as::<_, Provider>(
             r#"

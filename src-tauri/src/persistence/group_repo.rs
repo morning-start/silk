@@ -77,17 +77,6 @@ impl GroupRepo {
     ) -> Result<Option<ProviderGroup>, sqlx::Error> {
         let now = chrono::Utc::now().naive_utc();
 
-        let existing = sqlx::query_as::<_, ProviderGroup>(
-            r#"SELECT id, name, model_name, strategy, enabled, created_at, updated_at FROM provider_groups WHERE id = $1"#,
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
-
-        let Some(_) = existing else {
-            return Ok(None);
-        };
-
         sqlx::query_as::<_, ProviderGroup>(
             r#"
             UPDATE provider_groups
@@ -164,17 +153,6 @@ impl GroupRepo {
         id: &str,
         update: &UpdateGroupMember,
     ) -> Result<Option<GroupMember>, sqlx::Error> {
-        let existing = sqlx::query_as::<_, GroupMember>(
-            r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE id = $1"#,
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
-
-        let Some(_) = existing else {
-            return Ok(None);
-        };
-
         sqlx::query_as::<_, GroupMember>(
             r#"
             UPDATE group_members

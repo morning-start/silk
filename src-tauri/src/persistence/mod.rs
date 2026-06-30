@@ -1,3 +1,4 @@
+pub mod defaults;
 pub mod gateway_key_repo;
 pub mod gateway_settings_repo;
 pub mod group_repo;

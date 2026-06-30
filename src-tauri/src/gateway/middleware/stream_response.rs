@@ -165,37 +165,35 @@ impl SseEvent {
 
 /// SSE 解析器：将字节流解析为 SseEvent
 pub struct SseParser {
-    buffer: String,
+    buffer: bytes::BytesMut,
 }
 
 impl SseParser {
     pub fn new() -> Self {
         Self {
-            buffer: String::new(),
+            buffer: bytes::BytesMut::new(),
         }
     }
 
     /// 喂入数据块，返回解析出的事件
     pub fn feed(&mut self, chunk: &[u8]) -> Vec<SseEvent> {
-        // 使用 lossy 转换避免非 UTF-8 字节静默丢弃
-        let text = String::from_utf8_lossy(chunk);
-
-        self.buffer.push_str(&text);
+        self.buffer.extend_from_slice(chunk);
 
         // 防止 buffer 无限增长：超过 1MB 时截断
         const MAX_BUFFER_SIZE: usize = 1024 * 1024;
         if self.buffer.len() > MAX_BUFFER_SIZE {
-            let safe_idx = self.buffer.floor_char_boundary(self.buffer.len() - MAX_BUFFER_SIZE / 2);
-            self.buffer = self.buffer.split_off(safe_idx);
+            let split_idx = self.buffer.len() - MAX_BUFFER_SIZE / 2;
+            let _ = self.buffer.split_to(split_idx);
         }
 
         let mut events = Vec::new();
 
-        while let Some(pos) = self.buffer.find("\n\n") {
-            let raw = self.buffer[..pos].to_string();
-            self.buffer = self.buffer[pos + 2..].to_string();
+        while let Some(pos) = self.buffer.windows(2).position(|w| w == b"\n\n") {
+            let raw_bytes = self.buffer.split_to(pos);
+            let _ = self.buffer.split_to(2); // Skip the \n\n
 
-            if let Some(event) = Self::parse_event(&raw) {
+            let raw_str = String::from_utf8_lossy(&raw_bytes);
+            if let Some(event) = Self::parse_event(&raw_str) {
                 events.push(event);
             }
         }
