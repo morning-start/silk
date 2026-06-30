@@ -37,7 +37,7 @@ impl LoadBalancedItem for ChannelItem {
 
 pub async fn run(
     runtime: &GatewayContext,
-    ctx: RequestContext,
+    mut ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
 
@@ -47,13 +47,9 @@ pub async fn run(
     }
 
     // 1. 优先通过请求体中的 model 字段做模型映射路由
-    let body_text = String::from_utf8_lossy(&ctx.request_body).into_owned();
-
-    if body_text.trim().starts_with('{') {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_text) {
-            if let Some(result) = try_model_mapping_route(runtime, ctx.clone(), &json, error_ctx).await? {
-                return Ok(result);
-            }
+    if let Some(json) = ctx.get_parsed_body().cloned() {
+        if let Some(result) = try_model_mapping_route(runtime, ctx.clone(), &json, error_ctx).await? {
+            return Ok(result);
         }
     }
 
@@ -125,26 +121,12 @@ async fn try_model_mapping_route(
     };
 
     let selected_channel = channels.iter().find(|c| c.provider_id == selected.provider_id);
-    let remote_model = selected_channel.and_then(|c| {
-        let sm = c.selected_models_vec();
-        if sm.contains(&request_model) { None } else { sm.first().cloned() }
-    });
+    if let Some(channel) = selected_channel {
+        let sm = channel.selected_models_vec();
+        apply_model_override(&mut ctx, &request_model, &sm);
+    }
 
     let provider = load_provider_with_cache(runtime, &selected.provider_id, error_ctx).await?;
-
-    if let Some(ref remote_model) = remote_model {
-        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(
-            &String::from_utf8_lossy(&ctx.request_body)
-        ) {
-            if let Some(obj) = json.as_object_mut() {
-                obj.insert("model".to_string(), serde_json::Value::String(remote_model.clone()));
-                if let Ok(new_body) = serde_json::to_vec(&json) {
-                    ctx.request_body = bytes::Bytes::from(new_body);
-                }
-            }
-        }
-        ctx.remote_model_override = Some(remote_model.clone());
-    }
 
     ctx.provider = Some(provider);
     ctx.inbound_protocol = Some(detect_inbound_protocol(&ctx.path, json).to_string());
@@ -205,8 +187,8 @@ async fn try_route_fallback(
                     let provider = load_provider_with_cache(runtime, default_provider_id, error_ctx.clone()).await?;
                     // 使用 Provider 的第一个协议做 outbound
                     let outbound = resolve_protocol_adapter(&provider);
-                    // 用真实请求体推断入站协议（避免误判为 openai_chat）
-                    let body_json = serde_json::from_slice::<serde_json::Value>(&ctx.request_body).unwrap_or(serde_json::Value::Null);
+                    // 用缓存或真实请求体推断入站协议（避免误判为 openai_chat）
+                    let body_json = ctx.get_parsed_body().cloned().unwrap_or(serde_json::Value::Null);
                     let inbound = detect_inbound_protocol(&ctx.path, &body_json);
                     ctx.provider = Some(provider);
                     ctx.inbound_protocol = Some(inbound.to_string());
@@ -269,15 +251,12 @@ pub async fn try_next_channel(
     };
 
     // 重新计算远程模型覆盖（每个渠道可能有不同的 selected_models）
-    let body_json: serde_json::Value =
-        serde_json::from_str(&String::from_utf8_lossy(&ctx.client_body)).unwrap_or_default();
-    if let Some(original_model) = body_json
-        .get("model")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-    {
+    let original_model = ctx
+        .get_parsed_body()
+        .and_then(|json| json.get("model")?.as_str().map(|s| s.to_string()));
+    if let Some(ref original_model) = original_model {
         if let Ok(Some(mapping)) =
-            ModelMappingRepo::find_by_model_name(&runtime.pool, &original_model).await
+            ModelMappingRepo::find_by_model_name(&runtime.pool, original_model).await
         {
             if mapping.enabled != 0 {
                 if let Ok(channels) =
@@ -286,32 +265,16 @@ pub async fn try_next_channel(
                     if let Some(channel) = channels.iter().find(|c| c.provider_id == next_provider_id)
                     {
                         let sm = channel.selected_models_vec();
-                        if !sm.contains(&original_model) {
-                            if let Some(remote_model) = sm.first().cloned() {
-                                if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(
-                                    &String::from_utf8_lossy(&ctx.request_body),
-                                ) {
-                                    if let Some(obj) = json.as_object_mut() {
-                                        obj.insert(
-                                            "model".to_string(),
-                                            serde_json::Value::String(remote_model.clone()),
-                                        );
-                                        if let Ok(new_body) = serde_json::to_vec(&json) {
-                                            ctx.request_body = bytes::Bytes::from(new_body);
-                                        }
-                                    }
-                                }
-                                ctx.remote_model_override = Some(remote_model);
-                            }
-                        }
+                        apply_model_override(&mut ctx, original_model, &sm);
                     }
                 }
             }
         }
     }
 
-    // 协议推断（使用 client_body 避免被覆盖干扰）
-    let inbound_adapter = detect_inbound_protocol(&ctx.path, &body_json);
+    // 协议推断（使用缓存的请求体避免被覆盖干扰）
+    let inbound_body = ctx.get_parsed_body().cloned().unwrap_or_default();
+    let inbound_adapter = detect_inbound_protocol(&ctx.path, &inbound_body);
     let outbound_adapter = resolve_protocol_adapter(&provider);
     ctx.provider = Some(provider);
     ctx.inbound_protocol = Some(inbound_adapter.to_string());
@@ -393,5 +356,29 @@ async fn load_provider_with_cache(
             GatewayError::NotFound(format!("未找到目标 Provider: {provider_id}")),
         )),
         Err(err) => Err(StageError::new(error_ctx, GatewayError::Database(err))),
+    }
+}
+
+/// 应用模型覆盖逻辑
+fn apply_model_override(
+    ctx: &mut RequestContext,
+    original_model: &str,
+    selected_models: &[String],
+) {
+    // 恢复为原始客户端请求体，清除可能在上一次尝试中设置的覆盖
+    ctx.request_body = ctx.client_body.clone();
+    ctx.parsed_body = None;
+    ctx.remote_model_override = None;
+
+    if !selected_models.contains(&original_model.to_string()) {
+        if let Some(remote_model) = selected_models.first() {
+            if let Some(mut json) = ctx.get_parsed_body().cloned() {
+                if let Some(obj) = json.as_object_mut() {
+                    obj.insert("model".to_string(), serde_json::Value::String(remote_model.clone()));
+                    let _ = ctx.update_body(json);
+                }
+            }
+            ctx.remote_model_override = Some(remote_model.clone());
+        }
     }
 }
