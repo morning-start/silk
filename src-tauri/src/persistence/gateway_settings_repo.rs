@@ -62,7 +62,7 @@ impl GatewaySettingsRepo {
                 rate_limit_enabled, rate_limit_max_requests_per_minute, rate_limit_max_tokens_per_minute,
                 created_at, updated_at
             )
-            VALUES (?1, '127.0.0.1', 2013, 0, 30, 0, 1000, 500000, $1, $1)
+            VALUES ($2, '127.0.0.1', 2013, 0, 30, 0, 1000, 500000, $1, $1)
             "#,
         )
         .bind(now)
