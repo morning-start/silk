@@ -170,7 +170,7 @@ pub async fn load_gateway_context(
         log_sender,
         adapter_registry,
         group_manager,
-    ))
+    ).map_err(|e| sqlx::Error::Protocol(e))?)
 }
 
 impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {

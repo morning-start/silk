@@ -132,11 +132,45 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
     let mut logs = batch.drain(..).collect::<Vec<_>>();
 
     // 在消费侧计算 cost，不阻塞请求热路径
-    for log in &mut logs {
-        if log.cost.is_some() {
-            continue;
+    // 收集所有需要计算 cost 的模型名，批量查询避免逐条 DB 查询
+    let uncosted_models: Vec<String> = logs
+        .iter()
+        .filter(|log| log.cost.is_none())
+        .filter_map(|log| log.model_used.clone())
+        .collect();
+    if !uncosted_models.is_empty() {
+        let unique_models: Vec<String> = {
+            let mut set: Vec<String> = Vec::new();
+            for m in uncosted_models {
+                if !set.contains(&m) {
+                    set.push(m);
+                }
+            }
+            set
+        };
+        let mappings =
+            match crate::persistence::ModelMappingRepo::find_by_model_names(pool, &unique_models)
+                .await
+            {
+                Ok(m) => m,
+                Err(_) => Vec::new(),
+            };
+        for log in &mut logs {
+            if log.cost.is_some() {
+                continue;
+            }
+            let model_name = match &log.model_used {
+                Some(m) => m,
+                None => continue,
+            };
+            if let Some(mapping) = mappings.iter().find(|m| &m.model_name == model_name) {
+                let input_price = mapping.input_price_per_1m?;
+                let output_price = mapping.output_price_per_1m?;
+                let inp = log.tokens_input.unwrap_or(0) as f64 / 1_000_000.0 * input_price;
+                let out = log.tokens_output.unwrap_or(0) as f64 / 1_000_000.0 * output_price;
+                log.cost = Some(inp + out);
+            }
         }
-        log.cost = calculate_cost(pool, &log.model_used, log.tokens_input, log.tokens_output).await;
     }
 
     match crate::persistence::LogRepo::insert_batch(pool, &logs).await {
@@ -162,29 +196,4 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
             tracing::warn!(%err, "批量写入日志失败");
         }
     }
-}
-
-/// 通过模型映射价格计算本次请求费用（在消费侧异步执行）
-///
-/// 公式：(tokens_input / 1_000_000) × input_price_per_1m + (tokens_output / 1_000_000) × output_price_per_1m
-async fn calculate_cost(
-    pool: &SqlitePool,
-    model_used: &Option<String>,
-    tokens_input: Option<i64>,
-    tokens_output: Option<i64>,
-) -> Option<f64> {
-    let model_name = model_used.as_ref()?;
-
-    let mapping = crate::persistence::ModelMappingRepo::find_by_model_name(pool, model_name)
-        .await
-        .ok()
-        .flatten()?;
-
-    let input_price = mapping.input_price_per_1m?;
-    let output_price = mapping.output_price_per_1m?;
-
-    let inp = tokens_input.unwrap_or(0) as f64 / 1_000_000.0 * input_price;
-    let out = tokens_output.unwrap_or(0) as f64 / 1_000_000.0 * output_price;
-
-    Some(inp + out)
 }
