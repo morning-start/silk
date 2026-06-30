@@ -117,17 +117,7 @@ impl ModelMappingRepo {
             .as_ref()
             .map(|caps| serde_json::to_string(caps).unwrap_or_else(|_| "[]".to_string()));
 
-        // 先检查存在性
-        let Some(_) =
-            sqlx::query_as::<_, ModelMapping>(r#"SELECT * FROM model_mappings WHERE id = $1"#)
-                .bind(id)
-                .fetch_optional(&mut *tx)
-                .await?
-        else {
-            return Ok(None);
-        };
-
-        let mapping = sqlx::query_as::<_, ModelMapping>(
+        let Some(mapping) = sqlx::query_as::<_, ModelMapping>(
             r#"
             UPDATE model_mappings
             SET model_name = COALESCE($2, model_name),
@@ -158,7 +148,10 @@ impl ModelMappingRepo {
         .bind(enabled)
         .bind(now)
         .fetch_optional(&mut *tx)
-        .await?;
+        .await?
+        else {
+            return Ok(None);
+        };
 
         // 在事务内替换关联渠道
         if let Some(ref channels) = update.channels {
@@ -166,7 +159,7 @@ impl ModelMappingRepo {
         }
 
         tx.commit().await?;
-        Ok(mapping)
+        Ok(Some(mapping))
     }
 
     /// 删除模型映射（关联渠道由 ON DELETE CASCADE 自动清理）

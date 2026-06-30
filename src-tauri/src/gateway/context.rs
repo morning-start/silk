@@ -207,6 +207,8 @@ pub struct RequestContext {
     pub client_body: bytes::Bytes,
     /// 管道中流转的请求体（可被 resolve_route / transform_request 修改）
     pub request_body: bytes::Bytes,
+    /// 缓存的解析后的 JSON 请求体
+    pub parsed_body: Option<serde_json::Value>,
     pub route: Option<RoutingRule>,
     pub provider: Option<Provider>,
     pub inbound_protocol: Option<String>,
@@ -255,6 +257,7 @@ impl Clone for RequestContext {
             path: self.path.clone(),
             client_body: self.client_body.clone(),
             request_body: self.request_body.clone(),
+            parsed_body: self.parsed_body.clone(),
             route: self.route.clone(),
             provider: self.provider.clone(),
             inbound_protocol: self.inbound_protocol.clone(),
@@ -320,6 +323,7 @@ impl RequestContext {
             content_type,
             client_body: bytes::Bytes::new(),
             request_body: bytes::Bytes::new(),
+            parsed_body: None,
             route: None,
             provider: None,
             inbound_protocol: None,
@@ -343,6 +347,22 @@ impl RequestContext {
             failed_providers: Vec::new(),
             channels_available: Vec::new(),
         }
+    }
+
+    pub fn get_parsed_body(&mut self) -> Option<&serde_json::Value> {
+        if self.parsed_body.is_none() && !self.request_body.is_empty() {
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&self.request_body) {
+                self.parsed_body = Some(json);
+            }
+        }
+        self.parsed_body.as_ref()
+    }
+
+    pub fn update_body(&mut self, json: serde_json::Value) -> Result<(), serde_json::Error> {
+        let new_body = serde_json::to_vec(&json)?;
+        self.request_body = bytes::Bytes::from(new_body);
+        self.parsed_body = Some(json);
+        Ok(())
     }
 
     pub fn mark_error(

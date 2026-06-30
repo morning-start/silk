@@ -1,6 +1,7 @@
 use sqlx::SqlitePool;
 
 use crate::models::{GatewaySettings, UpdateGatewaySettings};
+use crate::persistence::defaults;
 
 const SETTINGS_ID: &str = "default";
 
@@ -12,14 +13,14 @@ impl GatewaySettingsRepo {
         GatewaySettings {
             id: SETTINGS_ID.to_string(),
             bind_host: "127.0.0.1".to_string(),
-            bind_port: 2013,
+            bind_port: defaults::DEFAULT_BIND_PORT as i32,
             allow_remote: 0,
-            log_retention_days: 30,
+            log_retention_days: defaults::DEFAULT_LOG_RETENTION_DAYS as i32,
             default_provider_id: None,
             default_route_id: None,
             rate_limit_enabled: 0,
-            rate_limit_max_requests_per_minute: 1000,
-            rate_limit_max_tokens_per_minute: 500000,
+            rate_limit_max_requests_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_REQUESTS,
+            rate_limit_max_tokens_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_TOKENS,
             created_at: now,
             updated_at: now,
         }
@@ -62,11 +63,15 @@ impl GatewaySettingsRepo {
                 rate_limit_enabled, rate_limit_max_requests_per_minute, rate_limit_max_tokens_per_minute,
                 created_at, updated_at
             )
-            VALUES ($2, '127.0.0.1', 2013, 0, 30, 0, 1000, 500000, $1, $1)
+            VALUES ($2, '127.0.0.1', $3, 0, $4, 0, $5, $6, $1, $1)
             "#,
         )
         .bind(now)
         .bind(SETTINGS_ID)
+        .bind(defaults::DEFAULT_BIND_PORT)
+        .bind(defaults::DEFAULT_LOG_RETENTION_DAYS)
+        .bind(defaults::DEFAULT_RATE_LIMIT_MAX_REQUESTS)
+        .bind(defaults::DEFAULT_RATE_LIMIT_MAX_TOKENS)
         .execute(&mut *tx)
         .await?;
 

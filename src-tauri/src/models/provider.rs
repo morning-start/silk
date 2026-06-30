@@ -106,11 +106,9 @@ impl Provider {
             .ok_or(crate::crypto::CryptoError::InvalidFormat)?;
 
         if selected.enabled && !selected.value.is_empty() {
-            // 明文存储，直接返回（旧加密数据视为无效，需用户重新填写）
-            if selected.value.starts_with('{') && selected.value.contains("\"ciphertext\"") {
-                return Err(crate::crypto::CryptoError::InvalidFormat);
-            }
-            Ok(selected.value.clone())
+            // 解密 API Key 并返回
+            let decrypted = crate::crypto::decrypt(&selected.value)?;
+            Ok(decrypted)
         } else {
             Err(crate::crypto::CryptoError::InvalidFormat)
         }

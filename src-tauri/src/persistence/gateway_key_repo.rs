@@ -3,6 +3,7 @@ use sqlx::SqlitePool;
 
 use crate::crypto::hash_api_key;
 use crate::models::{GatewayKey, NewGatewayKey, UpdateGatewayKey};
+use crate::persistence::defaults;
 
 pub struct GatewayKeyRepo;
 
@@ -17,7 +18,7 @@ impl GatewayKeyRepo {
         let enabled = if new.enabled.unwrap_or(true) { 1 } else { 0 };
         let key_hash = hash_api_key(&new.key_value);
         let key_prefix = format!("sk-gw-{}", &new.key_value[..8.min(new.key_value.len())]);
-        let max_concurrent = new.max_concurrent.unwrap_or(10);
+        let max_concurrent = new.max_concurrent.unwrap_or(defaults::DEFAULT_KEY_MAX_CONCURRENT as u32);
 
         let row = sqlx::query(
             r#"
@@ -96,15 +97,6 @@ impl GatewayKeyRepo {
     ) -> Result<Option<GatewayKey>, sqlx::Error> {
         let now = chrono::Utc::now().naive_utc();
         let enabled = update.enabled.map(|v| if v { 1 } else { 0 });
-
-        let Some(_) =
-            sqlx::query_as::<_, GatewayKey>(r#"SELECT * FROM gateway_keys WHERE id = $1"#)
-                .bind(id)
-                .fetch_optional(pool)
-                .await?
-        else {
-            return Ok(None);
-        };
 
         sqlx::query_as::<_, GatewayKey>(
             r#"

@@ -12,13 +12,18 @@ use crate::gateway::middleware::stream_response::{
 };
 use crate::gateway::pipeline::StageError;
 use super::build_upstream_url;
+use super::mask_api_key;
 
 fn is_streaming_body(ctx: &RequestContext) -> bool {
-    let body_str = String::from_utf8_lossy(&ctx.request_body);
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
+    if let Some(json) = &ctx.parsed_body {
         json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false)
     } else {
-        false
+        let body_str = String::from_utf8_lossy(&ctx.request_body);
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
+            json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false)
+        } else {
+            false
+        }
     }
 }
 
@@ -105,13 +110,7 @@ pub async fn run(
 
     // 调试日志：输出实际上游请求信息
     {
-        let masked_key = ctx.selected_api_key.as_deref().map(|k| {
-            if k.len() > 8 {
-                format!("{}...{}", &k[..4], &k[k.len()-4..])
-            } else {
-                "***".to_string()
-            }
-        }).unwrap_or_default();
+        let masked_key = ctx.selected_api_key.as_deref().map(mask_api_key).unwrap_or_default();
         let body_preview = String::from_utf8_lossy(&ctx.request_body)
             .chars().take(200).collect::<String>();
         tracing::debug!(
@@ -191,13 +190,7 @@ async fn handle_single_response(
     if status.as_u16() >= 400 {
         let req_body_preview = String::from_utf8_lossy(&ctx.request_body)
             .chars().take(1000).collect::<String>();
-        let masked_key = ctx.selected_api_key.as_deref().map(|k| {
-            if k.len() > 8 {
-                format!("{}...{}", &k[..4], &k[k.len()-4..])
-            } else {
-                "***".to_string()
-            }
-        }).unwrap_or_default();
+        let masked_key = ctx.selected_api_key.as_deref().map(mask_api_key).unwrap_or_default();
         tracing::warn!(
             upstream_status = %status,
             upstream_url = %ctx.upstream_url.as_deref().unwrap_or("(none)"),

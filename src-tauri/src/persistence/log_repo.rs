@@ -2,6 +2,7 @@ use sqlx::Row;
 use sqlx::SqlitePool;
 
 use crate::models::{NewRequestLog, RequestLog};
+use crate::persistence::defaults;
 
 pub struct LogRepo;
 
@@ -130,7 +131,7 @@ impl LogRepo {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<RequestLog>, sqlx::Error> {
-        let limit = limit.clamp(1, 1000);
+        let limit = limit.clamp(1, defaults::PAGINATION_MAX_LIMIT);
         sqlx::query_as::<_, RequestLog>(
             r#"
             SELECT * FROM request_logs

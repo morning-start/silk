@@ -88,6 +88,17 @@ pub(crate) mod internals {
     pub fn header_value_as_str(value: Option<&HeaderValue>) -> Option<&str> {
         value.and_then(|v| v.to_str().ok())
     }
+
+    /// 掩码 API Key，仅显示前4位和后4位；短 key 显示 "***"
+    pub fn mask_api_key(key: Option<&str>) -> String {
+        key.map(|k| {
+            if k.len() > 8 {
+                format!("{}...{}", &k[..4], &k[k.len()-4..])
+            } else {
+                "***".to_string()
+            }
+        }).unwrap_or_default()
+    }
 }
 
 // 公开重导出（供 pipeline 和中间件使用）

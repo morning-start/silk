@@ -103,11 +103,19 @@ pub async fn create(
 ) -> Result<ProviderResponse, ServiceError> {
     let pool = require_db()?;
 
+    let mut keys = payload.keys;
+    for entry in &mut keys {
+        if !entry.value.is_empty() {
+            entry.value = crate::crypto::encrypt(&entry.value)
+                .map_err(|e| ServiceError::Internal(format!("加密 API Key 失败: {e}")))?;
+        }
+    }
+
     let new = NewProvider {
         name: payload.name,
         protocols: payload.protocols,
         models: payload.models,
-        keys: payload.keys, // 明文存储，不再加密
+        keys,
         key_strategy: payload.key_strategy,
         api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
         proxy_url: payload.proxy_url,
@@ -133,11 +141,24 @@ pub async fn update(
 ) -> Result<ProviderResponse, ServiceError> {
     let pool = require_db()?;
 
+    let keys = match payload.keys {
+        Some(mut ks) => {
+            for entry in &mut ks {
+                if !entry.value.is_empty() {
+                    entry.value = crate::crypto::encrypt(&entry.value)
+                        .map_err(|e| ServiceError::Internal(format!("加密 API Key 失败: {e}")))?;
+                }
+            }
+            Some(ks)
+        }
+        None => None,
+    };
+
     let update = UpdateProvider {
         name: payload.name,
         protocols: payload.protocols,
         models: payload.models,
-        keys: payload.keys,
+        keys,
         key_strategy: payload.key_strategy,
         api_base_url: payload
             .api_base_url
@@ -368,20 +389,26 @@ impl ProviderResponse {
         }
     }
 
-    /// 解析 keys JSON 字段（明文存储，直接返回）
+    /// 解析 keys JSON 字段并解密用于展示
     fn parse_keys(keys_json: &str) -> (Vec<ProviderKeyEntry>, i64) {
         let entries: Vec<ProviderKeyEntry> = serde_json::from_str(keys_json).unwrap_or_default();
         let count = entries.len() as i64;
-        // 旧加密数据视为无效，清空 value 让用户重新填写
-        let cleaned: Vec<ProviderKeyEntry> = entries
+        let decrypted: Vec<ProviderKeyEntry> = entries
             .into_iter()
             .map(|mut k| {
-                if k.value.starts_with('{') && k.value.contains("\"ciphertext\"") {
-                    k.value = String::new();
+                if !k.value.is_empty() {
+                    if let Ok(decrypted_val) = crate::crypto::decrypt(&k.value) {
+                        k.value = decrypted_val;
+                    } else {
+                        // 如果是加密 JSON 格式但解密失败（如主密钥改变），清空它以提示重新填写
+                        if k.value.starts_with('{') && k.value.contains("\"ciphertext\"") {
+                            k.value = String::new();
+                        }
+                    }
                 }
                 k
             })
             .collect();
-        (cleaned, count)
+        (decrypted, count)
     }
 }

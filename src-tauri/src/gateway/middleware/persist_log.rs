@@ -43,10 +43,9 @@ pub async fn run(
         .map(|value| value.as_u16() as i64);
 
     // 从请求体 JSON 提取 model 和 stream 字段
-    let request_body_full = maybe_body_text(&ctx.request_body);
-    let (model_from_body, stream_from_body) = request_body_full
-        .as_deref()
-        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+    let (model_from_body, stream_from_body) = ctx
+        .parsed_body
+        .as_ref()
         .map(|json| {
             let model = json
                 .get("model")
@@ -58,7 +57,25 @@ pub async fn run(
                 .unwrap_or(false);
             (model, stream)
         })
-        .unwrap_or((None, false));
+        .unwrap_or_else(|| {
+            let request_body_full = maybe_body_text(&ctx.request_body);
+            request_body_full
+                .as_deref()
+                .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+                .map(|json| {
+                    let model = json
+                        .get("model")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let stream = json
+                        .get("stream")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    (model, stream)
+                })
+                .unwrap_or((None, false))
+        });
+    let request_body_full = maybe_body_text(&ctx.request_body);
     let request_body = truncate_body(request_body_full);
 
     // 流式判定：请求体 stream=true 优先，兜底看 upstream_body 是否为空
