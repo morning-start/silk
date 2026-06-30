@@ -185,7 +185,8 @@ impl SseParser {
         // 防止 buffer 无限增长：超过 1MB 时截断
         const MAX_BUFFER_SIZE: usize = 1024 * 1024;
         if self.buffer.len() > MAX_BUFFER_SIZE {
-            self.buffer = self.buffer.split_off(self.buffer.len() - MAX_BUFFER_SIZE / 2);
+            let safe_idx = self.buffer.floor_char_boundary(self.buffer.len() - MAX_BUFFER_SIZE / 2);
+            self.buffer = self.buffer.split_off(safe_idx);
         }
 
         let mut events = Vec::new();
@@ -218,23 +219,31 @@ impl SseParser {
                 // SSE 规范：注释以 : 开头，可选空格
                 let comment = line.strip_prefix(": ").or_else(|| line.strip_prefix(':'));
                 event.comment = comment.map(|s| s.to_string());
-            } else if let Some(rest) = line.strip_prefix("event: ") {
+            } else if let Some(rest) = line.strip_prefix("event:")
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+            {
                 event.event = Some(rest.to_string());
                 has_data = true;
-            } else if let Some(rest) = line.strip_prefix("data: ") {
+            } else if let Some(rest) = line.strip_prefix("data:")
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+            {
                 // SSE 规范：多个 data: 字段用 \n 拼接
                 event.data = match event.data {
                     Some(existing) => Some(format!("{existing}\n{rest}")),
                     None => Some(rest.to_string()),
                 };
                 has_data = true;
-            } else if let Some(rest) = line.strip_prefix("id: ") {
+            } else if let Some(rest) = line.strip_prefix("id:")
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+            {
                 // SSE 规范：id 字段包含 null 字符时应忽略
                 if !rest.contains('\0') {
                     event.id = Some(rest.to_string());
                     has_data = true;
                 }
-            } else if let Some(rest) = line.strip_prefix("retry: ") {
+            } else if let Some(rest) = line.strip_prefix("retry:")
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+            {
                 event.retry = rest.parse().ok();
                 has_data = true;
             }
