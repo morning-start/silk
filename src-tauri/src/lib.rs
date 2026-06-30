@@ -141,8 +141,8 @@ pub fn get_db_pool() -> Option<&'static SqlitePool> {
 async fn seed_default_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // 默认网关设置
     sqlx::query(
-        r#"INSERT OR IGNORE INTO gateway_settings (id, bind_host, bind_port, allow_remote, log_retention_days, rate_limit_enabled, rate_limit_max_requests_per_minute, rate_limit_max_tokens_per_minute, created_at, updated_at)
-        VALUES ('default', '127.0.0.1', 2013, 0, 30, 0, 1000, 500000, datetime('now'), datetime('now'))"#
+        r#"INSERT OR IGNORE INTO gateway_settings (id, bind_host, bind_port, allow_remote, log_retention_days, created_at, updated_at)
+        VALUES ('default', '127.0.0.1', 2013, 0, 30, datetime('now'), datetime('now'))"#
     )
     .execute(pool)
     .await?;
