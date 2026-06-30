@@ -113,7 +113,13 @@ function copyKey(text: string) {
 
 async function handleSave() {
   try {
-    await gatewayStore.updateSettings(formValue.value);
+    // 空字符串转 null，避免覆盖已有值
+    const payload = {
+      ...formValue.value,
+      default_provider_id: formValue.value.default_provider_id || null,
+      default_route_id: formValue.value.default_route_id || null,
+    };
+    await gatewayStore.updateSettings(payload);
     message.success("设置已保存");
   } catch {
     message.error("保存失败");

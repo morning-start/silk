@@ -12,7 +12,6 @@ export interface Provider {
   key_count: number;
   keys: { name: string; value: string; enabled: boolean; weight: number }[];
   api_base_url: string;
-  model_name: string | null;
   proxy_url: string | null;
   timeout_seconds: number;
   max_retries: number;

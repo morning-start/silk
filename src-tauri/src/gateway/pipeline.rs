@@ -100,7 +100,7 @@ impl GatewayPipeline {
                     Err(stage_err) => {
                         // 记录失败的 Key
                         ctx = stage_err.context;
-                        if let Some(ref key) = ctx.selected_api_key.clone() {
+                        if let Some(ref key) = ctx.selected_api_key {
                             ctx.failed_keys.push(key.clone());
                         }
                         ctx.selected_api_key = None; // 避免复用
