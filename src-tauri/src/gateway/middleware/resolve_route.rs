@@ -37,7 +37,7 @@ impl LoadBalancedItem for ChannelItem {
 
 pub async fn run(
     runtime: &GatewayContext,
-    mut ctx: RequestContext,
+    ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
 
@@ -51,7 +51,7 @@ pub async fn run(
 
     if body_text.trim().starts_with('{') {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_text) {
-            if let Some(result) = try_model_mapping_route(runtime, ctx, &json, error_ctx).await? {
+            if let Some(result) = try_model_mapping_route(runtime, ctx.clone(), &json, error_ctx).await? {
                 return Ok(result);
             }
         }
@@ -159,6 +159,7 @@ async fn try_route_fallback(
     mut ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
+    let route_result = runtime
         .route_manager
         .resolve(
             ctx.host.as_deref(),
