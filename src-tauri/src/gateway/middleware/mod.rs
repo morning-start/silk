@@ -67,8 +67,9 @@ pub(crate) mod internals {
         body: bytes::Bytes,
     ) -> axum::response::Response {
         let mut response = axum::response::Response::builder().status(status);
-        {
-            let response_headers = response.headers_mut().expect("response headers available");
+        // headers_mut() 仅在 status 是无效状态码时返回 None，
+        // 此处 status 来自上游响应，理论上不会失效；但为防御 panic 使用 map
+        if let Some(response_headers) = response.headers_mut() {
             for (name, value) in headers.iter() {
                 if should_forward_header(name) {
                     response_headers.insert(name, value.clone());
