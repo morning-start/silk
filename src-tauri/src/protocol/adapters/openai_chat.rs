@@ -6,7 +6,8 @@ use linguafranca::traits::IntoOpenResponses;
 
 use crate::models::Provider;
 use crate::protocol::adapter::{
-    build_bearer_headers, ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse,
+    build_bearer_headers, build_upstream, ProtocolError, ProviderAdapter, UpstreamRequest,
+    UpstreamResponse,
 };
 
 pub struct OpenAIChatAdapter;
@@ -23,18 +24,13 @@ impl ProviderAdapter for OpenAIChatAdapter {
         provider: &Provider,
         selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError> {
-        // 反序列化一次，用于验证 + 生成 body
-        let chat_req: ChatCompletionsOpenAiRequest = serde_json::from_slice(req_body)
-            .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        let body = serde_json::to_value(&chat_req)
-            .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-
-        Ok(UpstreamRequest {
-            url: format!("{}/v1/chat/completions", provider.api_base_url),
-            method: "POST".to_string(),
-            headers: build_bearer_headers(selected_api_key)?,
-            body,
-        })
+        build_upstream::<ChatCompletionsOpenAiRequest>(
+            req_body,
+            provider,
+            selected_api_key,
+            "v1/chat/completions",
+            build_bearer_headers,
+        )
     }
 
     async fn transform_response(

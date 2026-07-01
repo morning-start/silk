@@ -6,7 +6,8 @@ use linguafranca::traits::IntoOpenResponses;
 
 use crate::models::Provider;
 use crate::protocol::adapter::{
-    build_anthropic_headers, ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse,
+    build_anthropic_headers, build_upstream, ProtocolError, ProviderAdapter, UpstreamRequest,
+    UpstreamResponse,
 };
 
 pub struct ClaudeMessagesAdapter;
@@ -23,18 +24,13 @@ impl ProviderAdapter for ClaudeMessagesAdapter {
         provider: &Provider,
         selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError> {
-        // 反序列化一次，用于验证 + 生成 body
-        let anthropic_req: AnthropicRequest = serde_json::from_slice(req_body)
-            .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        let body = serde_json::to_value(&anthropic_req)
-            .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-
-        Ok(UpstreamRequest {
-            url: format!("{}/v1/messages", provider.api_base_url),
-            method: "POST".to_string(),
-            headers: build_anthropic_headers(selected_api_key)?,
-            body,
-        })
+        build_upstream::<AnthropicRequest>(
+            req_body,
+            provider,
+            selected_api_key,
+            "v1/messages",
+            build_anthropic_headers,
+        )
     }
 
     async fn transform_response(

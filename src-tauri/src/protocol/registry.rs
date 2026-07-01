@@ -2,9 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::protocol::adapter::ProviderAdapter;
-use crate::protocol::adapters::claude::ClaudeMessagesAdapter;
-use crate::protocol::adapters::openai_chat::OpenAIChatAdapter;
-use crate::protocol::adapters::openai_response::OpenAIResponseAdapter;
 use crate::protocol::ProtocolError;
 
 /// 适配器注册表：根据协议类型返回对应适配器
@@ -21,16 +18,17 @@ impl std::fmt::Debug for AdapterRegistry {
 }
 
 impl AdapterRegistry {
-    pub fn new() -> Self {
-        let mut registry = Self {
+    /// 创建空注册表（不注册任何适配器）
+    pub fn new_empty() -> Self {
+        Self {
             adapters: HashMap::new(),
-        };
+        }
+    }
 
-        // 注册内置适配器
-        registry.register(Arc::new(OpenAIChatAdapter));
-        registry.register(Arc::new(ClaudeMessagesAdapter));
-        registry.register(Arc::new(OpenAIResponseAdapter));
-
+    /// 创建注册表并注册所有内置适配器
+    pub fn new() -> Self {
+        let mut registry = Self::new_empty();
+        crate::protocol::builtin_adapters::register_all(&mut registry);
         registry
     }
 
