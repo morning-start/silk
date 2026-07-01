@@ -57,3 +57,44 @@ impl HeaderConfig {
         self.forward_headers.contains(&name_lower) && !self.exclude_headers.contains(&name_lower)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_forward_user_agent() {
+        let config = HeaderConfig::default();
+        assert!(config.should_forward("user-agent"));
+    }
+
+    #[test]
+    fn test_should_forward_x_request_id() {
+        let config = HeaderConfig::default();
+        assert!(config.should_forward("x-request-id"));
+    }
+
+    #[test]
+    fn test_should_not_forward_authorization() {
+        let config = HeaderConfig::default();
+        assert!(!config.should_forward("authorization"));
+    }
+
+    #[test]
+    fn test_should_not_forward_host() {
+        let config = HeaderConfig::default();
+        assert!(!config.should_forward("host"));
+    }
+
+    #[test]
+    fn test_should_forward_cursor_header() {
+        let config = HeaderConfig::default();
+        assert!(config.should_forward("x-cursor-client-id"));
+    }
+
+    #[test]
+    fn test_should_forward_windsurf_header() {
+        let config = HeaderConfig::default();
+        assert!(config.should_forward("x-windsurf-version"));
+    }
+}
