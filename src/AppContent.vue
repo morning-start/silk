@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted } from "vue";
+import { computed, h, onMounted, ref, onErrorCaptured } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import {
   NLayout,
@@ -104,6 +104,17 @@ async function restartGateway() {
 onMounted(() => {
   gatewayStore.initStatus();
 });
+
+// 全局错误边界：捕获子组件渲染错误，显示降级 UI
+const errorInfo = ref<{ message: string; stack?: string } | null>(null);
+onErrorCaptured((err, _instance, info) => {
+  errorInfo.value = {
+    message: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  };
+  console.error(`[ErrorBoundary] ${info}:`, err);
+  return false; // 阻止错误继续向上传播
+});
 </script>
 
 <template>
@@ -203,7 +214,17 @@ onMounted(() => {
 
       <!-- Content -->
       <NLayoutContent content-style="padding: 24px;" class="app-content">
-        <router-view />
+        <template v-if="errorInfo">
+          <div class="error-boundary">
+            <div class="error-boundary-icon">⚠️</div>
+            <h3 class="error-boundary-title">页面渲染出错</h3>
+            <p class="error-boundary-message">{{ errorInfo.message }}</p>
+            <NButton type="primary" @click="errorInfo = null">重试</NButton>
+          </div>
+        </template>
+        <template v-else>
+          <router-view />
+        </template>
       </NLayoutContent>
     </NLayout>
   </NLayout>
@@ -422,5 +443,35 @@ onMounted(() => {
   background: var(--content-bg, #f8fafc);
   min-height: calc(100vh - 56px);
   overflow-y: auto;
+}
+
+/* Error Boundary */
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  text-align: center;
+  gap: 12px;
+}
+
+.error-boundary-icon {
+  font-size: 48px;
+}
+
+.error-boundary-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.error-boundary-message {
+  font-size: 13px;
+  color: #64748b;
+  max-width: 400px;
+  word-break: break-all;
+  margin: 0;
 }
 </style>

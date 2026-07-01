@@ -135,6 +135,22 @@ impl GroupManager {
     pub async fn reload_all(&self, pool: &SqlitePool) -> Result<(), sqlx::Error> {
         self.load(pool).await
     }
+
+    /// 记录连接开始（LeastConn 策略使用）
+    pub async fn connection_started(&self, member: &GroupMember) {
+        let inner = self.inner.read().await;
+        if let Some(state) = inner.groups.get(&member.group_id) {
+            state.balancer.connection_started(member);
+        }
+    }
+
+    /// 记录连接结束（LeastConn 策略使用）
+    pub async fn connection_finished(&self, member: &GroupMember) {
+        let inner = self.inner.read().await;
+        if let Some(state) = inner.groups.get(&member.group_id) {
+            state.balancer.connection_finished(member);
+        }
+    }
 }
 
 impl Default for GroupManager {

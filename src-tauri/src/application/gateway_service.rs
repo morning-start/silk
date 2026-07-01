@@ -223,10 +223,12 @@ mod tests {
         let gateway = load_gateway_context(pool.clone(), log_sender)
             .await
             .expect("load gateway context");
+        let (settings_change_tx, _settings_change_rx) = tokio::sync::broadcast::channel(16);
         let state = AppState {
             gateway: Arc::new(RwLock::new(gateway)),
             gateway_server: Arc::new(RwLock::new(None)),
             provider_name_cache: Arc::new(RwLock::new(HashMap::new())),
+            settings_change_tx,
         };
 
         start_existing_gateway(&state)

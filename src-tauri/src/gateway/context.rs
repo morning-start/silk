@@ -107,19 +107,23 @@ impl RouteManager {
     ///
     /// 如果规则指向 group，通过 GroupManager 选择一个 Provider；
     /// 如果规则直接指向 provider，返回该 provider_id。
+    /// 同时返回选中的 GroupMember（仅分组路由时有值），用于 LeastConn 连接追踪。
     pub async fn resolve_provider_id(
         &self,
         route: &RoutingRule,
         group_manager: &GroupManager,
-    ) -> Option<String> {
+    ) -> (Option<String>, Option<GroupMember>) {
         if let Some(ref group_id) = route.target_group_id {
             // 从分组中选择一个 Provider
-            group_manager
-                .select_provider(group_id)
-                .await
-                .map(|member| member.provider_id)
+            match group_manager.select_provider(group_id).await {
+                Some(member) => {
+                    let pid = member.provider_id.clone();
+                    (Some(pid), Some(member))
+                }
+                None => (None, None),
+            }
         } else {
-            Some(route.target_provider_id.clone())
+            (Some(route.target_provider_id.clone()), None)
         }
     }
 }
@@ -247,6 +251,8 @@ pub struct RequestContextInner {
     pub failed_providers: Vec<String>,
     /// 模型池映射中可用的渠道列表（provider_id），用于失败回退
     pub channels_available: Vec<String>,
+    /// 选中的分组成员（用于 LeastConn 连接追踪），仅路由到分组时设置
+    pub selected_group_member: Option<GroupMember>,
 }
 
 /// 请求上下文 — 整个网关管道的核心数据结构
@@ -346,6 +352,7 @@ impl RequestContext {
                 failed_keys: Vec::new(),
                 failed_providers: Vec::new(),
                 channels_available: Vec::new(),
+                selected_group_member: None,
             },
             response: None,
         }

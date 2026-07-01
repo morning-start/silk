@@ -163,7 +163,7 @@ async fn try_route_fallback(
                     if let Ok(Some(fallback_route)) =
                         crate::persistence::RoutingRuleRepo::find_by_id(&runtime.pool, default_route_id).await
                     {
-                        let provider_id = runtime
+                        let (provider_id, group_member) = runtime
                             .route_manager
                             .resolve_provider_id(&fallback_route, &runtime.group_manager)
                             .await;
@@ -172,6 +172,7 @@ async fn try_route_fallback(
                             let provider = load_provider_with_cache(runtime, &pid, error_ctx.clone()).await?;
                             ctx.route = Some(fallback_route.clone());
                             ctx.provider = Some(provider);
+                            ctx.selected_group_member = group_member;
                             ctx.inbound_protocol = fallback_route.inbound_protocol.clone();
                             ctx.outbound_protocol = fallback_route.outbound_protocol.clone();
                             ctx.adapter_registry = Some(runtime.adapter_registry.clone());
@@ -205,21 +206,23 @@ async fn try_route_fallback(
         }
     };
 
-    let provider_id = runtime
+    let (provider_id, group_member) = runtime
         .route_manager
         .resolve_provider_id(&route, &runtime.group_manager)
-        .await
-        .ok_or_else(|| {
-            StageError::new(
-                error_ctx.clone(),
-                GatewayError::NotFound("无法解析目标 Provider".to_string()),
-            )
-        })?;
+        .await;
+
+    let provider_id = provider_id.ok_or_else(|| {
+        StageError::new(
+            error_ctx.clone(),
+            GatewayError::NotFound("无法解析目标 Provider".to_string()),
+        )
+    })?;
 
     let provider = load_provider_with_cache(runtime, &provider_id, error_ctx.clone()).await?;
 
     ctx.route = Some(route.clone());
     ctx.provider = Some(provider);
+    ctx.selected_group_member = group_member;
     ctx.inbound_protocol = route.inbound_protocol.clone();
     ctx.outbound_protocol = route.outbound_protocol.clone();
     ctx.adapter_registry = Some(runtime.adapter_registry.clone());
