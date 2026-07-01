@@ -217,7 +217,7 @@ pub fn run() {
 
             // 设置变更监听：配置变更时自动重启网关
             let app_handle = app.handle().clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let mut rx = {
                     let state = app_handle.state::<AppState>();
                     state.settings_change_tx.subscribe()
