@@ -54,7 +54,6 @@ impl HeaderConfig {
     /// 检查 header 是否应该被转发
     pub fn should_forward(&self, header_name: &str) -> bool {
         let name_lower = header_name.to_lowercase();
-        !self.exclude_headers.contains(&name_lower) && 
-        (self.forward_headers.contains(&name_lower) || !self.exclude_headers.contains(&name_lower))
+        self.forward_headers.contains(&name_lower) && !self.exclude_headers.contains(&name_lower)
     }
 }
