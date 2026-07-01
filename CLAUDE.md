@@ -1,167 +1,190 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+指导 AI 助手在此仓库中工作时遵循的约定与上下文。
 
-## Project
+## 项目
 
-**Silk (丝路)** — A pure-local desktop AI multi-model relay/gateway client. Provides a unified local HTTP endpoint at `http://127.0.0.1:xxxx` that bridges three LLM protocol paradigms: OpenAI Chat, Claude Messages, and OpenAI Response. All inbound protocols are bidirectionally converted and **unified to OpenAI Response format for outbound**. Also handles transparent passthrough for image/video AI APIs. All data stays local — no cloud, no server-side component.
+**Silk（丝路）** — 纯本地桌面 AI 多模型中转/网关客户端。提供一个 `http://127.0.0.1:2013` 的统一本地 HTTP 端点，桥接三种 LLM 协议范式（OpenAI Chat、Claude Messages、OpenAI Response），所有入站协议双向转换。数据纯本地 — 无云、无服务端组件。
 
-See `docs/规划/Silk（丝路）项目完整需求&定位&功能总结.md` for the full product vision and feature list, and `docs/规划/规划使用库.md` for detailed tech selection rationale.
+核心定位：**单人单用户、桌面端本地**。不需要分布式、多用户、容器化部署。
+
+## 当前状态
+
+代码审查报告见 `docs/code-review.md` — 全部 **10 项问题（2 P0 + 5 P1 + 3 P2）已修复**，编译零警告。综合评分 8.8/10（在单人本地约束框内 9.0/10）。
+
+### ✅ 已实现（Rust 后端）
+- **Axum HTTP 网关** (`gateway/`) — 11 阶段中间件管道（extract → authenticate → resolve_route → select_channel → transform_request → dispatch_upstream → stream_response → transform_response → persist_log → finalize + rate_limit）
+- **协议适配器** (`protocol/`) — OpenAI Chat、Claude Messages、OpenAI Response，`ProviderAdapter` trait + `AdapterRegistry` + `builtin_adapters.rs` 集中注册
+- **SSE 流式** (`stream_response.rs`) — 完整 SSE 解析、心跳、Last-Event-ID 重连
+- **SQLite 持久化** (`persistence/`) — 9 个 Repo，WAL 模式，异步批量写日志
+- **Provider 缓存** — TTL 5 分钟内存缓存
+- **路由管理器** — Host/Path/Method/ContentType 四维匹配 + 分组负载均衡
+- **失败回退** — 三级回退（重试 → 换 Key → 换 Provider）
+- **AES-GCM 加密** — API Key 加密存储
+- **网关 Key 认证** — Bearer + x-api-key 双认证，SHA-256 哈希查库
+
+### ✅ 已实现（Vue3 前端）
+- **10 个视图**：Dashboard、Providers、RoutingRules、Groups、Settings、Logs、Analytics、Monitoring、ModelSquare、Debugger
+- **Pinia Stores**：gateway、providers (SWR)、routingRules (SWR)、groups (SWR)、logs
+- **SWR 缓存**（`useSwrCache`）：providers / routingRules / groups 三 Store 已接入 30s TTL 缓存
+- **跨 Store 联动**（`useCrossStoreNotify`）：Dashboard 在 providers/routingRules/groups 变更时自动刷新
+- **IPC 层**：统一的 `api/index.ts`，~50 个 Tauri invoke 方法
 
 ## Commands
 
 ```bash
-bun install              # Install frontend deps
-bun run dev               # Vite dev server (port 1420)
-bun run build             # Type-check (vue-tsc) + production build
-bun run tauri dev         # Full Tauri dev (frontend + Rust compile)
-bun run tauri build       # Build production bundle (.msi/.dmg/.deb)
+bun install                   # 安装前端依赖
+bun run dev                   # Vite 开发服务器 (port 1420)
+bun run build                 # Type-check (vue-tsc) + 生产构建
+bun run tauri dev             # 完整 Tauri 开发（前端 + Rust 编译）
+bun run tauri build           # 构建生产安装包 (.msi/.dmg/.deb)
 
-# Rust-only checks (run inside src-tauri/)
-cargo check               # Fast Rust type-check
-cargo clippy              # Rust linting
-cargo test                # Run Rust tests
+# Rust 检查（在 src-tauri/ 内执行）
+cargo check -p silk           # Rust 类型检查
+cargo clippy                  # Rust 代码风格检查
+cargo test                    # 运行 Rust 测试
 ```
 
-## Current State
-
-**Backend core implemented** — the Rust backend has a working HTTP gateway with middleware pipeline, protocol adapters, and SQLite persistence:
-
-### ✅ Implemented (Rust Backend)
-- **Axum HTTP Gateway** at `src-tauri/src/gateway/` — HTTP server with 7-stage middleware pipeline
-- **Middleware Pipeline** (`pipeline.rs`): extract → resolve_route → normalize_protocol → transform_request → dispatch_upstream → transform_response → persist_log
-- **Protocol Adapters** at `src-tauri/src/protocol/` — OpenAI Chat, Claude Messages, OpenAI Response adapters with `ProviderAdapter` trait
-- **SSE Streaming** (`stream_response.rs`) — Full SSE parsing, heartbeat, reconnect with Last-Event-ID
-- **SQLite Persistence** at `src-tauri/src/persistence/` — Provider, RoutingRule, Group, Log, GatewaySettings repos
-- **Provider Cache** — TTL-based in-memory cache (5 min)
-- **Route Manager** — Host/Path/Method/ContentType matching with group load balancing
-- **AES-GCM Encryption** — Secure API key storage
-- **Async Log Writer** — Channel-based batch write to SQLite
-
-### 🚧 In Progress
-- `src/App.vue` still has boilerplate (no UI yet)
-- NaiveUI, Pinia, Vue Router not installed yet
-- No frontend views implemented
-
-### 📦 Planned
-- `src/views/` — Provider management, routing rules, log viewer, settings
-- `src/stores/` — Pinia stores for providers, logs, settings
-- `src/components/` — Reusable UI components
-
-## Architecture
+## 架构
 
 ```
-Vue3 + NaiveUI + Tailwind (UI Layer)
-    ↕ Tauri IPC (invoke / events)
-Rust Backend
-    ├─ Axum HTTP Gateway (127.0.0.1:port)
-    │   └─ 7-stage Middleware Pipeline
-    ├─ Protocol Adapters (OpenAI/Claude/Response)
-    ├─ Provider Cache (TTL 5min)
-    └─ Route Manager (Group Load Balancing)
-    ↕ async functions
-Persistence (SQLite via SQLx)
-    ├─ Provider Repo (AES-GCM encrypted keys)
-    ├─ RoutingRule Repo
-    ├─ Group Repo
-    ├─ Log Repo (async batch write)
-    └─ GatewaySettings Repo
+Vue3 + NaiveUI (UI 层)
+    ↕ Tauri IPC (invoke)
+commands/ (Tauri 胶水层, ~150 行)
     ↕
-Tauri Native Layer (tray, window management, file I/O)
+application/ (业务服务层)
+    ├── gateway_service    网关控制（start/stop/restart/status）
+    ├── provider_service   渠道 CRUD + 测试
+    ├── routing_service    路由规则 CRUD
+    ├── settings_service   网关设置 CRUD (broadcast 通知重启)
+    ├── group_service      分组 CRUD + 成员管理
+    └── model_fetcher      远程模型列表获取
+    ↕
+gateway/ (Axum HTTP 网关核心)
+    ├── context.rs          GatewayContext + RequestContext + ProviderCache + RouteManager
+    ├── pipeline.rs         11 阶段中间件管道 (含三级回退)
+    ├── middleware/          11 个中间件模块
+    ├── group_manager.rs    分组负载均衡 (加权轮询)
+    ├── log_cost.rs         cost 计算（消费侧异步计算）
+    └── log_cleanup.rs      日志定时清理
+    ↕
+protocol/ (协议适配器)
+    ├── adapter.rs          ProviderAdapter trait + 共享工具函数
+    ├── builtin_adapters.rs 内置适配器注册入口
+    ├── registry.rs         适配器注册表
+    └── adapters/           OpenAI Chat / Claude / OpenAI Response
+    ↕
+persistence/ (SQLite Repo 层, via SQLx)
+    ├── provider_repo       渠道 CRUD
+    ├── routing_rule_repo   路由规则（按优先级排序）
+    ├── group_repo          分组 + 成员管理
+    ├── log_repo            日志批量插入 + 统计查询
+    ├── gateway_settings_repo 单例设置 CRUD
+    ├── gateway_key_repo    网关 Key 哈希查找
+    ├── model_mapping_repo  模型费用查询
+    └── stats_repo          仪表盘统计聚合
+    ↕
+models/ (数据模型)
+    ├── provider.rs         渠道（含 keys JSON 字段 + AES-GCM 加密）
+    ├── gateway_settings.rs 设置（含 NetworkConfig / RateLimitConfig 语义子类型）
+    ├── routing_rule.rs     路由规则（四维匹配 + inbound/outbound 协议）
+    └── request_log.rs      请求日志（含 cost、token 用量）
 ```
 
-### Key Flow
+### 核心数据流
 
 ```
-External AI Tool → Axum Gateway
+外部 AI 工具 → Axum 网关 (127.0.0.1:2013)
     ↓
-extract::initialize() + read_body()    → Generate request_id, read body (2MB limit)
+extract         → 生成 request_id、读取请求体（2MB 限制）
     ↓
-resolve_route::run()                   → Match Host/Path/Method/ContentType → find Provider
+authenticate    → Bearer / x-api-key 认证
     ↓
-normalize_protocol::run()              → Set inbound/outbound protocol from route
+resolve_route   → 四维匹配（Host/Path/Method/ContentType）→ 找到 Provider
     ↓
-transform_request::run()               → Adapter converts to upstream format
+select_channel  → 分组负载均衡（加权轮询），选上游 Key
     ↓
-dispatch_upstream::run()               → Forward to upstream (retry + backoff + SSE reconnect)
+transform_request → 适配器入站→出站协议转换
     ↓
-transform_response::run()              → Adapter converts response
+dispatch_upstream → 转发上游（含重试 + 退避 + SSE 重连）
     ↓
-persist_log::run() → finalize()        → Async log write + build final response
+stream_response  → SSE 心跳 + Last-Event-ID 重连
+    ↓
+transform_response → 适配器出站→入站协议转换
+    ↓
+persist_log     → 异步日志写入（channel 批处理）
+    ↓
+finalize        → 构建最终 HTTP 响应
 ```
 
-### Module Structure
+### 关键设计决策
 
-```
-src-tauri/src/
-├── lib.rs                    # Tauri entry point
-├── main.rs                   # App entry
-├── error.rs                  # Global error types
-├── crypto/                   # AES-GCM encryption
-├── gateway/
-│   ├── mod.rs                # Server startup
-│   ├── pipeline.rs           # 7-stage middleware pipeline
-│   ├── context.rs            # RequestContext + GatewayContext
-│   ├── error.rs              # GatewayError enum
-│   ├── group_manager.rs      # Provider group load balancing
-│   └── middleware/
-│       ├── extract.rs        # Request extraction
-│       ├── resolve_route.rs  # Route resolution
-│       ├── normalize_protocol.rs
-│       ├── transform_request.rs
-│       ├── dispatch_upstream.rs
-│       ├── transform_response.rs
-│       ├── stream_response.rs  # SSE handling
-│       ├── persist_log.rs
-│       └── finalize.rs
-├── protocol/
-│   ├── adapter.rs            # ProviderAdapter trait + shared helpers
-│   ├── registry.rs           # Adapter registry
-│   └── adapters/
-│       ├── openai_chat.rs
-│       ├── claude.rs
-│       └── openai_response.rs
-├── persistence/              # SQLite repos
-├── models/                   # Data models
-└── commands/                 # Tauri IPC handlers
-```
+| 决策 | 原因 |
+|------|------|
+| Tauri 2（非 Electron） | 5-30MB 安装包 vs 150MB+，原生性能 |
+| Axum（非 Actix/Salvo） | 最佳 Tokio/Tower 生态兼容性 |
+| NaiveUI（非 Element Plus） | 更好的 TS 支持，更小，优秀主题系统 |
+| SQLx + SQLite（非 redb/sled） | 需要 SQL 分页/过滤日志 |
+| hyper-rustls（非 native-tls） | 纯 Rust TLS，无跨平台 OpenSSL 问题 |
+| Tokio 全异步 | 单一异步运行时处理所有 I/O |
+| broadcast channel 解耦 | `settings_service` 不依赖 `gateway_service`，避免循环依赖 |
 
-## Tech Stack Decisions (Locked)
+### RequestContext 设计
 
-| Choice | Why |
-|--------|-----|
-| Tauri 2 (not Electron) | 5–30MB bundle vs 150MB+, native performance |
-| Axum (not Actix/Salvo) | Best Tokio/Tower ecosystem compatibility |
-| NaiveUI (not Element Plus) | Better TS support, smaller, superior theming |
-| SQLx + SQLite (not redb/sled) | Need SQL for log pagination/filtering |
-| hyper-rustls (not native-tls) | Pure Rust TLS, no cross-platform OpenSSL issues |
-| Bun (not npm/pnpm) | Faster installs, HMR, builds |
-| Tokio full async | Single async runtime for all I/O |
+`RequestContext` 是整个管道的核心数据载体。采用 **Inner + Deref** 模式：
 
-## Conventions
+- `RequestContextInner`：所有可 Clone 字段（`#[derive(Clone)]`），通过 `Deref`/`DerefMut` 透明代理
+- `RequestContext`：仅持 `response: Option<Response>`（非 Clone 字段）
+- `clone()` 时 `response` 置为 `None`，其余自动推导
+- `adapter_registry` 为 `Option<Arc<AdapterRegistry>>`，在 `resolve_route` 阶段由 pipeline 注入（延迟初始化）
 
-- **Vue:** Always `<script setup lang="ts">` (Composition API)
-- **Tauri 2:** Import from `@tauri-apps/api/core` for `invoke()` (not `@tauri-apps/api/tauri`)
-- **TypeScript:** Strict mode enabled — `noUnusedLocals`, `noUnusedParameters` are on
-- **Rust:** Use `thiserror` for error enums; `serde_with` for complex serialization
-- **Package manager:** Bun, not npm
-- **Bundle identifier:** `morning-start.silk`
-- **Comments/documents:** Chinese is used in docs and UI text
-- **Middleware pattern:** Each stage is a separate module in `middleware/` with a `run()` function
-- **Protocol adapters:** Implement `ProviderAdapter` trait, register in `AdapterRegistry`
-- **Error handling:** `GatewayError` enum with `status_code()` and `error_code()` methods
+### 错误处理
 
-## API Endpoints
+`error.rs` — 结构化错误字段：
 
-| Method | Path | Handler |
-|--------|------|---------|
-| GET | `/health` | Returns `{"status": "ok", "service": "silk-gateway"}` |
-| * | `/*` | `GatewayPipeline` (full middleware pipeline) |
+| 变体 | 字段 |
+|------|------|
+| `BadRequest` | `{ message: String, code: Option<String> }` |
+| `Internal` | `{ message: String, detail: Option<String> }` |
+| `NotFound` | `{ message: String }` |
+| `Database` | `{ message: String }` |
+| `DbNotInitialized` | (无字段) |
 
-## Database Tables
+## 约定
 
-- `providers` — AI service providers (API keys encrypted with AES-GCM)
-- `routing_rules` — Host/Path/Method/ContentType matching rules
-- `provider_groups` — Groups for load balancing
-- `request_logs` — Full request/response logs (async batch write)
-- `gateway_settings` — Server config (bind host/port, etc.)
+- **Vue**: 始终使用 `<script setup lang="ts">`（Composition API）
+- **Tauri 2**: 从 `@tauri-apps/api/core` import `invoke()`（非 `@tauri-apps/api/tauri`）
+- **TypeScript**: 严格模式 — `noUnusedLocals`、`noUnusedParameters` 开启
+- **包管理器**: Bun，非 npm
+- **注释/文档**: 中文用于文档和 UI 文本；代码注释中英文均可
+- **中间件模式**: 每个阶段是 `middleware/` 下的独立模块，统一 `run(ctx) → Result` 签名
+- **协议适配器**: 实现 `ProviderAdapter` trait，在 `builtin_adapters.rs` 中注册
+- **错误处理**: `ServiceError` enum + `thiserror` derive
+- **前端 Store**: 优先使用 `useSwrCache`（30s TTL）+ `useCrossStoreNotify` 跨 Store 联动
+
+## API 端点
+
+| 方法 | 路径 | 处理 |
+|------|------|------|
+| GET | `/health` | `{"status": "ok", "service": "silk-gateway"}` |
+| * | `/*` | `GatewayPipeline`（完整 11 阶段管道） |
+
+## 数据库表
+
+- `providers` — AI 服务商（API Key 用 AES-GCM 加密存储）
+- `routing_rules` — 路由规则（四维匹配 + 优先级）
+- `provider_groups` — 分组（加权轮询负载均衡）
+- `group_members` — 分组-渠道关联
+- `request_logs` — 请求日志（复合索引：timestamp + provider_id + status_code）
+- `gateway_settings` — 网关配置（单行单例）
+- `gateway_keys` — 网关认证 Key（SHA-256 哈希存储）
+- `model_mappings` — 模型费用映射
+
+## 注意事项（常见陷阱）
+
+- **不要添加分布式/多用户能力** — 这是单人单机桌面应用，评估架构建议时以此为首要约束
+- **不要引入 Redis/消息队列** — 单进程内 Tokio channel 完全足够
+- **不要引入云依赖** — 纯本地运行，SQLite 是持久化上限
+- **修改中间件时检查 pipeline.rs** — 中间件执行顺序和失败回退逻辑在 `run_main()` + `run_with_failover()` 中定义
+- **新增适配器时**：创建文件 → `adapters/mod.rs` 加模块 → `builtin_adapters.rs` 注册（无需改 `registry.rs`）
+- **设置变更流程**：`settings_service::update()` 发送 broadcast → `lib.rs` 中监听任务重启网关（不要直接调用 `gateway_service::restart()`）

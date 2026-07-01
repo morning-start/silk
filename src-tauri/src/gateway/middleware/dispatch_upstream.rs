@@ -146,7 +146,19 @@ pub async fn run(
             )
         })?;
 
-        match request_clone.body(ctx.request_body.clone()).send().await {
+        // LeastConn 连接追踪：请求开始
+        if let Some(ref member) = ctx.selected_group_member {
+            runtime.group_manager.connection_started(member).await;
+        }
+
+        let result = request_clone.body(ctx.request_body.clone()).send().await;
+
+        // LeastConn 连接追踪：请求结束
+        if let Some(ref member) = ctx.selected_group_member {
+            runtime.group_manager.connection_finished(member).await;
+        }
+
+        match result {
             Ok(response) => {
                 let status = response.status();
                 let headers = response.headers().clone();

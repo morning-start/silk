@@ -35,7 +35,7 @@ pub struct RequestLog {
 }
 
 /// 用于写入日志的输入结构
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NewRequestLog {
     pub request_id: String,
     pub method: String,
