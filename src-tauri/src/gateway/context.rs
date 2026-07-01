@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
 use crate::gateway::group_manager::GroupManager;
+use crate::gateway::header_config::HeaderConfig;
 use crate::models::{GatewaySettings, GroupMember, Provider, RoutingRule};
 use crate::persistence::RoutingRuleRepo;
 use crate::protocol::AdapterRegistry;
@@ -28,6 +29,8 @@ pub struct GatewayContext {
     pub http_client: reqwest::Client,
     /// 共享的 HTTP 客户端（流式，无超时）
     pub http_client_streaming: reqwest::Client,
+    /// Header 转发配置
+    pub header_config: HeaderConfig,
 }
 
 impl GatewayContext {
@@ -62,6 +65,7 @@ impl GatewayContext {
             group_manager,
             http_client,
             http_client_streaming,
+            header_config: HeaderConfig::default(),
         })
     }
 }
