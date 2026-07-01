@@ -131,7 +131,7 @@ impl GroupManager {
         Ok(())
     }
 
-    /// 重新加载所有分组
+    /// 重新加载所有分组（委托给 load）
     pub async fn reload_all(&self, pool: &SqlitePool) -> Result<(), sqlx::Error> {
         self.load(pool).await
     }

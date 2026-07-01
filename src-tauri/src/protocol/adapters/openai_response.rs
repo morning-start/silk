@@ -4,7 +4,8 @@ use linguafranca::open_responses::request::OpenResponsesRequest;
 
 use crate::models::Provider;
 use crate::protocol::adapter::{
-    build_bearer_headers, ProtocolError, ProviderAdapter, UpstreamRequest, UpstreamResponse,
+    build_bearer_headers, build_upstream, ProtocolError, ProviderAdapter, UpstreamRequest,
+    UpstreamResponse,
 };
 
 pub struct OpenAIResponseAdapter;
@@ -21,18 +22,13 @@ impl ProviderAdapter for OpenAIResponseAdapter {
         provider: &Provider,
         selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError> {
-        // 反序列化一次，用于验证 + 生成 body
-        let openai_req: OpenResponsesRequest = serde_json::from_slice(req_body)
-            .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-        let body = serde_json::to_value(&openai_req)
-            .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-
-        Ok(UpstreamRequest {
-            url: format!("{}/v1/responses", provider.api_base_url),
-            method: "POST".to_string(),
-            headers: build_bearer_headers(selected_api_key)?,
-            body,
-        })
+        build_upstream::<OpenResponsesRequest>(
+            req_body,
+            provider,
+            selected_api_key,
+            "v1/responses",
+            build_bearer_headers,
+        )
     }
 
     async fn transform_response(

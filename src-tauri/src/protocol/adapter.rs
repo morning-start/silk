@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use axum::http::{HeaderMap, HeaderValue};
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::models::Provider;
@@ -92,6 +93,30 @@ pub fn build_anthropic_headers(api_key: &str) -> Result<HeaderMap, ProtocolError
         HeaderValue::from_static("application/json"),
     );
     Ok(headers)
+}
+
+/// 通用的上游请求构建函数
+///
+/// 三个适配器的 `transform_request` 遵循相同模式：
+/// 反序列化 → 重序列化 → 构建 URL → 构建 headers。
+/// 通过泛型 `T` 统一这一流程，仅需调用方提供类型、路径和 header 构建器。
+pub fn build_upstream<T: Serialize + serde::de::DeserializeOwned>(
+    req_body: &[u8],
+    provider: &Provider,
+    api_key: &str,
+    path: &str,
+    headers: fn(&str) -> Result<HeaderMap, ProtocolError>,
+) -> Result<UpstreamRequest, ProtocolError> {
+    let req: T = serde_json::from_slice(req_body)
+        .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+    let body = serde_json::to_value(&req)
+        .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
+    Ok(UpstreamRequest {
+        url: format!("{}/{}", provider.api_base_url, path),
+        method: "POST".to_string(),
+        headers: headers(api_key)?,
+        body,
+    })
 }
 
 // ---------------------------------------------------------------------------

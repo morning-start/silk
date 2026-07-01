@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
 use crate::gateway::group_manager::GroupManager;
-use crate::models::{GatewaySettings, Provider, RoutingRule};
+use crate::models::{GatewaySettings, GroupMember, Provider, RoutingRule};
 use crate::persistence::RoutingRuleRepo;
 use crate::protocol::AdapterRegistry;
 

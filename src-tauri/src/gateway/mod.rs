@@ -2,6 +2,7 @@ pub mod context;
 pub mod error;
 pub mod group_manager;
 pub mod log_cleanup;
+pub mod log_cost;
 pub mod middleware;
 pub mod pipeline;
 
@@ -132,48 +133,7 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
     let mut logs = batch.drain(..).collect::<Vec<_>>();
 
     // 在消费侧计算 cost，不阻塞请求热路径
-    // 收集所有需要计算 cost 的模型名，批量查询避免逐条 DB 查询
-    let uncosted_models: Vec<String> = logs
-        .iter()
-        .filter(|log| log.cost.is_none())
-        .filter_map(|log| log.model_used.clone())
-        .collect();
-    if !uncosted_models.is_empty() {
-        let unique_models: Vec<String> = {
-            let mut set: Vec<String> = Vec::new();
-            for m in uncosted_models {
-                if !set.contains(&m) {
-                    set.push(m);
-                }
-            }
-            set
-        };
-        let mappings =
-            match crate::persistence::ModelMappingRepo::find_by_model_names(pool, &unique_models)
-                .await
-            {
-                Ok(m) => m,
-                Err(_) => Vec::new(),
-            };
-        for log in &mut logs {
-            if log.cost.is_some() {
-                continue;
-            }
-            let model_name = match &log.model_used {
-                Some(m) => m,
-                None => continue,
-            };
-            if let Some(mapping) = mappings.iter().find(|m| &m.model_name == model_name) {
-                if let (Some(input_price), Some(output_price)) =
-                    (mapping.input_price_per_1m, mapping.output_price_per_1m)
-                {
-                    let inp = log.tokens_input.unwrap_or(0) as f64 / 1_000_000.0 * input_price;
-                    let out = log.tokens_output.unwrap_or(0) as f64 / 1_000_000.0 * output_price;
-                    log.cost = Some(inp + out);
-                }
-            }
-        }
-    }
+    log_cost::compute_batch_costs(&mut logs, pool).await;
 
     match crate::persistence::LogRepo::insert_batch(pool, &logs).await {
         Ok(count) => {
