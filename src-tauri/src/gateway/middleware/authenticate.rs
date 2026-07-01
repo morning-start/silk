@@ -94,3 +94,58 @@ pub async fn run(
         Err(e) => Err(StageError::new(error_ctx, GatewayError::Database(e))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn test_extract_bearer_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer sk-test-123".parse().unwrap(),
+        );
+        
+        let token = extract_auth_token(&headers);
+        assert_eq!(token, Some("sk-test-123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_token_format() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Token sk-test-456".parse().unwrap(),
+        );
+        
+        let token = extract_auth_token(&headers);
+        assert_eq!(token, Some("sk-test-456".to_string()));
+    }
+
+    #[test]
+    fn test_extract_x_api_key() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", "sk-test-789".parse().unwrap());
+        
+        let token = extract_auth_token(&headers);
+        assert_eq!(token, Some("sk-test-789".to_string()));
+    }
+
+    #[test]
+    fn test_extract_x_api_key_uppercase() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-API-Key", "sk-test-012".parse().unwrap());
+        
+        let token = extract_auth_token(&headers);
+        assert_eq!(token, Some("sk-test-012".to_string()));
+    }
+
+    #[test]
+    fn test_no_auth_header() {
+        let headers = HeaderMap::new();
+        let token = extract_auth_token(&headers);
+        assert_eq!(token, None);
+    }
+}
