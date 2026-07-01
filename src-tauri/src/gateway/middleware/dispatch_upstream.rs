@@ -87,16 +87,17 @@ pub async fn run(
             upstream_request = upstream_request.header(name, value);
         }
     }
-    // 转发必需的客户端头（不再转发全量客户端头，避免 Cloudflare 误判）
+    // 转发客户端头（使用 HeaderConfig 配置）
+    let header_config = crate::gateway::header_config::HeaderConfig::default();
     for (name, value) in ctx.headers.iter() {
-        if name == "user-agent"
-            || name == "accept"
-            || name == "x-request-id"
-            || name == "x-trace-id"
-        {
-            if !ctx.upstream_headers.as_ref().map_or(false, |h| h.contains_key(name)) {
-                upstream_request = upstream_request.header(name, value);
-            }
+        // 跳过已经被适配器设置的 header
+        if ctx.upstream_headers.as_ref().map_or(false, |h| h.contains_key(name)) {
+            continue;
+        }
+        
+        // 使用配置决定是否转发
+        if header_config.should_forward(name.as_str()) {
+            upstream_request = upstream_request.header(name, value);
         }
     }
 
