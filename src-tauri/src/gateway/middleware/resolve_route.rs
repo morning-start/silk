@@ -54,7 +54,14 @@ pub async fn run(
     }
 
     // 2. 降级：通过 RoutingRule 匹配 + 默认 Provider 兜底
-    try_route_fallback(runtime, ctx).await
+    match try_route_fallback(runtime, ctx.clone()).await {
+        Ok(ctx) => return Ok(ctx),
+        Err(_) => {
+            // 3. 最后兜底：根据路径自动匹配协议，选择任意可用 Provider
+            //    利用已有的协议转换能力（transform_request/transform_response）处理协议不匹配
+            try_path_based_default(runtime, ctx).await
+        }
+    }
 }
 
 /// 处理 /v1/models 请求：返回本地模型池
@@ -296,11 +303,59 @@ pub async fn try_next_channel(
 ///    /v1/responses → openai_response, /v1/messages → claude_messages
 /// 2. 请求体 JSON 顶层键（兜底）：有 "input" → openai_response,
 ///    有 "messages" → openai_chat, 其他 → openai_chat
+/// 路径兜底路由：根据请求路径自动选择可用 Provider
+///
+/// 当没有显式路由规则或模型映射匹配时使用。
+/// 检测入站协议 → 选择任意启用 Provider → 利用现有协议转换能力处理协议不匹配。
+async fn try_path_based_default(
+    runtime: &GatewayContext,
+    mut ctx: RequestContext,
+) -> Result<RequestContext, StageError> {
+    let error_ctx = ctx.clone();
+
+    // 检测入站协议（从路径推断）
+    let body_json = ctx.get_parsed_body().cloned().unwrap_or(serde_json::Value::Null);
+    let inbound = detect_inbound_protocol(&ctx.path, &body_json);
+
+    // 获取所有启用 Provider
+    let providers = match ProviderRepo::find_enabled(&runtime.pool).await {
+        Ok(p) if !p.is_empty() => p,
+        Ok(_) => {
+            return Err(StageError::new(
+                error_ctx,
+                GatewayError::NotFound("未找到可用的渠道（Provider），请先添加并启用至少一个渠道".to_string()),
+            ));
+        }
+        Err(e) => {
+            return Err(StageError::new(
+                error_ctx,
+                GatewayError::Database(e),
+            ));
+        }
+    };
+
+    // 选择第一个可用 Provider（单用户场景足够；如有多个可用分组后用负载均衡）
+    let provider = providers.into_iter().next().unwrap();
+    let outbound = resolve_protocol_adapter(&provider);
+
+    tracing::info!(
+        "[path_based_default] inbound={inbound}, outbound={outbound}, provider={}",
+        provider.name
+    );
+
+    ctx.provider = Some(provider);
+    ctx.inbound_protocol = Some(inbound.to_string());
+    ctx.outbound_protocol = Some(outbound);
+    ctx.adapter_registry = Some(runtime.adapter_registry.clone());
+
+    Ok(ctx)
+}
+
 fn detect_inbound_protocol(path: &str, body: &serde_json::Value) -> &'static str {
     match path {
         "/v1/chat/completions" => return "openai_chat",
         "/v1/responses" => return "openai_response",
-        "/v1/messages" => return "claude_messages",
+        "/v1/messages" | "/v1/anthropic" => return "claude_messages",
         _ => {}
     }
     if body.get("input").is_some() {
