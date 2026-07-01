@@ -1,6 +1,7 @@
 pub mod context;
 pub mod error;
 pub mod group_manager;
+pub mod header_config;
 pub mod log_cleanup;
 pub mod log_cost;
 pub mod middleware;
