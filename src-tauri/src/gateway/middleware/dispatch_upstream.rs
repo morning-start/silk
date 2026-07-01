@@ -183,9 +183,17 @@ pub async fn run(
         }
     }
 
+    // 所有重试都失败，返回最后一条错误（或兜底错误消息）
+    let final_error = match last_error {
+        Some(err) => GatewayError::UpstreamError {
+            status: 0,
+            body: serde_json::json!({"error": {"message": err.to_string(), "type": "upstream_error"}}),
+        },
+        None => GatewayError::Internal("上游请求失败（无详细错误）".to_string()),
+    };
     Err(StageError::new(
         error_ctx,
-        GatewayError::Upstream(last_error.expect("至少有一次错误")),
+        final_error,
     ))
 }
 
