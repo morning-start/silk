@@ -3,12 +3,53 @@ use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
 use crate::persistence::GatewayKeyRepo;
+use axum::http::HeaderMap;
+
+/// 从 headers 中提取认证 token
+///
+/// 支持多种格式：
+/// - Authorization: Bearer <token>  (OpenAI 风格)
+/// - Authorization: Token <token>   (其他风格)
+/// - x-api-key: <token>             (Anthropic 风格，小写)
+/// - X-API-Key: <token>             (Anthropic 风格，原始大小写)
+fn extract_auth_token(headers: &HeaderMap) -> Option<String> {
+    // 1. 尝试 Authorization: Bearer 或 Authorization: Token
+    if let Some(auth_header) = headers.get(axum::http::header::AUTHORIZATION) {
+        if let Ok(auth_str) = auth_header.to_str() {
+            let auth_str = auth_str.trim();
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                return Some(token.trim().to_string());
+            }
+            if let Some(token) = auth_str.strip_prefix("Token ") {
+                return Some(token.trim().to_string());
+            }
+        }
+    }
+
+    // 2. 尝试 x-api-key (小写)
+    if let Some(api_key) = headers.get("x-api-key") {
+        if let Ok(key_str) = api_key.to_str() {
+            return Some(key_str.trim().to_string());
+        }
+    }
+
+    // 3. 尝试 X-API-Key (原始大小写)
+    if let Some(api_key) = headers.get("X-API-Key") {
+        if let Ok(key_str) = api_key.to_str() {
+            return Some(key_str.trim().to_string());
+        }
+    }
+
+    None
+}
 
 /// 认证中间件：对所有 /v1/* 请求校验网关 Key
 ///
 /// 支持的认证方式：
 /// - Authorization: Bearer <sk-gw-xxx>  (OpenAI 风格)
-/// - x-api-key: <sk-gw-xxx>              (Anthropic 风格)
+/// - Authorization: Token <sk-gw-xxx>   (其他风格)
+/// - x-api-key: <sk-gw-xxx>             (Anthropic 风格，小写)
+/// - X-API-Key: <sk-gw-xxx>             (Anthropic 风格，原始大小写)
 pub async fn run(
     mut ctx: RequestContext,
     runtime: &GatewayContext,
@@ -20,27 +61,8 @@ pub async fn run(
         return Ok(ctx);
     }
 
-    // 提取 token：优先 Authorization: Bearer，其次 x-api-key
-    let token = ctx
-        .headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_string())
-        .and_then(|val| {
-            if val.starts_with("Bearer ") {
-                Some(val[7..].trim().to_string())
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            ctx.headers
-                .get("x-api-key")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.trim().to_string())
-        });
-
-    let bearer_token = match token {
+    // 提取 token：按优先级尝试多种方式
+    let bearer_token = match extract_auth_token(&ctx.headers) {
         Some(t) => t,
         None => {
             return Err(StageError::new(
