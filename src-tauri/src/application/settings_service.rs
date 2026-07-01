@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::application::gateway_service;
 use crate::error::{require_db, ServiceError};
 use crate::models::{GatewaySettings, UpdateGatewaySettings};
 use crate::persistence::GatewaySettingsRepo;
@@ -73,10 +72,10 @@ pub async fn update(
         *current = settings.clone();
     }
 
-    if state.gateway_server.read().await.is_some()
-        && runtime_settings_changed(&previous_settings, &settings)
-    {
-        gateway_service::restart(state).await?;
+    if runtime_settings_changed(&previous_settings, &settings) {
+        // 通过 broadcast channel 通知配置变更，
+        // 由 lib.rs 中的监听任务处理网关重启，避免 application 层内部循环依赖
+        let _ = state.settings_change_tx.send(());
     }
 
     Ok(GatewaySettingsResponse::from(settings))
@@ -154,15 +153,34 @@ mod tests {
         let gateway = load_gateway_context(pool.clone(), log_sender)
             .await
             .expect("load gateway context");
+
+        let (settings_change_tx, mut settings_change_rx) =
+            tokio::sync::broadcast::channel::<()>(16);
+
         let state = AppState {
             gateway: Arc::new(RwLock::new(gateway)),
             gateway_server: Arc::new(RwLock::new(None)),
             provider_name_cache: Arc::new(RwLock::new(HashMap::new())),
+            settings_change_tx,
         };
 
         start_existing_gateway(&state)
             .await
             .expect("start gateway");
+
+        // 后台监听任务：收到 settings_change 事件后重启网关
+        let state_clone = state.clone();
+        let listener_handle = tokio::spawn(async move {
+            loop {
+                match settings_change_rx.recv().await {
+                    Ok(()) => {
+                        let _ = crate::application::gateway_service::restart(&state_clone).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
 
         let payload = UpdateSettingsPayload {
             bind_host: Some("127.0.0.1".to_string()),
@@ -178,15 +196,33 @@ mod tests {
 
         update(&state, payload).await.expect("update settings");
 
+        // 由于重启异步发生，需要轮询等待新端口就绪
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(3))
             .build()
             .expect("build client");
-        let response = client
-            .get(format!("http://127.0.0.1:{new_port}/health"))
-            .send()
-            .await
-            .expect("new port should respond");
-        assert!(response.status().is_success());
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut last_err = None;
+        while std::time::Instant::now() < deadline {
+            match client
+                .get(format!("http://127.0.0.1:{new_port}/health"))
+                .send()
+                .await
+            {
+                Ok(response) if response.status().is_success() => {
+                    listener_handle.abort(); // 清理监听任务
+                    return;
+                }
+                Ok(_) => {
+                    last_err = Some("非成功状态码".to_string());
+                }
+                Err(e) => {
+                    last_err = Some(e.to_string());
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        panic!("网关未在 5s 内在新端口上响应: {:?}", last_err);
     }
 }

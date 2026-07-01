@@ -31,6 +31,8 @@ pub struct AppState {
     pub gateway_server: Arc<RwLock<Option<GatewayServerHandle>>>,
     /// 渠道 id → name 映射表，用于日志展示时解析渠道名称
     pub provider_name_cache: Arc<RwLock<HashMap<String, String>>>,
+    /// 网关设置变更通知通道（用于解耦 settings_service → gateway_service 循环依赖）
+    pub settings_change_tx: tokio::sync::broadcast::Sender<()>,
 }
 
 impl AppState {
@@ -193,10 +195,15 @@ pub fn run() {
                 );
                 app.manage(cleanup_handle);
 
+                // 创建设置变更广播通道（容量 16，避免背压阻塞）
+                let (settings_change_tx, _settings_change_rx) =
+                    tokio::sync::broadcast::channel::<()>(16);
+
                 app.manage(AppState {
                     gateway: Arc::new(RwLock::new(gateway)),
                     gateway_server: Arc::new(RwLock::new(None)),
                     provider_name_cache,
+                    settings_change_tx,
                 });
 
                 let state = app.state::<AppState>();
@@ -207,6 +214,35 @@ pub fn run() {
             }) {
                 panic!("数据库初始化失败: {err}");
             }
+
+            // 设置变更监听：配置变更时自动重启网关
+            let app_handle = app.handle().clone();
+            tokio::spawn(async move {
+                let mut rx = {
+                    let state = app_handle.state::<AppState>();
+                    state.settings_change_tx.subscribe()
+                };
+                loop {
+                    match rx.recv().await {
+                        Ok(()) => {
+                            let state = app_handle.state::<AppState>();
+                            if state.gateway_server.read().await.is_some() {
+                                tracing::info!("设置变更，自动重启网关");
+                                let _ = crate::application::gateway_service::restart(
+                                    state.inner(),
+                                )
+                                .await;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            continue; // 丢弃，继续监听
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break; // channel 关闭，退出
+                        }
+                    }
+                }
+            });
 
             Ok(())
         })

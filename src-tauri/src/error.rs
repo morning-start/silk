@@ -11,20 +11,32 @@ pub enum ServiceError {
     DbNotInitialized,
 
     /// 请求的资源不存在
-    #[error("{0} 不存在")]
-    NotFound(String),
+    #[error("{message} 不存在")]
+    NotFound {
+        message: String,
+    },
 
     /// 参数校验失败等客户端错误
-    #[error("{0}")]
-    BadRequest(String),
+    #[error("{message}")]
+    BadRequest {
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+    },
 
     /// 数据库操作失败
-    #[error("数据库错误: {0}")]
-    Database(String),
+    #[error("数据库错误: {message}")]
+    Database {
+        message: String,
+    },
 
     /// 内部错误（第三方服务、IO 等）
-    #[error("{0}")]
-    Internal(String),
+    #[error("{message}")]
+    Internal {
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
 }
 
 /// 便捷函数：从 Option 获取数据库连接池，或返回 DbNotInitialized 错误
@@ -34,11 +46,15 @@ pub fn require_db() -> Result<&'static SqlitePool, ServiceError> {
 
 /// 从 Option 提取值，若为 None 返回 NotFound 错误
 pub fn require_found<T>(value: Option<T>, name: &str) -> Result<T, ServiceError> {
-    value.ok_or_else(|| ServiceError::NotFound(name.to_string()))
+    value.ok_or_else(|| ServiceError::NotFound {
+        message: name.to_string(),
+    })
 }
 
 impl From<sqlx::Error> for ServiceError {
     fn from(e: sqlx::Error) -> Self {
-        ServiceError::Database(e.to_string())
+        ServiceError::Database {
+            message: e.to_string(),
+        }
     }
 }

@@ -164,11 +164,13 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
                 None => continue,
             };
             if let Some(mapping) = mappings.iter().find(|m| &m.model_name == model_name) {
-                let input_price = mapping.input_price_per_1m?;
-                let output_price = mapping.output_price_per_1m?;
-                let inp = log.tokens_input.unwrap_or(0) as f64 / 1_000_000.0 * input_price;
-                let out = log.tokens_output.unwrap_or(0) as f64 / 1_000_000.0 * output_price;
-                log.cost = Some(inp + out);
+                if let (Some(input_price), Some(output_price)) =
+                    (mapping.input_price_per_1m, mapping.output_price_per_1m)
+                {
+                    let inp = log.tokens_input.unwrap_or(0) as f64 / 1_000_000.0 * input_price;
+                    let out = log.tokens_output.unwrap_or(0) as f64 / 1_000_000.0 * output_price;
+                    log.cost = Some(inp + out);
+                }
             }
         }
     }

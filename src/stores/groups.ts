@@ -1,28 +1,36 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { api, type ProviderGroup, type GroupWithMembers } from "../api";
 import { useAsyncOperation } from "../composables/useAsyncOperation";
+import { useSwrCache } from "../composables/useSwrCache";
+import { notifyDataChanged } from "../composables/useCrossStoreNotify";
 
 export const useGroupsStore = defineStore("groups", () => {
-  const groups = ref<ProviderGroup[]>([]);
-  const currentGroup = ref<GroupWithMembers | null>(null);
-  const fetchOp = useAsyncOperation();
+  // SWR 缓存：30 秒 TTL
+  const cache = useSwrCache<ProviderGroup[]>(30_000);
   const crudOp = useAsyncOperation();
 
+  const groups = computed(() => cache.data.value ?? []);
+  const currentGroup = ref<GroupWithMembers | null>(null);
+  const loading = computed(() => cache.loading.value);
+  const error = computed(() => cache.error.value);
+
   async function fetchAll() {
-    const result = await fetchOp.run(() => api.listGroups(), "获取分组失败");
-    if (result) groups.value = result;
+    return cache.fetchIfNeeded(() => api.listGroups());
   }
 
   async function fetchById(id: string) {
-    const result = await fetchOp.run(() => api.getGroup(id), "获取分组失败");
+    const result = await crudOp.run(() => api.getGroup(id), "获取分组失败");
     if (result) currentGroup.value = result;
   }
 
   async function create(data: { name: string; model_name: string; strategy?: string }) {
     const result = await crudOp.runOrThrow(() => api.createGroup(data), "创建失败");
     if (result) {
-      groups.value.unshift(result);
+      const list = cache.data.value ?? [];
+      list.unshift(result);
+      cache.data.value = list;
+      notifyDataChanged("groups");
     }
     return result;
   }
@@ -30,15 +38,23 @@ export const useGroupsStore = defineStore("groups", () => {
   async function update(id: string, data: Partial<ProviderGroup>) {
     const result = await crudOp.runOrThrow(() => api.updateGroup(id, data), "更新失败");
     if (result) {
-      const idx = groups.value.findIndex((g) => g.id === id);
-      if (idx >= 0) groups.value[idx] = result;
+      const list = cache.data.value;
+      if (list) {
+        const idx = list.findIndex((g) => g.id === id);
+        if (idx >= 0) list[idx] = result;
+      }
+      notifyDataChanged("groups");
     }
     return result;
   }
 
   async function remove(id: string) {
     await crudOp.runOrThrow(() => api.deleteGroup(id), "删除失败");
-    groups.value = groups.value.filter((g) => g.id !== id);
+    const list = cache.data.value;
+    if (list) {
+      cache.data.value = list.filter((g) => g.id !== id);
+      notifyDataChanged("groups");
+    }
   }
 
   async function addMember(groupId: string, providerId: string, weight?: number) {
@@ -54,10 +70,25 @@ export const useGroupsStore = defineStore("groups", () => {
     await fetchById(groupId);
   }
 
+  /** 强制刷新（忽略缓存） */
+  async function refresh() {
+    return cache.refresh(() => api.listGroups());
+  }
+
   return {
-    groups, currentGroup,
-    loading: fetchOp.loading, error: fetchOp.error,
-    crudLoading: crudOp.loading, crudError: crudOp.error,
-    fetchAll, fetchById, create, update, remove, addMember, removeMember,
+    groups,
+    currentGroup,
+    loading,
+    error,
+    crudLoading: crudOp.loading,
+    crudError: crudOp.error,
+    fetchAll,
+    fetchById,
+    create,
+    update,
+    remove,
+    addMember,
+    removeMember,
+    refresh,
   };
 });

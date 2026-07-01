@@ -13,9 +13,9 @@ impl GatewaySettingsRepo {
         GatewaySettings {
             id: SETTINGS_ID.to_string(),
             bind_host: "127.0.0.1".to_string(),
-            bind_port: defaults::DEFAULT_BIND_PORT as i32,
+            bind_port: defaults::DEFAULT_BIND_PORT,
             allow_remote: 0,
-            log_retention_days: defaults::DEFAULT_LOG_RETENTION_DAYS as i32,
+            log_retention_days: defaults::DEFAULT_LOG_RETENTION_DAYS,
             default_provider_id: None,
             default_route_id: None,
             rate_limit_enabled: 0,

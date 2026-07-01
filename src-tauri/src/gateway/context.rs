@@ -40,14 +40,15 @@ impl GatewayContext {
         adapter_registry: Arc<AdapterRegistry>,
         group_manager: Arc<GroupManager>,
     ) -> Result<Self, String> {
-        // 创建共享 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
+        // 创建共享的 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
+        // 流式客户端基于非流式客户端 clone 后修改超时，避免重复构建连接配置
         let http_client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
         let http_client_streaming = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| format!("创建流式 HTTP 客户端失败: {e}"))?;
 
@@ -61,7 +62,7 @@ impl GatewayContext {
             group_manager,
             http_client,
             http_client_streaming,
-        }
+        })
     }
 }
 
@@ -194,7 +195,12 @@ impl ProviderCache {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub struct RequestContext {
+/// RequestContext 中所有可 Clone 的字段（排除 response 字段）
+///
+/// 使用 #[derive(Clone)] 消除手动逐字段 clone 的样板代码。
+/// 通过 Deref/DerefMut 使中间件代码透明地访问 inner 字段，无需修改 field access 模式。
+#[derive(Clone)]
+pub struct RequestContextInner {
     pub request_id: String,
     pub started_at: Instant,
     pub method: Method,
@@ -219,13 +225,12 @@ pub struct RequestContext {
     pub upstream_status: Option<axum::http::StatusCode>,
     pub upstream_headers: Option<HeaderMap>,
     pub upstream_body: Option<bytes::Bytes>,
-    pub response: Option<axum::response::Response>,
     /// 已发送给客户端的响应字节数（流式场景）
     pub response_bytes_sent: u64,
     /// 最后收到的 SSE 事件 ID（用于断线重连）
     pub last_event_id: Option<String>,
-    /// 适配器注册表（用于协议转换）
-    pub adapter_registry: Arc<crate::protocol::AdapterRegistry>,
+    /// 适配器注册表（用于协议转换），在 resolve_route 阶段由 pipeline 注入
+    pub adapter_registry: Option<Arc<crate::protocol::AdapterRegistry>>,
     /// 远程模型名覆盖（来自 model_mapping_channels 的 selected_models）
     pub remote_model_override: Option<String>,
     /// 认证通过的 Gateway Key 名称（用于日志记录）
@@ -244,43 +249,37 @@ pub struct RequestContext {
     pub channels_available: Vec<String>,
 }
 
+/// 请求上下文 — 整个网关管道的核心数据结构
+///
+/// 设计说明：
+/// - `response` 字段（axum::Response，非 Clone）单独存放在外层 struct，
+///   其余所有字段通过 `RequestContextInner` 自动 derive Clone。
+/// - 通过 `Deref` / `DerefMut` 透明代理到 inner，中间件代码无需感知拆分。
+/// - `clone()` 时 `response` 置为 `None`（克隆上下文时不应携带已构建的响应）。
+pub struct RequestContext {
+    pub response: Option<axum::response::Response>,
+    inner: RequestContextInner,
+}
+
 impl Clone for RequestContext {
     fn clone(&self) -> Self {
         Self {
-            request_id: self.request_id.clone(),
-            started_at: self.started_at,
-            method: self.method.clone(),
-            uri: self.uri.clone(),
-            headers: self.headers.clone(),
-            host: self.host.clone(),
-            content_type: self.content_type.clone(),
-            path: self.path.clone(),
-            client_body: self.client_body.clone(),
-            request_body: self.request_body.clone(),
-            parsed_body: self.parsed_body.clone(),
-            route: self.route.clone(),
-            provider: self.provider.clone(),
-            inbound_protocol: self.inbound_protocol.clone(),
-            outbound_protocol: self.outbound_protocol.clone(),
-            final_status: self.final_status,
-            error_message: self.error_message.clone(),
-            error_code: self.error_code.clone(),
-            upstream_status: self.upstream_status,
-            upstream_headers: self.upstream_headers.clone(),
-            upstream_body: self.upstream_body.clone(),
+            inner: self.inner.clone(),
             response: None,
-            response_bytes_sent: self.response_bytes_sent,
-            last_event_id: self.last_event_id.clone(),
-            adapter_registry: self.adapter_registry.clone(),
-            remote_model_override: self.remote_model_override.clone(),
-            auth_key_name: self.auth_key_name.clone(),
-            selected_api_key: self.selected_api_key.clone(),
-            upstream_url: self.upstream_url.clone(),
-            upstream_method: self.upstream_method.clone(),
-            failed_keys: self.failed_keys.clone(),
-            failed_providers: self.failed_providers.clone(),
-            channels_available: self.channels_available.clone(),
         }
+    }
+}
+
+impl std::ops::Deref for RequestContext {
+    type Target = RequestContextInner;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for RequestContext {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
@@ -313,39 +312,42 @@ impl RequestContext {
             .map(ToOwned::to_owned);
 
         Self {
-            request_id,
-            started_at,
-            path: uri.path().to_string(),
-            method,
-            uri,
-            headers,
-            host,
-            content_type,
-            client_body: bytes::Bytes::new(),
-            request_body: bytes::Bytes::new(),
-            parsed_body: None,
-            route: None,
-            provider: None,
-            inbound_protocol: None,
-            outbound_protocol: None,
-            final_status: None,
-            error_message: None,
-            error_code: None,
-            upstream_status: None,
-            upstream_headers: None,
-            upstream_body: None,
+            inner: RequestContextInner {
+                request_id,
+                started_at,
+                path: uri.path().to_string(),
+                method,
+                uri,
+                headers,
+                host,
+                content_type,
+                client_body: bytes::Bytes::new(),
+                request_body: bytes::Bytes::new(),
+                parsed_body: None,
+                route: None,
+                provider: None,
+                inbound_protocol: None,
+                outbound_protocol: None,
+                final_status: None,
+                error_message: None,
+                error_code: None,
+                upstream_status: None,
+                upstream_headers: None,
+                upstream_body: None,
+                response_bytes_sent: 0,
+                last_event_id: None,
+                // adapter_registry 由 resolve_route 阶段注入，初始为 None
+                adapter_registry: None,
+                remote_model_override: None,
+                auth_key_name: None,
+                selected_api_key: None,
+                upstream_url: None,
+                upstream_method: None,
+                failed_keys: Vec::new(),
+                failed_providers: Vec::new(),
+                channels_available: Vec::new(),
+            },
             response: None,
-            response_bytes_sent: 0,
-            last_event_id: None,
-            adapter_registry: Arc::new(crate::protocol::AdapterRegistry::new()),
-            remote_model_override: None,
-            auth_key_name: None,
-            selected_api_key: None,
-            upstream_url: None,
-            upstream_method: None,
-            failed_keys: Vec::new(),
-            failed_providers: Vec::new(),
-            channels_available: Vec::new(),
         }
     }
 
@@ -388,4 +390,3 @@ impl RequestContext {
         self.started_at.elapsed().as_millis() as i64
     }
 }
-

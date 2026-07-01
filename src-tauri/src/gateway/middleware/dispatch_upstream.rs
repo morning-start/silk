@@ -110,7 +110,11 @@ pub async fn run(
 
     // 调试日志：输出实际上游请求信息
     {
-        let masked_key = ctx.selected_api_key.as_deref().map(mask_api_key).unwrap_or_default();
+        let masked_key = ctx
+            .selected_api_key
+            .as_deref()
+            .map(mask_api_key)
+            .unwrap_or_default();
         let body_preview = String::from_utf8_lossy(&ctx.request_body)
             .chars().take(200).collect::<String>();
         tracing::debug!(
@@ -190,7 +194,11 @@ async fn handle_single_response(
     if status.as_u16() >= 400 {
         let req_body_preview = String::from_utf8_lossy(&ctx.request_body)
             .chars().take(1000).collect::<String>();
-        let masked_key = ctx.selected_api_key.as_deref().map(mask_api_key).unwrap_or_default();
+        let masked_key = ctx
+            .selected_api_key
+            .as_deref()
+            .map(mask_api_key)
+            .unwrap_or_default();
         tracing::warn!(
             upstream_status = %status,
             upstream_url = %ctx.upstream_url.as_deref().unwrap_or("(none)"),

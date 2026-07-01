@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, h } from "vue";
+import { ref, onMounted, watch, h } from "vue";
 import { useRouter } from "vue-router";
 import {
   NCard,
@@ -24,6 +24,7 @@ import {
 } from "@vicons/ionicons5";
 import { api, type DashboardStats, type RequestLog } from "../api";
 import { useGatewayStore } from "../stores/gateway";
+import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
 
 const router = useRouter();
 const gatewayStore = useGatewayStore();
@@ -145,6 +146,19 @@ onMounted(() => {
   loadData();
   gatewayStore.fetchStatus();
 });
+
+// 跨 Store 联动：当路由规则或渠道数据变更时自动刷新统计
+const providersSignal = useDataChangeSignal("providers");
+const routingRulesSignal = useDataChangeSignal("routingRules");
+const groupsSignal = useDataChangeSignal("groups");
+
+watch(
+  [providersSignal, routingRulesSignal, groupsSignal],
+  () => {
+    loadData();
+  },
+  { flush: "post" }
+);
 </script>
 
 <template>

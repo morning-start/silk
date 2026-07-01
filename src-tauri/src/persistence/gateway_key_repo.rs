@@ -18,7 +18,9 @@ impl GatewayKeyRepo {
         let enabled = if new.enabled.unwrap_or(true) { 1 } else { 0 };
         let key_hash = hash_api_key(&new.key_value);
         let key_prefix = format!("sk-gw-{}", &new.key_value[..8.min(new.key_value.len())]);
-        let max_concurrent = new.max_concurrent.unwrap_or(defaults::DEFAULT_KEY_MAX_CONCURRENT as u32);
+        let max_concurrent = new
+            .max_concurrent
+            .unwrap_or(defaults::DEFAULT_KEY_MAX_CONCURRENT);
 
         let row = sqlx::query(
             r#"

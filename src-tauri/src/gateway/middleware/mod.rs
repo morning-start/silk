@@ -90,14 +90,12 @@ pub(crate) mod internals {
     }
 
     /// 掩码 API Key，仅显示前4位和后4位；短 key 显示 "***"
-    pub fn mask_api_key(key: Option<&str>) -> String {
-        key.map(|k| {
-            if k.len() > 8 {
-                format!("{}...{}", &k[..4], &k[k.len()-4..])
-            } else {
-                "***".to_string()
-            }
-        }).unwrap_or_default()
+    pub fn mask_api_key(key: &str) -> String {
+        if key.len() > 8 {
+            format!("{}...{}", &key[..4], &key[key.len() - 4..])
+        } else {
+            "***".to_string()
+        }
     }
 }
 
