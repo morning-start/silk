@@ -161,6 +161,19 @@ dispatch_upstream 重试耗尽
 
 `GatewayError`（网关管道专用）支持上游错误透传：`UpstreamError { status, body }` 直接返回原始 HTTP 状态码和错误体。
 
+### Header 处理
+
+**入站认证**（`authenticate.rs`）：
+- 支持多种认证方式：`Authorization: Bearer {key}`、`Authorization: Token {key}`、`x-api-key: {key}`
+- 根据请求头自动识别认证方式
+
+**Header 转发**（`dispatch_upstream.rs`）：
+- 使用 `HeaderConfig` 配置管理 header 转发
+- 默认转发通用 header（`user-agent`、`accept` 等）
+- 默认转发请求追踪 header（`x-request-id`、`x-trace-id` 等）
+- 默认转发 AI 工具特定 header（`x-cursor-client-id`、`x-windsurf-version` 等）
+- 默认排除认证相关 header（`authorization`、`x-api-key` 等）
+
 ## 约定
 
 - **Vue**: 始终使用 `<script setup lang="ts">`（Composition API）
