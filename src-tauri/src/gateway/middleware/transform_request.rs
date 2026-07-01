@@ -39,8 +39,13 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
     // 获取 outbound 适配器（生成正确的 URL、认证头、Content-Type）
     let adapter = ctx
         .adapter_registry
-        .get(target_protocol)
-        .or_else(|| ctx.adapter_registry.get("openai_chat"))
+        .as_ref()
+        .and_then(|reg| reg.get(target_protocol))
+        .or_else(|| {
+            ctx.adapter_registry
+                .as_ref()
+                .and_then(|reg| reg.get("openai_chat"))
+        })
         .ok_or_else(|| {
             StageError::new(
                 ctx.clone(),

@@ -48,7 +48,11 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
                     status = upstream_status,
                     reason = reason_phrase,
                     upstream_url = %ctx.upstream_url.as_deref().unwrap_or("(none)"),
-                    selected_key_preview = %ctx.selected_api_key.as_deref().map(mask_api_key).unwrap_or_default(),
+                    selected_key_preview = %ctx
+                        .selected_api_key
+                        .as_deref()
+                        .map(mask_api_key)
+                        .unwrap_or_default(),
                     body_preview = %preview,
                     parse_error = %parse_err,
                     "上游返回非 JSON 错误响应 — 请检查上游 URL 和 API Key"
@@ -80,8 +84,13 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
     // --- 正常响应处理 ---
     let adapter = ctx
         .adapter_registry
-        .get(&outbound_protocol)
-        .or_else(|| ctx.adapter_registry.get("openai_response"))
+        .as_ref()
+        .and_then(|reg| reg.get(&outbound_protocol))
+        .or_else(|| {
+            ctx.adapter_registry
+                .as_ref()
+                .and_then(|reg| reg.get("openai_response"))
+        })
         .ok_or_else(|| {
             StageError::new(
                 ctx.clone(),

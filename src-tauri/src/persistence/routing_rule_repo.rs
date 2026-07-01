@@ -44,7 +44,7 @@ impl RoutingRuleRepo {
         .bind(protocol_conversion)
         .bind(new.model_name_override.as_deref())
         .bind(new.metadata_json.as_deref())
-        .bind(new.priority.unwrap_or(defaults::DEFAULT_ROUTING_PRIORITY as i32))
+        .bind(new.priority.unwrap_or(defaults::DEFAULT_ROUTING_PRIORITY))
         .bind(enabled)
         .bind(now)
         .bind(now)

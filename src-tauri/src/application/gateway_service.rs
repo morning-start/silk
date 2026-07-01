@@ -73,7 +73,7 @@ pub async fn start(state: &AppState) -> Result<GatewayStartResponse, ServiceErro
     // 在写锁内完成检查和启动，避免 TOCTOU 竞态
     let mut server = state.gateway_server.write().await;
     if server.is_some() {
-        return Err(ServiceError::BadRequest("网关已在运行中".to_string()));
+        return Err(ServiceError::BadRequest { message: "网关已在运行中".to_string(), code: None });
     }
     // server 仍持有写锁，防止并发 start()
 
@@ -84,10 +84,10 @@ pub async fn start(state: &AppState) -> Result<GatewayStartResponse, ServiceErro
 
     let gateway = load_gateway_context(pool.clone(), log_sender)
         .await
-        .map_err(|e| ServiceError::Internal(format!("加载网关上下文失败: {e}")))?;
+        .map_err(|e| ServiceError::Internal { message: format!("加载网关上下文失败: {e}"), detail: None })?;
     let gateway_server = spawn_gateway_server(gateway.clone())
         .await
-        .map_err(|e| ServiceError::Internal(format!("启动网关失败: {e}")))?;
+        .map_err(|e| ServiceError::Internal { message: format!("启动网关失败: {e}"), detail: None })?;
 
     // 先更新 gateway context（锁顺序：gateway -> gateway_server）
     {
@@ -113,7 +113,7 @@ pub async fn stop(state: &AppState) -> Result<GatewayStopResponse, ServiceError>
             message: "网关已停止".to_string(),
         })
     } else {
-        Err(ServiceError::BadRequest("网关未运行".to_string()))
+        Err(ServiceError::BadRequest { message: "网关未运行".to_string(), code: None })
     }
 }
 
@@ -133,13 +133,13 @@ pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResp
     // 在写锁内完成检查和启动
     let mut server = state.gateway_server.write().await;
     if server.is_some() {
-        return Err(ServiceError::BadRequest("网关已在运行中".to_string()));
+        return Err(ServiceError::BadRequest { message: "网关已在运行中".to_string(), code: None });
     }
 
     let gateway = state.gateway.read().await.clone();
     let gateway_server = spawn_gateway_server(gateway.clone())
         .await
-        .map_err(|e| ServiceError::Internal(format!("启动网关失败: {e}")))?;
+        .map_err(|e| ServiceError::Internal { message: format!("启动网关失败: {e}"), detail: None })?;
 
     *server = Some(gateway_server);
 

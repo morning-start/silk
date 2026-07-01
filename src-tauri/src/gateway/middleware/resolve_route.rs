@@ -131,7 +131,7 @@ async fn try_model_mapping_route(
     ctx.provider = Some(provider);
     ctx.inbound_protocol = Some(detect_inbound_protocol(&ctx.path, json).to_string());
     ctx.outbound_protocol = Some(resolve_protocol_adapter(ctx.provider.as_ref().unwrap()));
-    ctx.adapter_registry = runtime.adapter_registry.clone();
+    ctx.adapter_registry = Some(runtime.adapter_registry.clone());
     Ok(Some(ctx))
 }
 
@@ -174,7 +174,7 @@ async fn try_route_fallback(
                             ctx.provider = Some(provider);
                             ctx.inbound_protocol = fallback_route.inbound_protocol.clone();
                             ctx.outbound_protocol = fallback_route.outbound_protocol.clone();
-                            ctx.adapter_registry = runtime.adapter_registry.clone();
+                            ctx.adapter_registry = Some(runtime.adapter_registry.clone());
                             return Ok(ctx);
                         }
                     }
@@ -193,7 +193,7 @@ async fn try_route_fallback(
                     ctx.provider = Some(provider);
                     ctx.inbound_protocol = Some(inbound.to_string());
                     ctx.outbound_protocol = Some(outbound);
-                    ctx.adapter_registry = runtime.adapter_registry.clone();
+                    ctx.adapter_registry = Some(runtime.adapter_registry.clone());
                     return Ok(ctx);
                 }
             }
@@ -222,7 +222,7 @@ async fn try_route_fallback(
     ctx.provider = Some(provider);
     ctx.inbound_protocol = route.inbound_protocol.clone();
     ctx.outbound_protocol = route.outbound_protocol.clone();
-    ctx.adapter_registry = runtime.adapter_registry.clone();
+    ctx.adapter_registry = Some(runtime.adapter_registry.clone());
 
     Ok(ctx)
 }

@@ -99,7 +99,8 @@ impl GatewayPipeline {
                     Err(stage_err) => {
                         // 记录失败的 Key
                         ctx = stage_err.context;
-                        if let Some(ref key) = ctx.selected_api_key {
+                        let failed_key = ctx.selected_api_key.clone();
+                        if let Some(ref key) = failed_key {
                             ctx.failed_keys.push(key.clone());
                         }
                         ctx.selected_api_key = None; // 避免复用
@@ -121,7 +122,8 @@ impl GatewayPipeline {
                         }
 
                         // 所有 Key 都试过了，记录 provider 失败
-                        if let Some(ref p) = ctx.provider {
+                        let prov = ctx.provider.clone();
+                        if let Some(p) = prov {
                             if !ctx.failed_providers.contains(&p.id) {
                                 ctx.failed_providers.push(p.id.clone());
                             }

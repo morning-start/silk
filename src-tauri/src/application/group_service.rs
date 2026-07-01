@@ -173,7 +173,7 @@ pub async fn update_member(
 
     let member = GroupRepo::update_member(pool, &id, &update)
         .await?
-        .ok_or(ServiceError::NotFound("成员".to_string()))?;
+        .ok_or(ServiceError::NotFound { message: "成员".to_string() })?;
 
     state.reload_group(pool, &member.group_id).await;
 
