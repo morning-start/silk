@@ -2,10 +2,12 @@ mod types;
 pub use types::{
     CleanupLogsPayload, CreateGatewayKeyPayload, CreateGatewayKeyResponse,
     CreateModelMappingPayload, DashboardStatsResponse, ExportLogsPayload,
-    ExportLogsResponse, GatewayKeyResponse, HourlyStatsResponse, ListLogsPayload,
-    ListLogsResponse, LogResponse, ModelMappingResponse, ProviderStatsResponse,
+    ExportLogsResponse, GatewayKeyResponse, ListLogsPayload,
+    ListLogsResponse, LogResponse, ModelMappingResponse,
     UpdateGatewayKeyPayload, UpdateModelMappingPayload,
 };
+
+pub use crate::application::stats_service::{HourlyStatsResponse, ProviderStatsResponse};
 
 use tauri::State;
 
@@ -22,6 +24,7 @@ use crate::application::routing_service::{
     self, CreateRoutingRulePayload, RoutingRuleResponse, UpdateRoutingRulePayload,
 };
 use crate::application::settings_service::{self, GatewaySettingsResponse, UpdateSettingsPayload};
+use crate::application::stats_service;
 use crate::models::{GroupMember, NewGatewayKey, NewModelMapping, ProviderGroup, UpdateGatewayKey, UpdateModelMapping};
 use crate::persistence::{GatewayKeyRepo, LogRepo, ModelMappingRepo, StatsRepo};
 use crate::AppState;
@@ -376,9 +379,8 @@ pub async fn stats_by_provider(
 ) -> Result<Vec<ProviderStatsResponse>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let limit = limit.unwrap_or(10);
-    let stats = StatsRepo::stats_by_provider(pool, limit)
-        .await.map_err(|e| format!("查询服务商统计失败: {e}"))?;
-    Ok(stats.into_iter().map(ProviderStatsResponse::from).collect())
+    stats_service::stats_by_provider(pool, limit)
+        .await.map_err(|e| format!("查询服务商统计失败: {e}"))
 }
 
 #[tauri::command]
@@ -388,9 +390,8 @@ pub async fn hourly_stats(
 ) -> Result<Vec<HourlyStatsResponse>, String> {
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let hours = hours.unwrap_or(24);
-    let stats = StatsRepo::hourly_stats(pool, hours)
-        .await.map_err(|e| format!("查询时序统计失败: {e}"))?;
-    Ok(stats.into_iter().map(HourlyStatsResponse::from).collect())
+    stats_service::hourly_stats(pool, hours)
+        .await.map_err(|e| format!("查询时序统计失败: {e}"))
 }
 
 // ============================================================================

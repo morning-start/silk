@@ -148,6 +148,19 @@ impl GroupRepo {
         .await
     }
 
+    /// 根据 member ID 查询单个成员
+    pub async fn find_member_by_id(
+        pool: &SqlitePool,
+        id: &str,
+    ) -> Result<Option<GroupMember>, sqlx::Error> {
+        sqlx::query_as::<_, GroupMember>(
+            r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE id = $1"#,
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+    }
+
     pub async fn update_member(
         pool: &SqlitePool,
         id: &str,

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::load_balancer::{LoadBalanceStrategy, LoadBalancedItem, LoadBalancer};
+use crate::load_balancer::LoadBalancedItem;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Provider {
@@ -96,29 +96,6 @@ impl Provider {
         serde_json::from_str(&self.keys).unwrap_or_default()
     }
 
-    /// 按负载均衡策略选择一个 API Key。
-    pub fn select_api_key(&self) -> Result<String, crate::crypto::CryptoError> {
-        let entries = self.keys_vec();
-        let strategy = LoadBalanceStrategy::from_str(&self.key_strategy);
-        let balancer = LoadBalancer::new(entries, strategy);
-        let selected = balancer
-            .select()
-            .ok_or(crate::crypto::CryptoError::InvalidFormat)?;
-
-        if selected.enabled && !selected.value.is_empty() {
-            // 解密 API Key 并返回
-            let decrypted = crate::crypto::decrypt(&selected.value)?;
-            Ok(decrypted)
-        } else {
-            Err(crate::crypto::CryptoError::InvalidFormat)
-        }
-    }
-
-    /// 获取超时时间（秒）
-    pub fn timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(self.timeout_seconds.max(0) as u64)
-    }
-
     /// 解析 protocols JSON 字段为 Vec<String>
     pub fn protocols_vec(&self) -> Vec<String> {
         serde_json::from_str(&self.protocols).unwrap_or_default()
@@ -127,18 +104,6 @@ impl Provider {
     /// 解析 models JSON 字段为 Vec<String>
     pub fn models_vec(&self) -> Vec<String> {
         serde_json::from_str(&self.models).unwrap_or_default()
-    }
-
-    /// 规范化 API Base URL：去除尾部 /v1 或 /v1/
-    pub fn normalize_api_base_url(url: &str) -> String {
-        let trimmed = url.trim_end_matches('/');
-        if trimmed.ends_with("/v1") {
-            trimmed[..trimmed.len() - 3]
-                .trim_end_matches('/')
-                .to_string()
-        } else {
-            trimmed.to_string()
-        }
     }
 }
 
@@ -165,19 +130,5 @@ mod tests {
             created_at: chrono::Utc::now().naive_utc(),
             updated_at: chrono::Utc::now().naive_utc(),
         }
-    }
-
-    #[test]
-    fn select_api_key_fails_when_all_keys_disabled() {
-        let provider = make_provider(
-            r#"[{"name":"主密钥","value":"k1","enabled":false,"weight":1}]"#,
-            "round_robin",
-        );
-
-        let err = provider
-            .select_api_key()
-            .expect_err("all disabled keys should fail selection");
-
-        assert!(matches!(err, crate::crypto::CryptoError::InvalidFormat));
     }
 }

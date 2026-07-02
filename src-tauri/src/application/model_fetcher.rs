@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
 use crate::error::ServiceError;
+use crate::application::provider_service::normalize_api_base_url;
 
 /// 远程模型获取请求载荷
 #[derive(Debug, Deserialize)]
@@ -29,7 +30,7 @@ pub struct ProviderModelInfo {
 pub async fn fetch_models(
     payload: FetchModelsPayload,
 ) -> Result<Vec<ProviderModelInfo>, ServiceError> {
-    let base_url = crate::models::Provider::normalize_api_base_url(&payload.api_base_url);
+    let base_url = normalize_api_base_url(&payload.api_base_url);
     let test_url = format!("{}/v1/models", base_url);
     let timeout_secs = payload.timeout_seconds.unwrap_or(10).min(30).max(1) as u64;
 

@@ -1,9 +1,40 @@
 use serde::{Deserialize, Serialize};
 
+use crate::crypto::CryptoError;
 use crate::error::{require_db, require_found, ServiceError};
+use crate::load_balancer::{LoadBalanceStrategy, LoadBalancer};
 use crate::models::{NewProvider, Provider, ProviderKeyEntry, UpdateProvider};
 use crate::persistence::ProviderRepo;
 use crate::AppState;
+
+/// 按负载均衡策略选择一个 API Key（已从 models/provider.rs 移出）
+pub fn select_api_key(provider: &Provider) -> Result<String, CryptoError> {
+    let entries = provider.keys_vec();
+    let strategy = LoadBalanceStrategy::from_str(&provider.key_strategy);
+    let balancer = LoadBalancer::new(entries, strategy);
+    let selected = balancer
+        .select()
+        .ok_or(CryptoError::InvalidFormat)?;
+
+    if selected.enabled && !selected.value.is_empty() {
+        let decrypted = crate::crypto::decrypt(&selected.value)?;
+        Ok(decrypted)
+    } else {
+        Err(CryptoError::InvalidFormat)
+    }
+}
+
+/// 规范化 API Base URL：去除尾部 /v1 或 /v1/
+pub fn normalize_api_base_url(url: &str) -> String {
+    let trimmed = url.trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        trimmed[..trimmed.len() - 3]
+            .trim_end_matches('/')
+            .to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct ProviderResponse {
@@ -101,7 +132,7 @@ pub async fn create(
         models: payload.models,
         keys,
         key_strategy: payload.key_strategy,
-        api_base_url: crate::models::Provider::normalize_api_base_url(&payload.api_base_url),
+        api_base_url: normalize_api_base_url(&payload.api_base_url),
         proxy_url: payload.proxy_url,
         timeout_seconds: payload.timeout_seconds,
         max_retries: payload.max_retries,
@@ -146,7 +177,7 @@ pub async fn update(
         key_strategy: payload.key_strategy,
         api_base_url: payload
             .api_base_url
-            .map(|u| crate::models::Provider::normalize_api_base_url(&u)),
+            .map(|u| normalize_api_base_url(&u)),
         proxy_url: payload.proxy_url,
         timeout_seconds: payload.timeout_seconds,
         max_retries: payload.max_retries,
@@ -169,7 +200,7 @@ pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, 
 
     let provider = require_found(ProviderRepo::find_by_id(pool, &id).await?, "Provider")?;
 
-    let base_url = crate::models::Provider::normalize_api_base_url(&provider.api_base_url);
+    let base_url = normalize_api_base_url(&provider.api_base_url);
     let test_url = format!("{}/v1/models", base_url);
     let timeout_secs = provider.timeout_seconds.min(10).max(1) as u64;
 
@@ -180,8 +211,7 @@ pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, 
 
     let start = std::time::Instant::now();
 
-    let api_key = provider
-        .select_api_key()
+    let api_key = select_api_key(&provider)
         .map_err(|e| ServiceError::Internal { message: format!("获取 API Key 失败: {e}"), detail: None })?;
 
     let result = client

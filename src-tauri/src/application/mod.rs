@@ -4,3 +4,4 @@ pub mod model_fetcher;
 pub mod provider_service;
 pub mod routing_service;
 pub mod settings_service;
+pub mod stats_service;
