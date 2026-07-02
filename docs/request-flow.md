@@ -10,16 +10,19 @@ flowchart TD
     RR -->|路径 /v1/models| MM[(ModelMappingRepo\n本地启用模型)]
     MM --> RSP[提前构建响应]
 
-    RR -->|匹配到路由| SC[select_channel\n选择渠道 & Key\nKey 负载均衡]
+    RR -->|匹配到路由| B_RT[before_route\n插件钩子]
+    B_RT -->|检查缓存等| SC[select_channel\n选择渠道 & Key\nKey 负载均衡]
 
     RR --> PR[(ProviderRepo\n渠道配置)]
     RR --> GR[(GatewaySettings\n路由规则)]
 
     SC --> TR[transform_request\n请求协议转换\nOpenAI/Claude → 上游格式]
-    TR --> DU[dispatch_upstream\n发送上游请求\n含重试+退避+SSE管理]
+    TR --> B_UP[before_upstream\n插件钩子\n注入缓存/日志压缩/窗口截断]
+    B_UP --> DU[dispatch_upstream\n发送上游请求\n含重试+退避+SSE管理]
     DU --> UP[上游 Provider\nOpenAI / Claude / 其他]
     UP --> TRESP[transform_response\n响应协议转换\n上游格式 → OpenAI Response]
-    TRESP --> PL[persist_log\n异步写入 SQLite]
+    TRESP --> A_UP[after_upstream\n插件钩子]
+    A_UP --> PL[persist_log\n异步写入 SQLite]
     RSP --> PL
     PL --> FIN[finalize\n构建最终 HTTP 响应]
 
@@ -37,7 +40,7 @@ flowchart TD
     classDef io fill:#fefce8,stroke:#ca8a04,stroke-width:1px;
 
     class GK,MM,PR,GR db;
-    class REQ,EXT,AUTH,RL,RR,SC,TR,DU,TRESP,PL,FIN,RSP,UP proc;
+    class REQ,EXT,AUTH,RL,RR,SC,TR,DU,TRESP,PL,FIN,RSP,UP,B_RT,B_UP,A_UP proc;
     class CP io;
 ```
 
@@ -45,7 +48,12 @@ flowchart TD
 
 - `/v1/models` 读取的是本地启用的模型映射，不是上游目录。
 - `/v1/*` 的实际鉴权是 `gateway_keys`，不是 `gateway_settings.auth_token_hash`。
-- 请求主链是：`extract → authenticate → rate_limit → resolve_route → select_channel → transform_request → dispatch_upstream → transform_response → persist_log → finalize`。
+- 请求主链已引入插件钩子系统：
+  `extract → authenticate → rate_limit → resolve_route → [before_route] → select_channel → transform_request → [before_upstream] → dispatch_upstream → transform_response → [after_upstream] → persist_log → finalize`。
+- 默认开启的 3 个内置原生插件：
+  *   **`PromptCachePlugin`**：自动为 Claude 注入 `cache_control` 标记。
+  *   **`SlidingWindowPlugin`**：滑动窗口，自动裁剪历史对话。
+  *   **`TerminalLogPrunerPlugin`**：控制台/终端大段编译输出日志压缩折叠。
 - 请求先按 `routing_rules`（Host/Path/Method/ContentType）匹配路由，匹配成功后选择对应 Provider；若未匹配到路由规则，再按 body 里的 `model` 走模型映射兜底。
 - 日志是异步写入 SQLite，不阻塞主请求。
 - 三级失败回退：单次请求重试 → 换 Key → 换渠道。
