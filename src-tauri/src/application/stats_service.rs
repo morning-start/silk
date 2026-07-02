@@ -1,5 +1,4 @@
 use serde::Serialize;
-use sqlx::SqlitePool;
 
 use crate::error::{require_db, ServiceError};
 use crate::persistence::StatsRepo;
@@ -51,19 +50,15 @@ impl From<crate::persistence::stats_repo::HourlyStats> for HourlyStatsResponse {
 // ---------------------------------------------------------------------------
 
 /// 获取按 Provider 分组的请求统计
-pub async fn stats_by_provider(
-    pool: &SqlitePool,
-    limit: i64,
-) -> Result<Vec<ProviderStatsResponse>, sqlx::Error> {
+pub async fn stats_by_provider(limit: i64) -> Result<Vec<ProviderStatsResponse>, ServiceError> {
+    let pool = require_db()?;
     let stats = StatsRepo::stats_by_provider(pool, limit).await?;
     Ok(stats.into_iter().map(ProviderStatsResponse::from).collect())
 }
 
 /// 获取按小时分组的时序统计
-pub async fn hourly_stats(
-    pool: &SqlitePool,
-    hours: i64,
-) -> Result<Vec<HourlyStatsResponse>, sqlx::Error> {
+pub async fn hourly_stats(hours: i64) -> Result<Vec<HourlyStatsResponse>, ServiceError> {
+    let pool = require_db()?;
     let stats = StatsRepo::hourly_stats(pool, hours).await?;
     Ok(stats.into_iter().map(HourlyStatsResponse::from).collect())
 }
