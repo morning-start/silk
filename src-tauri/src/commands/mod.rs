@@ -300,9 +300,8 @@ pub async fn stats_by_provider(
     _state: State<'_, AppState>,
     limit: Option<i64>,
 ) -> Result<Vec<ProviderStatsResponse>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let limit = limit.unwrap_or(10);
-    stats_service::stats_by_provider(pool, limit)
+    stats_service::stats_by_provider(limit)
         .await
         .map_err(|e| e.to_string())
 }
@@ -312,9 +311,8 @@ pub async fn hourly_stats(
     _state: State<'_, AppState>,
     hours: Option<i64>,
 ) -> Result<Vec<HourlyStatsResponse>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let hours = hours.unwrap_or(24);
-    stats_service::hourly_stats(pool, hours)
+    stats_service::hourly_stats(hours)
         .await
         .map_err(|e| e.to_string())
 }
