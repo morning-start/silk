@@ -31,6 +31,8 @@ pub struct GatewayContext {
     pub http_client_streaming: reqwest::Client,
     /// Header 转发配置
     pub header_config: HeaderConfig,
+    /// 网关插件列表
+    pub plugins: Vec<Arc<dyn crate::gateway::plugin::GatewayPlugin>>,
 }
 
 impl GatewayContext {
@@ -42,6 +44,7 @@ impl GatewayContext {
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
         adapter_registry: Arc<AdapterRegistry>,
         group_manager: Arc<GroupManager>,
+        plugins: Vec<Arc<dyn crate::gateway::plugin::GatewayPlugin>>,
     ) -> Result<Self, String> {
         // 创建共享的 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
         // 流式客户端基于非流式客户端 clone 后修改超时，避免重复构建连接配置
@@ -51,7 +54,7 @@ impl GatewayContext {
             .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
         let http_client_streaming = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|e| format!("创建流式 HTTP 客户端失败: {e}"))?;
 
@@ -66,6 +69,7 @@ impl GatewayContext {
             http_client,
             http_client_streaming,
             header_config: HeaderConfig::default(),
+            plugins,
         })
     }
 }

@@ -6,6 +6,8 @@ pub mod log_cleanup;
 pub mod log_cost;
 pub mod middleware;
 pub mod pipeline;
+pub mod plugin;
+pub mod plugins;
 
 use axum::body::Body;
 use axum::extract::State;
@@ -19,6 +21,7 @@ use tokio::task::JoinHandle;
 pub use context::{GatewayContext, RequestContext, RouteManager};
 pub use error::GatewayError;
 pub use pipeline::{GatewayPipeline, StageError};
+pub use plugin::GatewayPlugin;
 
 pub struct GatewayServerHandle {
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
