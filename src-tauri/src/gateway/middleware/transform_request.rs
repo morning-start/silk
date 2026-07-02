@@ -23,6 +23,21 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
     let target_protocol = &outbound;
 
+    // 自动注入 stream:true，使所有请求走流式 SSE 路径
+    // 上游不支持非流式响应时（返回空 body），依赖此机制规避
+    if let Some(body) = ctx.get_parsed_body() {
+        let mut json = body.clone();
+        if !json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false) {
+            json["stream"] = serde_json::Value::Bool(true);
+            ctx.update_body(json).map_err(|e| {
+                StageError::new(
+                    ctx.clone(),
+                    GatewayError::BadRequest(format!("注入 stream 字段失败: {e}")),
+                )
+            })?;
+        }
+    }
+
     // 跨协议时转换请求体格式：inbound → hub → outbound
     let request_bytes = if inbound != outbound {
         tracing::debug!(

@@ -1,3 +1,4 @@
+use crate::crypto::decrypt;
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
@@ -49,6 +50,13 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         )
     })?;
 
-    ctx.selected_api_key = Some(selected.value.clone());
+    // 解密选中的 Key（数据库存储的是加密密文）
+    let decrypted = decrypt(&selected.value).map_err(|e| {
+        StageError::new(
+            error_ctx.clone(),
+            GatewayError::Internal(format!("解密 API Key 失败: {e}")),
+        )
+    })?;
+    ctx.selected_api_key = Some(decrypted);
     Ok(ctx)
 }
