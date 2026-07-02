@@ -1,23 +1,35 @@
 mod types;
 pub use types::{
-    CleanupLogsPayload, CreateGatewayKeyPayload, CreateGatewayKeyResponse,
-    CreateModelMappingPayload, DashboardStatsResponse, ExportLogsPayload,
-    ExportLogsResponse, GatewayKeyResponse, ListLogsPayload,
-    ListLogsResponse, LogResponse, ModelMappingResponse,
-    UpdateGatewayKeyPayload, UpdateModelMappingPayload,
+    CleanupLogsPayload, ExportLogsPayload, ListLogsPayload,
 };
+pub use crate::application::provider_service::FetchModelsPayload;
 
-pub use crate::application::stats_service::{HourlyStatsResponse, ProviderStatsResponse};
+pub use crate::application::gateway_key_service::{
+    CreateGatewayKeyPayload, CreateGatewayKeyResponse, GatewayKeyResponse,
+    UpdateGatewayKeyPayload,
+};
+pub use crate::application::log_service::{
+    ExportLogsResponse, ListLogsResponse, LogResponse,
+};
+pub use crate::application::model_mapping_service::{
+    CreateModelMappingPayload, ModelMappingResponse, UpdateModelMappingPayload,
+};
+pub use crate::application::stats_service::{
+    DashboardStatsResponse, HourlyStatsResponse, ProviderStatsResponse,
+};
 
 use tauri::State;
 
+use crate::application::gateway_key_service as gks;
 use crate::application::gateway_service::{self, GatewayStartResponse, GatewayStatusResponse, GatewayStopResponse};
 use crate::application::group_service::{
     self as gs, AddMemberPayload, CreateGroupPayload, GroupWithMembersResponse, UpdateGroupPayload,
     UpdateMemberPayload,
 };
+use crate::application::log_service;
+use crate::application::model_mapping_service as mms;
 use crate::application::provider_service::{
-    self, CreateProviderPayload, FetchModelsPayload, ProviderModelInfo, ProviderResponse,
+    self, CreateProviderPayload, ProviderModelInfo, ProviderResponse,
     ProviderTestResponse, UpdateProviderPayload,
 };
 use crate::application::routing_service::{
@@ -25,8 +37,6 @@ use crate::application::routing_service::{
 };
 use crate::application::settings_service::{self, GatewaySettingsResponse, UpdateSettingsPayload};
 use crate::application::stats_service;
-use crate::models::{GroupMember, NewGatewayKey, NewModelMapping, ProviderGroup, UpdateGatewayKey, UpdateModelMapping};
-use crate::persistence::{GatewayKeyRepo, LogRepo, ModelMappingRepo, StatsRepo};
 use crate::AppState;
 
 // ============================================================================
@@ -162,12 +172,12 @@ pub async fn delete_routing_rule(state: State<'_, AppState>, id: String) -> Resu
 // ============================================================================
 
 #[tauri::command]
-pub async fn list_groups() -> Result<Vec<ProviderGroup>, String> {
+pub async fn list_groups() -> Result<Vec<crate::models::ProviderGroup>, String> {
     gs::list().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn find_groups_by_model(model_name: String) -> Result<Vec<ProviderGroup>, String> {
+pub async fn find_groups_by_model(model_name: String) -> Result<Vec<crate::models::ProviderGroup>, String> {
     gs::find_by_model(model_name).await.map_err(|e| e.to_string())
 }
 
@@ -180,7 +190,7 @@ pub async fn get_group(id: String) -> Result<GroupWithMembersResponse, String> {
 pub async fn create_group(
     state: State<'_, AppState>,
     payload: CreateGroupPayload,
-) -> Result<ProviderGroup, String> {
+) -> Result<crate::models::ProviderGroup, String> {
     gs::create(state.inner(), payload).await.map_err(|e| e.to_string())
 }
 
@@ -189,7 +199,7 @@ pub async fn update_group(
     state: State<'_, AppState>,
     id: String,
     payload: UpdateGroupPayload,
-) -> Result<ProviderGroup, String> {
+) -> Result<crate::models::ProviderGroup, String> {
     gs::update(state.inner(), id, payload).await.map_err(|e| e.to_string())
 }
 
@@ -203,7 +213,7 @@ pub async fn add_group_member(
     state: State<'_, AppState>,
     group_id: String,
     payload: AddMemberPayload,
-) -> Result<GroupMember, String> {
+) -> Result<crate::models::GroupMember, String> {
     gs::add_member(state.inner(), group_id, payload).await.map_err(|e| e.to_string())
 }
 
@@ -212,7 +222,7 @@ pub async fn update_group_member(
     state: State<'_, AppState>,
     id: String,
     payload: UpdateMemberPayload,
-) -> Result<GroupMember, String> {
+) -> Result<crate::models::GroupMember, String> {
     gs::update_member(state.inner(), id, payload).await.map_err(|e| e.to_string())
 }
 
@@ -230,24 +240,9 @@ pub async fn list_logs(
     state: State<'_, AppState>,
     payload: ListLogsPayload,
 ) -> Result<ListLogsResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let limit = payload.limit.unwrap_or(50).clamp(1, 500);
-    let offset = payload.offset.unwrap_or(0);
-    let cache = state.provider_name_cache.read().await;
-
-    let logs = LogRepo::find_paginated(pool, limit, offset)
+    log_service::list(state.inner(), payload.limit, payload.offset)
         .await
-        .map_err(|e| format!("查询日志失败: {e}"))?;
-    let total = LogRepo::count(pool)
-        .await
-        .map_err(|e| format!("查询日志总数失败: {e}"))?;
-
-    Ok(ListLogsResponse {
-        logs: logs.into_iter().map(|l| LogResponse::from_log(l, &cache)).collect(),
-        total,
-        limit,
-        offset,
-    })
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -255,19 +250,16 @@ pub async fn cleanup_logs(
     _state: State<'_, AppState>,
     payload: CleanupLogsPayload,
 ) -> Result<u64, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let before = chrono::Utc::now().naive_utc() - chrono::Duration::days(payload.before_days);
-    LogRepo::delete_before(pool, before)
+    log_service::cleanup(payload.before_days)
         .await
-        .map_err(|e| format!("清理日志失败: {e}"))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn clear_all_logs(_state: State<'_, AppState>) -> Result<u64, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    LogRepo::delete_all(pool)
+    log_service::clear_all()
         .await
-        .map_err(|e| format!("清空日志失败: {e}"))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -275,64 +267,9 @@ pub async fn export_logs_csv(
     _state: State<'_, AppState>,
     payload: ExportLogsPayload,
 ) -> Result<ExportLogsResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let limit = payload.limit.unwrap_or(10000).clamp(1, 50000);
-    let offset = payload.offset.unwrap_or(0);
-
-    let logs = if let Some(provider_id) = &payload.provider_id {
-        LogRepo::find_by_provider(pool, provider_id, limit)
-            .await
-            .map_err(|e| format!("查询日志失败: {e}"))?
-    } else {
-        LogRepo::find_paginated(pool, limit, offset)
-            .await
-            .map_err(|e| format!("查询日志失败: {e}"))?
-    };
-
-    let mut csv_content = String::new();
-    csv_content.push_str("id,request_id,timestamp,method,path,status_code,duration_ms,provider_id,model_used,tokens_input,tokens_output,error_message\n");
-
-    // CSV 字段转义：含逗号/换行/引号的字段用双引号包裹
-    fn csv_escape(field: &str) -> String {
-        if field.contains(',') || field.contains('\n') || field.contains('"') {
-            format!("\"{}\"", field.replace('"', "\"\""))
-        } else {
-            field.to_string()
-        }
-    }
-
-    for log in &logs {
-        csv_content.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{}\n",
-            csv_escape(&log.id),
-            csv_escape(&log.request_id),
-            csv_escape(&log.timestamp.to_string()),
-            csv_escape(&log.method),
-            csv_escape(&log.path),
-            log.status_code.unwrap_or(0),
-            log.duration_ms.unwrap_or(0),
-            csv_escape(log.provider_id.as_deref().unwrap_or("")),
-            csv_escape(log.model_used.as_deref().unwrap_or("")),
-            log.tokens_input.unwrap_or(0),
-            log.tokens_output.unwrap_or(0),
-            csv_escape(log.error_message.as_deref().unwrap_or("")),
-        ));
-    }
-
-    let file_path = payload.file_path.unwrap_or_else(|| {
-        format!("silk_logs_{}.csv", chrono::Utc::now().format("%Y%m%d_%H%M%S"))
-    });
-
-    // 路径安全校验：使用跨平台 is_absolute() 防止路径遍历
-    if file_path.contains("..") || std::path::Path::new(&file_path).is_absolute() {
-        return Err("文件路径不安全: 不允许包含 .. 或使用绝对路径".to_string());
-    }
-
-    tokio::fs::write(&file_path, &csv_content)
+    log_service::export_csv(payload.provider_id, payload.limit, payload.offset, payload.file_path)
         .await
-        .map_err(|e| format!("写入 CSV 文件失败: {e}"))?;
-
-    Ok(ExportLogsResponse { file_path, exported_count: logs.len() as u64 })
+        .map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -343,21 +280,9 @@ pub async fn export_logs_csv(
 pub async fn dashboard_stats(
     _state: State<'_, AppState>,
 ) -> Result<DashboardStatsResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-
-    let agg = StatsRepo::dashboard_aggregate(pool)
+    stats_service::dashboard_stats()
         .await
-        .map_err(|e| format!("查询仪表盘统计失败: {e}"))?;
-
-    Ok(DashboardStatsResponse {
-        today_requests: agg.today_requests,
-        today_success: agg.today_success,
-        today_avg_duration_ms: agg.today_avg_duration_ms.unwrap_or(0.0),
-        today_tokens: agg.today_tokens,
-        active_providers: agg.active_providers,
-        total_requests: agg.total_requests,
-        yesterday_requests: agg.yesterday_requests,
-    })
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -365,11 +290,9 @@ pub async fn recent_requests(
     _state: State<'_, AppState>,
     limit: Option<i64>,
 ) -> Result<Vec<LogResponse>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let limit = limit.unwrap_or(20);
-    let logs = StatsRepo::recent_requests(pool, limit)
-        .await.map_err(|e| format!("查询最近请求失败: {e}"))?;
-    Ok(logs.into_iter().map(LogResponse::from).collect())
+    log_service::recent_requests(limit)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -380,7 +303,8 @@ pub async fn stats_by_provider(
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let limit = limit.unwrap_or(10);
     stats_service::stats_by_provider(pool, limit)
-        .await.map_err(|e| format!("查询服务商统计失败: {e}"))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -391,7 +315,8 @@ pub async fn hourly_stats(
     let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
     let hours = hours.unwrap_or(24);
     stats_service::hourly_stats(pool, hours)
-        .await.map_err(|e| format!("查询时序统计失败: {e}"))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -402,10 +327,7 @@ pub async fn hourly_stats(
 pub async fn list_gateway_keys(
     _state: State<'_, AppState>,
 ) -> Result<Vec<GatewayKeyResponse>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let keys = GatewayKeyRepo::find_all(pool)
-        .await.map_err(|e| format!("查询 Key 失败: {e}"))?;
-    Ok(keys.into_iter().map(GatewayKeyResponse::from).collect())
+    gks::list().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -413,11 +335,7 @@ pub async fn get_gateway_key(
     _state: State<'_, AppState>,
     id: String,
 ) -> Result<GatewayKeyResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let key = GatewayKeyRepo::find_by_id(pool, &id)
-        .await.map_err(|e| format!("查询 Key 失败: {e}"))?
-        .ok_or("Key 不存在")?;
-    Ok(GatewayKeyResponse::from(key))
+    gks::get(id).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -425,22 +343,7 @@ pub async fn create_gateway_key(
     _state: State<'_, AppState>,
     payload: CreateGatewayKeyPayload,
 ) -> Result<CreateGatewayKeyResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let key_value = if payload.key_value.is_empty() {
-        format!("sk-gw-{}", uuid::Uuid::new_v4().to_string().replace("-", ""))
-    } else {
-        payload.key_value
-    };
-    let new = NewGatewayKey {
-        name: payload.name,
-        key_value,
-        enabled: payload.enabled,
-        expires_at: payload.expires_at,
-        max_concurrent: payload.max_concurrent,
-    };
-    let (key, plain_key) = GatewayKeyRepo::create(pool, &new)
-        .await.map_err(|e| format!("创建 Key 失败: {e}"))?;
-    Ok(CreateGatewayKeyResponse { key: GatewayKeyResponse::from(key), plain_key })
+    gks::create(payload).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -449,24 +352,12 @@ pub async fn update_gateway_key(
     id: String,
     payload: UpdateGatewayKeyPayload,
 ) -> Result<GatewayKeyResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let update = UpdateGatewayKey {
-        name: payload.name,
-        enabled: payload.enabled,
-        expires_at: payload.expires_at,
-        max_concurrent: payload.max_concurrent,
-    };
-    let key = GatewayKeyRepo::update(pool, &id, &update)
-        .await.map_err(|e| format!("更新 Key 失败: {e}"))?
-        .ok_or("Key 不存在")?;
-    Ok(GatewayKeyResponse::from(key))
+    gks::update(id, payload).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn delete_gateway_key(_state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    GatewayKeyRepo::delete(pool, &id)
-        .await.map_err(|e| format!("删除 Key 失败: {e}"))
+    gks::delete(id).await.map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -477,16 +368,7 @@ pub async fn delete_gateway_key(_state: State<'_, AppState>, id: String) -> Resu
 pub async fn list_model_mappings(
     _state: State<'_, AppState>,
 ) -> Result<Vec<ModelMappingResponse>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let mappings = ModelMappingRepo::find_all(pool)
-        .await.map_err(|e| format!("查询模型映射失败: {e}"))?;
-    let mut result = Vec::with_capacity(mappings.len());
-    for m in mappings {
-        let channels = ModelMappingRepo::find_channels_by_mapping_id(pool, &m.id)
-            .await.unwrap_or_default();
-        result.push(ModelMappingResponse::from_model(m, channels));
-    }
-    Ok(result)
+    mms::list().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -494,13 +376,7 @@ pub async fn get_model_mapping(
     _state: State<'_, AppState>,
     id: String,
 ) -> Result<ModelMappingResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let mapping = ModelMappingRepo::find_by_id(pool, &id)
-        .await.map_err(|e| format!("查询模型映射失败: {e}"))?
-        .ok_or("模型映射不存在")?;
-    let channels = ModelMappingRepo::find_channels_by_mapping_id(pool, &mapping.id)
-        .await.unwrap_or_default();
-    Ok(ModelMappingResponse::from_model(mapping, channels))
+    mms::get(id).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -508,16 +384,7 @@ pub async fn find_model_mapping_by_name(
     _state: State<'_, AppState>,
     model_name: String,
 ) -> Result<Option<ModelMappingResponse>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let mapping = match ModelMappingRepo::find_by_model_name(pool, &model_name)
-        .await.map_err(|e| format!("查询模型映射失败: {e}"))?
-    {
-        Some(m) => m,
-        None => return Ok(None),
-    };
-    let channels = ModelMappingRepo::find_channels_by_mapping_id(pool, &mapping.id)
-        .await.unwrap_or_default();
-    Ok(Some(ModelMappingResponse::from_model(mapping, channels)))
+    mms::find_by_name(model_name).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -525,25 +392,7 @@ pub async fn create_model_mapping(
     _state: State<'_, AppState>,
     payload: CreateModelMappingPayload,
 ) -> Result<ModelMappingResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let new = NewModelMapping {
-        model_name: payload.model_name,
-        max_input_tokens: payload.max_input_tokens,
-        max_context_tokens: payload.max_context_tokens,
-        max_output_tokens: payload.max_output_tokens,
-        input_price_per_1m: payload.input_price_per_1m,
-        output_price_per_1m: payload.output_price_per_1m,
-        capabilities: payload.capabilities,
-        description: payload.description,
-        strategy: payload.strategy,
-        enabled: payload.enabled,
-        channels: payload.channels,
-    };
-    let mapping = ModelMappingRepo::create(pool, &new)
-        .await.map_err(|e| format!("创建模型映射失败: {e}"))?;
-    let channels = ModelMappingRepo::find_channels_by_mapping_id(pool, &mapping.id)
-        .await.unwrap_or_default();
-    Ok(ModelMappingResponse::from_model(mapping, channels))
+    mms::create(payload).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -552,33 +401,12 @@ pub async fn update_model_mapping(
     id: String,
     payload: UpdateModelMappingPayload,
 ) -> Result<ModelMappingResponse, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    let update = UpdateModelMapping {
-        model_name: payload.model_name,
-        max_input_tokens: payload.max_input_tokens,
-        max_context_tokens: payload.max_context_tokens,
-        max_output_tokens: payload.max_output_tokens,
-        input_price_per_1m: payload.input_price_per_1m,
-        output_price_per_1m: payload.output_price_per_1m,
-        capabilities: payload.capabilities,
-        description: payload.description,
-        strategy: payload.strategy,
-        enabled: payload.enabled,
-        channels: payload.channels,
-    };
-    let mapping = ModelMappingRepo::update(pool, &id, &update)
-        .await.map_err(|e| format!("更新模型映射失败: {e}"))?
-        .ok_or("模型映射不存在")?;
-    let channels = ModelMappingRepo::find_channels_by_mapping_id(pool, &mapping.id)
-        .await.unwrap_or_default();
-    Ok(ModelMappingResponse::from_model(mapping, channels))
+    mms::update(id, payload).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn delete_model_mapping(_state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    ModelMappingRepo::delete(pool, &id)
-        .await.map_err(|e| format!("删除模型映射失败: {e}"))
+    mms::delete(id).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -586,7 +414,5 @@ pub async fn get_group_providers(
     _state: State<'_, AppState>,
     group_id: String,
 ) -> Result<Vec<crate::models::GroupProviderInfo>, String> {
-    let pool = crate::get_db_pool().ok_or("数据库未初始化")?;
-    ModelMappingRepo::find_group_providers(pool, &group_id)
-        .await.map_err(|e| format!("查询分组渠道失败: {e}"))
+    mms::get_group_providers(group_id).await.map_err(|e| e.to_string())
 }

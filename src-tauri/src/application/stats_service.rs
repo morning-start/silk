@@ -1,6 +1,7 @@
 use serde::Serialize;
 use sqlx::SqlitePool;
 
+use crate::error::{require_db, ServiceError};
 use crate::persistence::StatsRepo;
 
 // ---------------------------------------------------------------------------
@@ -65,4 +66,59 @@ pub async fn hourly_stats(
 ) -> Result<Vec<HourlyStatsResponse>, sqlx::Error> {
     let stats = StatsRepo::hourly_stats(pool, hours).await?;
     Ok(stats.into_iter().map(HourlyStatsResponse::from).collect())
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard Stats Types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DashboardStatsResponse {
+    pub today_requests: i64,
+    pub today_success: i64,
+    pub today_avg_duration_ms: f64,
+    pub today_tokens: i64,
+    pub active_providers: i64,
+    pub total_requests: i64,
+    pub yesterday_requests: i64,
+}
+
+impl DashboardStatsResponse {
+    pub fn success_rate(&self) -> f64 {
+        if self.today_requests == 0 {
+            0.0
+        } else {
+            (self.today_success as f64 / self.today_requests as f64) * 100.0
+        }
+    }
+
+    pub fn growth_rate(&self) -> f64 {
+        if self.yesterday_requests == 0 {
+            0.0
+        } else {
+            ((self.today_requests - self.yesterday_requests) as f64
+                / self.yesterday_requests as f64)
+                * 100.0
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard Service Functions
+// ---------------------------------------------------------------------------
+
+/// 获取仪表盘聚合统计数据
+pub async fn dashboard_stats() -> Result<DashboardStatsResponse, ServiceError> {
+    let pool = require_db()?;
+    let agg = StatsRepo::dashboard_aggregate(pool).await?;
+
+    Ok(DashboardStatsResponse {
+        today_requests: agg.today_requests,
+        today_success: agg.today_success,
+        today_avg_duration_ms: agg.today_avg_duration_ms.unwrap_or(0.0),
+        today_tokens: agg.today_tokens,
+        active_providers: agg.active_providers,
+        total_requests: agg.total_requests,
+        yesterday_requests: agg.yesterday_requests,
+    })
 }

@@ -162,6 +162,8 @@ pub async fn load_gateway_context(
     let group_manager = Arc::new(GroupManager::new());
     group_manager.load(&pool).await?;
 
+    let plugins = crate::gateway::plugins::default_token_saving_plugins();
+
     Ok(GatewayContext::new(
         pool,
         Arc::new(RwLock::new(settings)),
@@ -170,6 +172,7 @@ pub async fn load_gateway_context(
         log_sender,
         adapter_registry,
         group_manager,
+        plugins,
     ).map_err(|e| sqlx::Error::Protocol(e))?)
 }
 

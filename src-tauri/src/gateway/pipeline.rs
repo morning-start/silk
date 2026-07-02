@@ -63,11 +63,14 @@ impl GatewayPipeline {
     ) -> Result<RequestContext, StageError> {
         let ctx = extract::read_body(ctx, body).await?;
         let ctx = authenticate::run(ctx, &self.runtime).await?;
-        let ctx = resolve_route::run(&self.runtime, ctx).await?;
+        let mut ctx = resolve_route::run(&self.runtime, ctx).await?;
 
-        // 如果路由阶段已构建响应（如 /v1/models），跳过后续流程
-        if ctx.response.is_some() {
-            return Ok(ctx);
+        // 执行插件 before_route 钩子
+        for plugin in &self.runtime.plugins {
+            ctx = plugin.before_route(ctx, &self.runtime).await?;
+            if ctx.response.is_some() {
+                return Ok(ctx);
+            }
         }
 
         // 失败回退循环
@@ -89,11 +92,20 @@ impl GatewayPipeline {
                 ctx = select_channel::run(ctx).await?;
                 ctx = transform_request::run(ctx).await?;
 
+                // 执行插件 before_upstream 钩子
+                for plugin in &self.runtime.plugins {
+                    ctx = plugin.before_upstream(ctx, &self.runtime).await?;
+                }
+
                 // dispatch_upstream 内部包含 Level 1（重试）
                 match dispatch_upstream::run(&self.runtime, ctx).await {
                     Ok(new_ctx) => {
                         // 成功！继续到响应转换
-                        let ctx = transform_response::run(new_ctx).await?;
+                        let mut ctx = transform_response::run(new_ctx).await?;
+                        // 执行插件 after_upstream 钩子
+                        for plugin in &self.runtime.plugins {
+                            ctx = plugin.after_upstream(ctx, &self.runtime).await?;
+                        }
                         return Ok(ctx);
                     }
                     Err(stage_err) => {
