@@ -148,44 +148,6 @@ impl DashboardStatsResponse {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
-pub struct ProviderStatsResponse {
-    pub provider_name: Option<String>,
-    pub request_count: i64,
-    pub avg_duration_ms: f64,
-    pub total_tokens: i64,
-}
-
-impl From<crate::persistence::stats_repo::ProviderStats> for ProviderStatsResponse {
-    fn from(s: crate::persistence::stats_repo::ProviderStats) -> Self {
-        Self {
-            provider_name: s.provider_name,
-            request_count: s.request_count,
-            avg_duration_ms: s.avg_duration_ms,
-            total_tokens: s.total_tokens,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct HourlyStatsResponse {
-    pub hour: String,
-    pub request_count: i64,
-    pub avg_duration_ms: f64,
-    pub total_tokens: i64,
-}
-
-impl From<crate::persistence::stats_repo::HourlyStats> for HourlyStatsResponse {
-    fn from(s: crate::persistence::stats_repo::HourlyStats) -> Self {
-        Self {
-            hour: s.hour,
-            request_count: s.request_count,
-            avg_duration_ms: s.avg_duration_ms,
-            total_tokens: s.total_tokens,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Gateway Key Types
 // ---------------------------------------------------------------------------

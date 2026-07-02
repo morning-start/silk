@@ -183,14 +183,9 @@ pub async fn update_member(
 pub async fn remove_member(state: &AppState, id: String) -> Result<bool, ServiceError> {
     let pool = require_db()?;
 
-    let member = sqlx::query_as::<_, GroupMember>(
-        r#"SELECT id, group_id, provider_id, weight, enabled, created_at FROM group_members WHERE id = ?1"#,
-    )
-    .bind(&id)
-    .fetch_optional(pool)
-    .await?;
+    let member = GroupRepo::find_member_by_id(pool, &id).await?;
 
-    let group_id = member.map(|m| m.group_id.clone());
+    let group_id = member.as_ref().map(|m| m.group_id.clone());
 
     let deleted = GroupRepo::remove_member(pool, &id).await?;
 
