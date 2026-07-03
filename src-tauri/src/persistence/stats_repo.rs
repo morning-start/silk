@@ -35,13 +35,14 @@ impl StatsRepo {
                  WHERE timestamp >= datetime('now', 'start of day')
                    AND timestamp < datetime('now', 'start of day', '+1 day')
                    AND status_code >= 200 AND status_code < 300) as today_success,
-                (SELECT AVG(duration_ms) FROM request_logs
+                (SELECT AVG(resp_ms) FROM request_logs
                  WHERE timestamp >= datetime('now', 'start of day')
                    AND timestamp < datetime('now', 'start of day', '+1 day')
-                   AND duration_ms IS NOT NULL) as today_avg_duration,
-                (SELECT COALESCE(SUM(tokens_input + tokens_output), 0) FROM request_logs
-                 WHERE timestamp >= datetime('now', 'start of day')
-                   AND timestamp < datetime('now', 'start of day', '+1 day')) as today_tokens,
+                   AND resp_ms IS NOT NULL) as today_avg_duration,
+                (SELECT COALESCE(SUM(re.tokens_input + re.tokens_output), 0) FROM request_log_extra_token re
+                 INNER JOIN request_logs rl ON re.request_id = rl.request_id
+                 WHERE rl.timestamp >= datetime('now', 'start of day')
+                   AND rl.timestamp < datetime('now', 'start of day', '+1 day')) as today_tokens,
                 (SELECT COUNT(DISTINCT provider_id) FROM request_logs
                  WHERE timestamp >= datetime('now', 'start of day')
                    AND timestamp < datetime('now', 'start of day', '+1 day')
@@ -98,10 +99,10 @@ impl StatsRepo {
     pub async fn today_avg_duration_ms(pool: &SqlitePool) -> Result<Option<f64>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT AVG(duration_ms) as avg_duration FROM request_logs
+            SELECT AVG(resp_ms) as avg_duration FROM request_logs
             WHERE timestamp >= datetime('now', 'start of day')
               AND timestamp < datetime('now', 'start of day', '+1 day')
-              AND duration_ms IS NOT NULL
+              AND resp_ms IS NOT NULL
             "#,
         )
         .fetch_one(pool)
@@ -113,9 +114,11 @@ impl StatsRepo {
     pub async fn today_total_tokens(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT COALESCE(SUM(tokens_input + tokens_output), 0) as total FROM request_logs
-            WHERE timestamp >= datetime('now', 'start of day')
-              AND timestamp < datetime('now', 'start of day', '+1 day')
+            SELECT COALESCE(SUM(re.tokens_input + re.tokens_output), 0) as total
+            FROM request_log_extra_token re
+            INNER JOIN request_logs rl ON re.request_id = rl.request_id
+            WHERE rl.timestamp >= datetime('now', 'start of day')
+              AND rl.timestamp < datetime('now', 'start of day', '+1 day')
             "#,
         )
         .fetch_one(pool)
@@ -187,10 +190,11 @@ impl StatsRepo {
             SELECT
                 p.name as provider_name,
                 COUNT(*) as request_count,
-                COALESCE(AVG(r.duration_ms), 0.0) as avg_duration_ms,
-                COALESCE(SUM(r.tokens_input + r.tokens_output), 0) as total_tokens
+                COALESCE(AVG(r.resp_ms), 0.0) as avg_duration_ms,
+                COALESCE(SUM(re.tokens_input + re.tokens_output), 0) as total_tokens
             FROM request_logs r
             LEFT JOIN providers p ON r.provider_id = p.id
+            LEFT JOIN request_log_extra_token re ON re.request_id = r.request_id
             WHERE r.timestamp >= datetime('now', '-1 day')
             GROUP BY r.provider_id, p.name
             ORDER BY request_count DESC
@@ -210,13 +214,14 @@ impl StatsRepo {
         sqlx::query_as::<_, HourlyStats>(
             r#"
             SELECT
-                strftime('%Y-%m-%d %H:00:00', timestamp) as hour,
+                strftime('%Y-%m-%d %H:00:00', r.timestamp) as hour,
                 COUNT(*) as request_count,
-                COALESCE(AVG(duration_ms), 0.0) as avg_duration_ms,
-                COALESCE(SUM(tokens_input + tokens_output), 0) as total_tokens
-            FROM request_logs
-            WHERE timestamp >= datetime('now', '-' || $1 || ' hours')
-            GROUP BY strftime('%Y-%m-%d %H', timestamp)
+                COALESCE(AVG(r.resp_ms), 0.0) as avg_duration_ms,
+                COALESCE(SUM(re.tokens_input + re.tokens_output), 0) as total_tokens
+            FROM request_logs r
+            LEFT JOIN request_log_extra_token re ON re.request_id = r.request_id
+            WHERE r.timestamp >= datetime('now', '-' || $1 || ' hours')
+            GROUP BY strftime('%Y-%m-%d %H', r.timestamp)
             ORDER BY hour ASC
             "#,
         )

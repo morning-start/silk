@@ -77,10 +77,10 @@ const columns: DataTableColumns<RequestLog> = [
   },
   {
     title: "耗时",
-    key: "duration_ms",
+    key: "resp_ms",
     width: 70,
     render(row) {
-      const ms = row.duration_ms;
+      const ms = row.resp_ms;
       if (ms == null) return "-";
       return h("span", { class: "num" }, `${ms}ms`);
     },
@@ -150,10 +150,9 @@ onMounted(() => {
 // 跨 Store 联动：当路由规则或渠道数据变更时自动刷新统计
 const providersSignal = useDataChangeSignal("providers");
 const routingRulesSignal = useDataChangeSignal("routingRules");
-const groupsSignal = useDataChangeSignal("groups");
 
 watch(
-  [providersSignal, routingRulesSignal, groupsSignal],
+  [providersSignal, routingRulesSignal],
   () => {
     loadData();
   },
@@ -320,11 +319,7 @@ watch(
 
 <style scoped>
 .dashboard {
-  max-width: 1200px;
-}
-
-.mb-16 {
-  margin-bottom: 16px;
+  width: 100%;
 }
 
 .welcome-card {
@@ -394,20 +389,6 @@ watch(
 
 .section-card {
   border-radius: 12px;
-}
-
-.text-mono {
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 12px;
-}
-
-.text-sm {
-  font-size: 12px;
-}
-
-.num {
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 12px;
 }
 
 .gateway-control-body {
