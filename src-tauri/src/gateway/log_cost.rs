@@ -13,7 +13,7 @@ pub async fn compute_batch_costs(logs: &mut Vec<NewRequestLog>, pool: &SqlitePoo
     let uncosted_models: Vec<String> = logs
         .iter()
         .filter(|log| log.cost.is_none())
-        .filter_map(|log| log.model_used.clone())
+        .filter_map(|log| log.model_id.clone())
         .collect();
 
     if uncosted_models.is_empty() {
@@ -40,7 +40,7 @@ pub async fn compute_batch_costs(logs: &mut Vec<NewRequestLog>, pool: &SqlitePoo
         if log.cost.is_some() {
             continue;
         }
-        let model_name = match &log.model_used {
+        let model_name = match &log.model_id {
             Some(m) => m,
             None => continue,
         };
@@ -64,12 +64,12 @@ mod tests {
     fn test_uncosted_models_filter() {
         let logs = vec![
             NewRequestLog {
-                model_used: Some("gpt-4".to_string()),
+                model_id: Some("gpt-4".to_string()),
                 cost: None,
                 ..Default::default()
             },
             NewRequestLog {
-                model_used: Some("gpt-3.5".to_string()),
+                model_id: Some("gpt-3.5".to_string()),
                 cost: Some(0.01),
                 ..Default::default()
             },
@@ -77,7 +77,7 @@ mod tests {
         let uncosted: Vec<String> = logs
             .iter()
             .filter(|log| log.cost.is_none())
-            .filter_map(|log| log.model_used.clone())
+            .filter_map(|log| log.model_id.clone())
             .collect();
         assert_eq!(uncosted, vec!["gpt-4"]);
     }

@@ -1,6 +1,5 @@
 pub mod context;
 pub mod error;
-pub mod group_manager;
 pub mod header_config;
 pub mod log_cleanup;
 pub mod log_cost;
@@ -17,6 +16,9 @@ use axum::routing::get;
 use axum::Router;
 use sqlx::SqlitePool;
 use tokio::task::JoinHandle;
+
+use crate::models::NewRequestLog;
+use crate::persistence::LogExtraTokenRepo;
 
 pub use context::{GatewayContext, RequestContext, RouteManager};
 pub use error::GatewayError;
@@ -84,11 +86,11 @@ async fn proxy_handler(State(context): State<GatewayContext>, req: Request<Body>
 
 /// 启动后台日志写入任务
 ///
-/// 从 channel 接收日志数据，批量写入 SQLite。
+/// 从 channel 接收日志数据，批量写入 SQLite（主表 + 扩展表）。
 /// 返回 JoinHandle，用于优雅关闭。
 pub fn spawn_log_writer(
     pool: SqlitePool,
-    mut receiver: tokio::sync::mpsc::Receiver<crate::models::NewRequestLog>,
+    mut receiver: tokio::sync::mpsc::Receiver<NewRequestLog>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut batch = Vec::new();
@@ -128,8 +130,8 @@ pub fn spawn_log_writer(
     })
 }
 
-/// 批量写入日志到 SQLite
-async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewRequestLog>) {
+/// 批量写入日志到 SQLite（主表 + 扩展表）
+async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<NewRequestLog>) {
     if batch.is_empty() {
         return;
     }
@@ -139,7 +141,23 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
     // 在消费侧计算 cost，不阻塞请求热路径
     log_cost::compute_batch_costs(&mut logs, pool).await;
 
-    match crate::persistence::LogRepo::insert_batch(pool, &logs).await {
+    // 分离扩展信息（cache_hit, tokens, cost 等迁出字段）
+    let extras: Vec<crate::models::NewRequestLogExtraToken> = logs
+        .iter()
+        .map(|log| crate::models::NewRequestLogExtraToken {
+            request_id: log.request_id.clone(),
+            cache_hit: log.cache_hit,
+            request_size_bytes: log.request_size_bytes,
+            response_size_bytes: log.response_size_bytes,
+            tokens_input: log.tokens_input,
+            tokens_output: log.tokens_output,
+            cost: log.cost,
+        })
+        .collect();
+
+    // 写入主表
+    let main_result = crate::persistence::LogRepo::insert_batch(pool, &logs).await;
+    match &main_result {
         Ok(count) => {
             tracing::debug!(count, "批量写入日志成功");
         }
@@ -160,6 +178,18 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<crate::models::NewReques
         }
         Err(err) => {
             tracing::warn!(%err, "批量写入日志失败");
+        }
+    }
+
+    // 只有主表写入成功后才写入扩展表
+    if main_result.is_ok() {
+        match LogExtraTokenRepo::insert_batch(pool, &extras).await {
+            Ok(count) => {
+                tracing::debug!(count, "批量写入扩展日志成功");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "写入扩展日志失败");
+            }
         }
     }
 }
