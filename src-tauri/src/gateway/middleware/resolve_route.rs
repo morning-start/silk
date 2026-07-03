@@ -172,10 +172,10 @@ async fn try_route_fallback(
         }
     };
 
-    // 候选选择：从路由规则解析 provider_id（含分组负载均衡）
-    let (provider_id, group_member) = runtime
+    // 候选选择：从路由规则解析 provider_id
+    let provider_id = runtime
         .route_manager
-        .resolve_provider_id(&route, &runtime.group_manager)
+        .resolve_provider_id(&route)
         .await;
 
     let provider_id = provider_id.ok_or_else(|| {
@@ -190,7 +190,6 @@ async fn try_route_fallback(
     let inbound = route.inbound_protocol.clone().unwrap_or_default();
     let outbound = route.outbound_protocol.clone().unwrap_or_default();
     ctx.route = Some(route);
-    ctx.selected_group_member = group_member;
     fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
 
     Ok(ctx)
@@ -210,9 +209,9 @@ async fn try_settings_default(
             if let Ok(Some(fallback_route)) =
                 crate::persistence::RoutingRuleRepo::find_by_id(&runtime.pool, default_route_id).await
             {
-                let (provider_id, group_member) = runtime
+                let provider_id = runtime
                     .route_manager
-                    .resolve_provider_id(&fallback_route, &runtime.group_manager)
+                    .resolve_provider_id(&fallback_route)
                     .await;
 
                 if let Some(pid) = provider_id {
@@ -220,7 +219,6 @@ async fn try_settings_default(
                     let inbound = fallback_route.inbound_protocol.clone().unwrap_or_default();
                     let outbound = fallback_route.outbound_protocol.clone().unwrap_or_default();
                     ctx.route = Some(fallback_route);
-                    ctx.selected_group_member = group_member;
                     fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
                     return Ok(ctx);
                 }

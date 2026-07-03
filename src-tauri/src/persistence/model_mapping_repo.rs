@@ -302,38 +302,4 @@ impl ModelMappingRepo {
         Ok(())
     }
 
-    /// 查询分组内的渠道信息（废弃，保留兼容）
-    pub async fn find_group_providers(
-        pool: &SqlitePool,
-        group_id: &str,
-    ) -> Result<Vec<crate::models::GroupProviderInfo>, sqlx::Error> {
-        let rows = sqlx::query(
-            r#"
-            SELECT p.id, p.name, p.protocols, p.models, p.health_status
-            FROM group_members gm
-            JOIN providers p ON p.id = gm.provider_id
-            WHERE gm.group_id = ?1 AND gm.enabled = 1
-            "#,
-        )
-        .bind(group_id)
-        .fetch_all(pool)
-        .await?;
-
-        let mut result = Vec::new();
-        for row in rows {
-            let protocols: Vec<String> =
-                serde_json::from_str(row.get::<&str, _>("protocols")).unwrap_or_default();
-            let models: Vec<String> =
-                serde_json::from_str(row.get::<&str, _>("models")).unwrap_or_default();
-
-            result.push(crate::models::GroupProviderInfo {
-                id: row.get("id"),
-                name: row.get("name"),
-                protocols,
-                models_count: models.len() as i64,
-                health_status: row.get("health_status"),
-            });
-        }
-        Ok(result)
-    }
 }

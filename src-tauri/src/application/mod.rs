@@ -1,6 +1,5 @@
 pub mod gateway_key_service;
 pub mod gateway_service;
-pub mod group_service;
 pub mod log_service;
 pub mod model_fetcher;
 pub mod model_mapping_service;
