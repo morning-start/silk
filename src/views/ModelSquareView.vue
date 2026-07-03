@@ -557,32 +557,15 @@ onMounted(loadData);
 
 <style scoped>
 .model-square {
-  max-width: 1200px;
+  width: 100%;
 }
 
+/* toolbar overrides — ModelSquareView 使用更紧凑的间距 */
 .toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   margin-bottom: 8px;
 }
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .toolbar-right {
-  display: flex;
-  align-items: center;
   gap: 8px;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
 }
 
 .model-card {
@@ -685,11 +668,6 @@ onMounted(loadData);
 .sep {
   color: var(--border-color, #e2e8f0);
   margin: 0 4px;
-}
-
-.num {
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-weight: 600;
 }
 
 .mc-caps {
@@ -865,10 +843,6 @@ onMounted(loadData);
   color: var(--text-color-3, #94a3b8);
 }
 
-.form-row {
-  display: flex;
-  gap: 12px;
-}
 
 .cap-checkboxes {
   display: flex;
@@ -884,30 +858,7 @@ onMounted(loadData);
   cursor: pointer;
 }
 
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 24px;
-  text-align: center;
-}
 
-.error-icon {
-  margin-bottom: 16px;
-}
 
-.error-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-color, #1e293b);
-  margin: 0 0 8px;
-}
 
-.error-desc {
-  font-size: 13px;
-  color: var(--text-color-3, #94a3b8);
-  margin: 0 0 20px;
-  max-width: 400px;
-}
 </style>

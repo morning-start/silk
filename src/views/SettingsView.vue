@@ -263,41 +263,12 @@ onMounted(() => {
 
 <style scoped>
 .settings-page {
-  max-width: 1200px;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
+  width: 100%;
 }
 
 .settings-card {
   border-radius: 12px;
   margin-bottom: 16px;
-}
-
-.form-row {
-  display: flex;
-  gap: 12px;
 }
 
 .add-key-box {
