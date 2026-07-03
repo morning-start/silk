@@ -142,35 +142,7 @@ onMounted(() => loadData(24));
 
 <style scoped>
 .monitoring {
-  max-width: 1200px;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.mb-16 {
-  margin-bottom: 16px;
+  width: 100%;
 }
 
 .metric-card {

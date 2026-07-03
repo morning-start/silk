@@ -273,3 +273,41 @@ body.dark ::-webkit-scrollbar-thumb:hover {
   margin: 0 0 20px;
   max-width: 400px;
 }
+
+/* ===== Page Layout (各页面通用) ===== */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toolbar-right {
+  display: flex;
+  align-items: center;
+}
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* ===== Card ===== */
+.table-card {
+  border-radius: 12px;
+}
+
+/* ===== Form Row ===== */
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+/* ===== Text helpers ===== */
+.text-sm {
+  font-size: 12px;
+}

@@ -391,41 +391,17 @@ onMounted(() => {
 
 <style scoped>
 .providers-page {
-  max-width: 1200px;
+  width: 100%;
 }
 
 .providers-page > .provider-card {
   margin-bottom: 0;
 }
 
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-}
-
 .providers-page {
-  max-width: 1200px;
+  width: 100%;
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   align-content: start;
 }
@@ -525,37 +501,5 @@ onMounted(() => {
   gap: 4px;
   border-top: 1px solid var(--border-color, #e2e8f0);
   padding-top: 10px;
-}
-
-.form-row {
-  display: flex;
-  gap: 12px;
-}
-
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 24px;
-  text-align: center;
-}
-
-.error-icon {
-  margin-bottom: 16px;
-}
-
-.error-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-color, #1e293b);
-  margin: 0 0 8px;
-}
-
-.error-desc {
-  font-size: 13px;
-  color: var(--text-color-3, #94a3b8);
-  margin: 0 0 20px;
-  max-width: 400px;
 }
 </style>
