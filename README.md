@@ -16,7 +16,7 @@
 
 | 层级 | 技术 |
 |------|------|
-| UI | Vue 3 + TypeScript + NaiveUI + Tailwind CSS |
+| UI | Vue 3 + TypeScript + NaiveUI |
 | 状态管理 | Pinia |
 | 桌面框架 | Tauri 2 |
 | 后端 | Rust + Axum + Tokio |
@@ -62,9 +62,9 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 网关中间件管道
+### 网关中间件管道（9 阶段 + 插件钩子）
 
-请求通过 7 阶段管道处理，每个阶段由独立中间件执行：
+请求通过 9 阶段管道处理，每个阶段由独立中间件执行，插件钩子在关键节点注入：
 
 ```
                     ┌──────────────────┐
@@ -72,35 +72,53 @@
                     └────────┬─────────┘
                              │
                     ┌────────▼─────────┐
-                    │  extract::       │
-                    │  initialize()    │  生成 request_id，初始化 RequestContext
-                    │  read_body()     │  读取请求体（限制 2MB）
+                    │  extract::       │  生成 request_id，初始化 RequestContext
+                    │  initialize()    │  读取请求体（限制 2MB）
                     └────────┬─────────┘
                              │
                     ┌────────▼─────────┐
-                    │  resolve_route:: │  根据 Host/Path/Method/ContentType
-                    │  run()           │  匹配路由规则，解析目标 Provider
+                    │  authenticate::  │  验证 Gateway Key（仅 /v1/* 路径）
+                    │  run()           │  支持 Bearer / x-api-key 两种方式
                     └────────┬─────────┘
                              │
                     ┌────────▼─────────┐
-                    │  normalize_      │  从路由规则获取 inbound/outbound
-                    │  protocol::run() │  协议标签，标记到上下文
+                    │  resolve_route:: │  模型映射优先 → 路由规则 → 路径兜底
+                    │  run()           │  确定 provider + inbound/outbound 协议
                     └────────┬─────────┘
                              │
                     ┌────────▼─────────┐
-                    │  transform_      │  根据入站协议选择适配器
-                    │  request::run()  │  解析请求为 Canonical 格式
-                    └────────┬─────────┘  转换为上游请求格式
+                    │  [before_route]  │  插件钩子（如 Prompt 缓存检测）
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │  select_channel  │  从 provider 的 Key 池中选择上游 Key
+                    │  ::run()         │  支持轮询 / 加权 / 主备策略
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │  transform_      │  根据入站/出站协议选择适配器
+                    │  request::run()  │  转换请求体为上游期望格式
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │  [before_        │  插件钩子（日志压缩、滑动窗口等）
+                    │   upstream]      │
+                    └────────┬─────────┘
                              │
                     ┌────────▼─────────┐
                     │  dispatch_       │  转发到上游 Provider
                     │  upstream::run() │  自动判断流式/非流式
-                    │                  │  SSE 断线重连（Last-Event-ID）
-                    └────────┬─────────┘  指数退避重试
+                    │                  │  SSE 断线重连、指数退避重试
+                    └────────┬─────────┘
                              │
                     ┌────────▼─────────┐
                     │  transform_      │  根据出站协议转换响应
                     │  response::run() │  支持流式/非流式两种模式
+                    └────────┬─────────┘
+                             │
+                    ┌────────▼─────────┐
+                    │  [after_         │  插件钩子（响应统计等）
+                    │   upstream]      │
                     └────────┬─────────┘
                              │
               ┌──────────────┴──────────────┐
@@ -111,6 +129,8 @@
      │  异步写入 SQLite │          │  构建最终响应     │
      └──────────────────┘          └──────────────────┘
 ```
+
+**三级失败回退**：`dispatch_upstream` 内部重试耗尽 → 换 Key（`select_channel` 排除已失败 Key）→ 换渠道（`resolve_route::try_next_channel`）→ 502
 
 ### 请求上下文 (RequestContext)
 
@@ -156,34 +176,31 @@ pub struct RequestContext {
 
 ### 协议适配器
 
-通过 `ProviderAdapter` trait 实现协议转换，支持热插拔：
+通过 `ProviderAdapter` trait 实现协议转换，直接操作 JSON，无中间格式：
 
 ```rust
 #[async_trait]
 pub trait ProviderAdapter: Send + Sync {
+    /// 适配器类型标识（如 "openai_chat", "claude_messages", "openai_response"）
     fn provider_type(&self) -> &'static str;
 
-    /// Canonical Request → 上游请求
-    async fn canonicalize_request(
+    /// 将原始请求体（JSON 字节）转为上游请求
+    async fn transform_request(
         &self,
-        req: &CanonicalRequest,
+        req_body: &[u8],
         provider: &Provider,
+        selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError>;
 
-    /// 上游响应 → Canonical Response
-    async fn parse_response(
+    /// 将上游响应转为客户端期望的格式（JSON）
+    async fn transform_response(
         &self,
         resp: &UpstreamResponse,
-    ) -> Result<CanonicalResponse, ProtocolError>;
+    ) -> Result<serde_json::Value, ProtocolError>;
 }
 ```
 
-**协议流程：**
-```
-入站请求 → Inbound Adapter → CanonicalRequest → Outbound Adapter → 上游请求
-                                          ↓
-上游响应 → Outbound Adapter → CanonicalResponse → Inbound Adapter → 入站响应
-```
+**新增适配器**：实现 trait → 在 `adapters/mod.rs` 添加模块 → 在 `builtin_adapters.rs` 调用 `registry.register(Arc::new(MyAdapter))` 即可，无需改 `registry.rs`。
 
 ### SSE 流式处理
 
@@ -313,63 +330,65 @@ cargo test               # 运行测试
 ```
 silk/
 ├── src/                          # Vue 前端源码
-│   ├── App.vue                   # 根组件
+│   ├── App.vue                   # 根组件（主题、全局壳）
+│   ├── AppContent.vue            # 布局 / 菜单 / 网关控制
+│   ├── api/index.ts              # ~50 个 Tauri invoke 封装
 │   ├── components/               # 可复用组件
-│   ├── stores/                   # Pinia 状态管理
-│   └── views/                    # 页面视图
+│   ├── router/index.ts           # 页面路由
+│   ├── stores/                   # Pinia 状态管理（useSwrCache + useCrossStoreNotify）
+│   └── views/                    # 页面视图（10 个管理页面）
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
-│   │   ├── lib.rs                # Tauri 命令入口
-│   │   ├── main.rs               # 应用入口
-│   │   ├── error.rs              # 全局错误类型
-│   │   ├── crypto/               # 加密模块 (AES-GCM)
+│   │   ├── lib.rs                # Tauri 初始化、DB 迁移、命令注册、网关生命周期
+│   │   ├── main.rs               # 调用 silk_lib::run()
+│   │   ├── error.rs              # ServiceError（应用层统一错误类型）
+│   │   ├── load_balancer.rs      # 负载均衡策略（round_robin / weighted / failover）
+│   │   ├── crypto/               # AES-GCM 加密（API Key 存储）
 │   │   ├── gateway/              # HTTP 网关
-│   │   │   ├── mod.rs            # 服务器启动
-│   │   │   ├── pipeline.rs       # 中间件管道
-│   │   │   ├── context.rs        # 请求/网关上下文
-│   │   │   ├── error.rs          # 网关错误类型
-│   │   │   ├── group_manager.rs  # Provider 分组管理
-│   │   │   └── middleware/       # 中间件实现
-│   │   │       ├── extract.rs              # 请求提取
-│   │   │       ├── resolve_route.rs        # 路由解析
-│   │   │       ├── normalize_protocol.rs   # 协议归一化
-│   │   │       ├── transform_request.rs    # 请求转换
-│   │   │       ├── dispatch_upstream.rs    # 上游转发
-│   │   │       ├── transform_response.rs   # 响应转换
-│   │   │       ├── stream_response.rs      # SSE 流处理
-│   │   │       ├── persist_log.rs          # 日志持久化
-│   │   │       └── finalize.rs             # 响应构建
-│   │   ├── protocol/             # 协议转换
-│   │   │   ├── mod.rs            # 协议模块入口
-│   │   │   ├── adapter.rs        # 适配器 trait
-│   │   │   ├── registry.rs       # 适配器注册表
-│   │   │   ├── canonical.rs      # Canonical 格式定义
+│   │   │   ├── mod.rs            # 服务器启动、日志写入任务
+│   │   │   ├── pipeline.rs       # 9 阶段管道编排 + 三级回退 + 插件钩子分发
+│   │   │   ├── context.rs        # GatewayContext + RequestContext (Inner+Deref 模式)
+│   │   │   ├── error.rs          # GatewayError 枚举
+│   │   │   ├── plugin.rs         # GatewayPlugin 生命周期拦截钩子定义
+│   │   │   ├── group_manager.rs  # Provider 分组负载均衡
+│   │   │   ├── header_config.rs  # Header 转发配置
+│   │   │   ├── log_cleanup.rs    # 定时日志清理任务
+│   │   │   ├── log_cost.rs       # Token 费用计算
+│   │   │   ├── plugins/          # 内置网关插件
+│   │   │   └── middleware/       # 中间件实现（12 个模块）
+│   │   │       ├── extract.rs              # 请求提取（initialize + read_body）
+│   │   │       ├── authenticate.rs         # 网关 Key 认证
+│   │   │       ├── rate_limit.rs           # IP 级限流
+│   │   │       ├── resolve_route.rs        # 路由解析（模型映射→路由规则→路径兜底）
+│   │   │       ├── select_channel.rs       # 上游 Key 选择
+│   │   │       ├── transform_request.rs    # 请求协议转换
+│   │   │       ├── dispatch_upstream.rs    # 上游转发（含 SSE + 重试）
+│   │   │       ├── transform_response.rs   # 响应协议转换
+│   │   │       ├── stream_response.rs      # SSE 流式处理（crate 内可见）
+│   │   │       ├── persist_log.rs          # 异步日志写入
+│   │   │       └── finalize.rs             # 构建最终响应
+│   │   ├── protocol/             # 协议适配层
+│   │   │   ├── adapter.rs        # ProviderAdapter trait + UpstreamRequest/Response
+│   │   │   ├── registry.rs       # AdapterRegistry（注册 + 查找）
+│   │   │   ├── builtin_adapters.rs  # 内置适配器注册（新增适配器改这里）
 │   │   │   └── adapters/         # 协议适配器实现
-│   │   │       ├── openai_chat.rs         # OpenAI Chat
+│   │   │       ├── openai_chat.rs         # OpenAI Chat Completions
 │   │   │       ├── claude.rs              # Claude Messages
-│   │   │       └── openai_response.rs     # OpenAI Response
-│   │   ├── persistence/          # SQLite 持久化
-│   │   │   ├── mod.rs
-│   │   │   ├── provider_repo.rs
-│   │   │   ├── routing_rule_repo.rs
-│   │   │   ├── group_repo.rs
-│   │   │   ├── log_repo.rs
-│   │   │   └── gateway_settings_repo.rs
+│   │   │       └── openai_response.rs     # OpenAI Responses API
+│   │   ├── application/          # 应用服务层
+│   │   │   ├── gateway_service.rs
+│   │   │   ├── provider_service.rs
+│   │   │   ├── routing_service.rs
+│   │   │   ├── group_service.rs
+│   │   │   ├── settings_service.rs
+│   │   │   ├── log_service.rs
+│   │   │   ├── stats_service.rs
+│   │   │   ├── gateway_key_service.rs
+│   │   │   └── model_mapping_service.rs
+│   │   ├── persistence/          # SQLite 持久化（Repo 模式）
 │   │   ├── models/               # 数据模型
-│   │   │   ├── mod.rs
-│   │   │   ├── provider.rs
-│   │   │   ├── routing_rule.rs
-│   │   │   ├── provider_group.rs
-│   │   │   ├── request_log.rs
-│   │   │   └── gateway_settings.rs
-│   │   └── commands/             # Tauri IPC 命令
-│   │       ├── mod.rs
-│   │       ├── providers.rs
-│   │       ├── routing_rules.rs
-│   │       ├── groups.rs
-│   │       ├── logs.rs
-│   │       ├── settings.rs
-│   │       └── gateway.rs
+│   │   └── commands/mod.rs       # 所有 Tauri IPC 命令（按功能分组）
+│   ├── migrations/               # SQLite 迁移文件（启动时自动执行）
 │   └── Cargo.toml
 ├── docs/                         # 项目文档
 └── public/                       # 静态资源

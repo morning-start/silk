@@ -4,7 +4,13 @@
 
 Silk（丝路）是一个纯本地桌面 AI 多模型网关客户端。提供统一本地 HTTP 端点 `http://127.0.0.1:{port}`，桥接 OpenAI Chat、Claude Messages、OpenAI Response 三种 LLM 协议范式。所有数据停留在本地，无云端组件。
 
+**路由决策顺序**（由高到低）：
+1. 模型映射（`model_mappings`）— 按请求体 `model` 字段匹配，支持多渠道负载均衡与自动失败回退
+2. 路由规则（`routing_rules`）— 按 Host / Path / Method / ContentType 匹配，支持分组
+3. 路径兜底 — 按请求路径推断协议，选取任意启用 Provider
+
 更完整的 HTTP 接口说明见 [网关 API 文档](./网关API文档.md)。
+
 
 ---
 
