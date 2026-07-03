@@ -16,18 +16,15 @@ impl LogRepo {
         } else {
             0
         };
-        let cache_hit = if log.cache_hit.unwrap_or(false) { 1 } else { 0 };
 
         sqlx::query_as::<_, RequestLog>(
             r#"
             INSERT INTO request_logs (id, request_id, method, path, route_id, inbound_protocol, outbound_protocol,
-                                      request_headers, request_body, status_code,
-                                      response_headers, response_body, duration_ms, provider_id,
-                                      error_message, error_code, model_used, retry_count, stream_enabled,
-                                      cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output,
-                                      cost, auth_key_name)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                                      status_code, resp_ms, provider_id,
+                                      error_message, error_code, model_id, model_name, retry_count, stream_enabled,
+                                      auth_key_name, channel_key_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                    $12, $13, $14, $15, $16, $17, $18)
             RETURNING *
             "#,
         )
@@ -38,25 +35,17 @@ impl LogRepo {
         .bind(log.route_id.as_deref())
         .bind(log.inbound_protocol.as_deref())
         .bind(log.outbound_protocol.as_deref())
-        .bind(log.request_headers.as_deref())
-        .bind(log.request_body.as_deref())
         .bind(log.status_code)
-        .bind(log.response_headers.as_deref())
-        .bind(log.response_body.as_deref())
-        .bind(log.duration_ms)
+        .bind(log.resp_ms)
         .bind(log.provider_id.as_deref())
         .bind(log.error_message.as_deref())
         .bind(log.error_code.as_deref())
-        .bind(log.model_used.as_deref())
+        .bind(log.model_id.as_deref())
+        .bind(log.model_name.as_deref())
         .bind(retry_count)
         .bind(stream_enabled)
-        .bind(cache_hit)
-        .bind(log.request_size_bytes)
-        .bind(log.response_size_bytes)
-        .bind(log.tokens_input)
-        .bind(log.tokens_output)
-        .bind(log.cost)
         .bind(log.auth_key_name.as_deref())
+        .bind(log.channel_key_name.as_deref())
         .fetch_one(pool)
         .await
     }
@@ -77,17 +66,14 @@ impl LogRepo {
             } else {
                 0
             };
-            let cache_hit = if log.cache_hit.unwrap_or(false) { 1 } else { 0 };
             let result = sqlx::query(
                 r#"
                 INSERT INTO request_logs (id, request_id, method, path, route_id, inbound_protocol, outbound_protocol,
-                                          request_headers, request_body, status_code,
-                                          response_headers, response_body, duration_ms, provider_id,
-                                          error_message, error_code, model_used, retry_count, stream_enabled,
-                                          cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output,
-                                          cost, auth_key_name)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                            $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                                          status_code, resp_ms, provider_id,
+                                          error_message, error_code, model_id, model_name, retry_count, stream_enabled,
+                                          auth_key_name, channel_key_name)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                            $12, $13, $14, $15, $16, $17, $18)
                 "#,
             )
             .bind(id)
@@ -97,25 +83,17 @@ impl LogRepo {
             .bind(log.route_id.as_deref())
             .bind(log.inbound_protocol.as_deref())
             .bind(log.outbound_protocol.as_deref())
-            .bind(log.request_headers.as_deref())
-            .bind(log.request_body.as_deref())
             .bind(log.status_code)
-            .bind(log.response_headers.as_deref())
-            .bind(log.response_body.as_deref())
-            .bind(log.duration_ms)
+            .bind(log.resp_ms)
             .bind(log.provider_id.as_deref())
             .bind(log.error_message.as_deref())
             .bind(log.error_code.as_deref())
-            .bind(log.model_used.as_deref())
+            .bind(log.model_id.as_deref())
+            .bind(log.model_name.as_deref())
             .bind(retry_count)
             .bind(stream_enabled)
-            .bind(cache_hit)
-            .bind(log.request_size_bytes)
-            .bind(log.response_size_bytes)
-            .bind(log.tokens_input)
-            .bind(log.tokens_output)
-            .bind(log.cost)
             .bind(log.auth_key_name.as_deref())
+            .bind(log.channel_key_name.as_deref())
             .execute(&mut *tx)
             .await?;
             count += result.rows_affected();

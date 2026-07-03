@@ -58,5 +58,6 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         )
     })?;
     ctx.selected_api_key = Some(decrypted);
+    ctx.channel_key_name = Some(selected.name.clone());
     Ok(ctx)
 }

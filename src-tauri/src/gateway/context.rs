@@ -6,9 +6,8 @@ use axum::http::{HeaderMap, Method, Uri};
 use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
-use crate::gateway::group_manager::GroupManager;
 use crate::gateway::header_config::HeaderConfig;
-use crate::models::{GatewaySettings, GroupMember, Provider, RoutingRule};
+use crate::models::{GatewaySettings, Provider, RoutingRule};
 use crate::persistence::RoutingRuleRepo;
 use crate::protocol::AdapterRegistry;
 
@@ -24,7 +23,6 @@ pub struct GatewayContext {
     pub provider_cache: Arc<ProviderCache>,
     pub log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
     pub adapter_registry: Arc<AdapterRegistry>,
-    pub group_manager: Arc<GroupManager>,
     /// 共享的 HTTP 客户端（非流式，带超时）
     pub http_client: reqwest::Client,
     /// 共享的 HTTP 客户端（流式，无超时）
@@ -43,7 +41,6 @@ impl GatewayContext {
         provider_cache: Arc<ProviderCache>,
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
         adapter_registry: Arc<AdapterRegistry>,
-        group_manager: Arc<GroupManager>,
         plugins: Vec<Arc<dyn crate::gateway::plugin::GatewayPlugin>>,
     ) -> Result<Self, String> {
         // 创建共享的 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
@@ -65,7 +62,6 @@ impl GatewayContext {
             provider_cache,
             log_sender,
             adapter_registry,
-            group_manager,
             http_client,
             http_client_streaming,
             header_config: HeaderConfig::default(),
@@ -115,24 +111,11 @@ impl RouteManager {
     ///
     /// 如果规则指向 group，通过 GroupManager 选择一个 Provider；
     /// 如果规则直接指向 provider，返回该 provider_id。
-    /// 同时返回选中的 GroupMember（仅分组路由时有值），用于 LeastConn 连接追踪。
     pub async fn resolve_provider_id(
         &self,
         route: &RoutingRule,
-        group_manager: &GroupManager,
-    ) -> (Option<String>, Option<GroupMember>) {
-        if let Some(ref group_id) = route.target_group_id {
-            // 从分组中选择一个 Provider
-            match group_manager.select_provider(group_id).await {
-                Some(member) => {
-                    let pid = member.provider_id.clone();
-                    (Some(pid), Some(member))
-                }
-                None => (None, None),
-            }
-        } else {
-            (Some(route.target_provider_id.clone()), None)
-        }
+    ) -> Option<String> {
+        Some(route.target_provider_id.clone())
     }
 }
 
@@ -249,6 +232,8 @@ pub struct RequestContextInner {
     pub auth_key_name: Option<String>,
     /// 渠道映射选中的上游 API Key
     pub selected_api_key: Option<String>,
+    /// 渠道映射选中的 Key 名称
+    pub channel_key_name: Option<String>,
     /// 适配器指定的上游 URL（覆盖原始请求 URI）
     pub upstream_url: Option<String>,
     /// 适配器指定的上游 HTTP 方法（覆盖原始请求方法）
@@ -259,8 +244,6 @@ pub struct RequestContextInner {
     pub failed_providers: Vec<String>,
     /// 模型池映射中可用的渠道列表（provider_id），用于失败回退
     pub channels_available: Vec<String>,
-    /// 选中的分组成员（用于 LeastConn 连接追踪），仅路由到分组时设置
-    pub selected_group_member: Option<GroupMember>,
 }
 
 /// 请求上下文 — 整个网关管道的核心数据结构
@@ -355,12 +338,12 @@ impl RequestContext {
                 remote_model_override: None,
                 auth_key_name: None,
                 selected_api_key: None,
+                channel_key_name: None,
                 upstream_url: None,
                 upstream_method: None,
                 failed_keys: Vec::new(),
                 failed_providers: Vec::new(),
                 channels_available: Vec::new(),
-                selected_group_member: None,
             },
             response: None,
         }

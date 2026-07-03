@@ -21,38 +21,6 @@ export interface Provider {
   updated_at: string;
 }
 
-export interface ProviderGroup {
-  id: string;
-  name: string;
-  model_name: string;
-  strategy: string;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface GroupMember {
-  id: string;
-  group_id: string;
-  provider_id: string;
-  weight: number;
-  enabled: boolean;
-}
-
-export interface GroupWithMembers {
-  group: ProviderGroup;
-  members: GroupMemberInfo[];
-}
-
-export interface GroupMemberInfo {
-  id: string;
-  group_id: string;
-  provider_id: string;
-  provider_name: string;
-  weight: number;
-  enabled: boolean;
-}
-
 export interface RoutingRule {
   id: string;
   name: string;
@@ -82,12 +50,16 @@ export interface RequestLog {
   inbound_protocol: string | null;
   outbound_protocol: string | null;
   response_status: number | null;
-  duration_ms: number | null;
+  /** 响应时间（毫秒） */
+  resp_ms: number | null;
   provider_id: string | null;
   provider_name: string | null;
   error_message: string | null;
   error_code: string | null;
-  model_used: string | null;
+  /** 实际使用的模型 ID */
+  model_id: string | null;
+  /** 模型池名称 */
+  model_name: string | null;
   retry_count: number;
   stream_enabled: boolean;
   cache_hit: boolean;
@@ -97,10 +69,10 @@ export interface RequestLog {
   tokens_output: number | null;
   cost: number | null;
   auth_key_name: string | null;
+  channel_key_name: string | null;
 }
 
 export interface GatewaySettings {
-  id: string;
   bind_host: string;
   bind_port: number;
   allow_remote: boolean;
@@ -110,8 +82,6 @@ export interface GatewaySettings {
   rate_limit_enabled: boolean;
   rate_limit_max_requests_per_minute: number;
   rate_limit_max_tokens_per_minute: number;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface GatewayStatus {
@@ -229,17 +199,6 @@ export const api = {
   deleteProvider: (id: string) => invoke<boolean>("delete_provider", { id }),
   testProvider: (id: string) => invoke<ProviderTestResponse>("test_provider", { id }),
 
-  // Groups
-  listGroups: () => invoke<ProviderGroup[]>("list_groups"),
-  getGroup: (id: string) => invoke<GroupWithMembers>("get_group", { id }),
-  createGroup: (data: { name: string; model_name: string; strategy?: string; enabled?: boolean }) =>
-    invoke<ProviderGroup>("create_group", { payload: data }),
-  updateGroup: (id: string, data: Partial<ProviderGroup>) =>
-    invoke<ProviderGroup>("update_group", { id, payload: data }),
-  deleteGroup: (id: string) => invoke<boolean>("delete_group", { id }),
-  addGroupMember: (groupId: string, data: { provider_id: string; weight?: number }) =>
-    invoke<GroupMember>("add_group_member", { groupId, payload: data }),
-  removeGroupMember: (id: string) => invoke<boolean>("remove_group_member", { id }),
 
   // Routing Rules
   listRoutingRules: () => invoke<RoutingRule[]>("list_routing_rules"),
@@ -273,7 +232,6 @@ export const api = {
   listModelMappings: () => invoke<ModelMapping[]>("list_model_mappings"),
   getModelMapping: (id: string) => invoke<ModelMapping>("get_model_mapping", { id }),
   findModelMappingByName: (name: string) => invoke<ModelMapping | null>("find_model_mapping_by_name", { model_name: name }),
-  getGroupProviders: (groupId: string) => invoke<MappingChannelInfo[]>("get_group_providers", { group_id: groupId }),
   createModelMapping: (data: {
     model_name: string;
     strategy?: string;
