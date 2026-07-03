@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
 use crate::load_balancer::{LoadBalanceStrategy, LoadBalancedItem, LoadBalancer};
-use crate::models::Provider;
+use crate::models::{ModelMappingChannel, Provider};
 use crate::persistence::{ModelMappingRepo, ProviderRepo};
+use crate::protocol::AdapterRegistry;
 
 use axum::response::IntoResponse;
 
@@ -35,6 +38,10 @@ impl LoadBalancedItem for ChannelItem {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 公共入口
+// ---------------------------------------------------------------------------
+
 pub async fn run(
     runtime: &GatewayContext,
     mut ctx: RequestContext,
@@ -64,7 +71,9 @@ pub async fn run(
     }
 }
 
-/// 处理 /v1/models 请求：返回本地模型池
+// ===== 阶段1：路由匹配（确定候选集和协议） =====
+
+/// 处理 /v1/models 请求：返回本地模型池（短路，不走上游）
 async fn handle_models_listing(
     runtime: &GatewayContext,
     mut ctx: RequestContext,
@@ -92,7 +101,7 @@ async fn handle_models_listing(
     Ok(ctx)
 }
 
-/// 尝试通过请求体 model 字段匹配模型映射
+/// 路由匹配（1）：通过请求体 model 字段匹配模型映射，用负载均衡选 provider
 ///
 /// 返回 Ok(Some(ctx)) 表示命中并路由成功，Ok(None) 表示未命中需要降级
 async fn try_model_mapping_route(
@@ -106,6 +115,7 @@ async fn try_model_mapping_route(
         None => return Ok(None),
     };
 
+    // 路由匹配：查模型映射表
     let mapping = match ModelMappingRepo::find_by_model_name(&runtime.pool, &request_model).await {
         Ok(Some(m)) if m.enabled != 0 => m,
         _ => return Ok(None),
@@ -116,39 +126,36 @@ async fn try_model_mapping_route(
         _ => return Ok(None),
     };
 
+    // 候选选择：负载均衡从可用渠道中选 provider
     ctx.channels_available = channels.iter().map(|c| c.provider_id.clone()).collect();
 
-    let strategy = LoadBalanceStrategy::from_str(&mapping.strategy);
-    let items: Vec<ChannelItem> = channels.iter().map(|c| ChannelItem { provider_id: c.provider_id.clone() }).collect();
-    let balancer = LoadBalancer::new(items, strategy);
-
-    let selected = match balancer.select() {
+    // 候选选择：负载均衡
+    let (selected_id, selected_models) = match select_via_load_balancer(&channels, &mapping.strategy) {
         Some(s) => s,
         None => return Ok(None),
     };
 
-    let selected_channel = channels.iter().find(|c| c.provider_id == selected.provider_id);
-    if let Some(channel) = selected_channel {
-        let sm = channel.selected_models_vec();
-        apply_model_override(&mut ctx, &request_model, &sm);
-    }
+    // 应用选中渠道的模型覆盖
+    apply_model_override(&mut ctx, &request_model, &selected_models);
 
-    let provider = load_provider_with_cache(runtime, &selected.provider_id, error_ctx).await?;
+    // 上下文填充：加载 provider，推断协议
+    let provider = load_provider_with_cache(runtime, &selected_id, error_ctx).await?;
+    let inbound = detect_inbound_protocol(&ctx.path, json).to_string();
+    let outbound = resolve_protocol_adapter(&provider);
+    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
 
-    ctx.provider = Some(provider);
-    ctx.inbound_protocol = Some(detect_inbound_protocol(&ctx.path, json).to_string());
-    ctx.outbound_protocol = Some(resolve_protocol_adapter(ctx.provider.as_ref().unwrap()));
-    ctx.adapter_registry = Some(runtime.adapter_registry.clone());
     Ok(Some(ctx))
 }
 
-/// 降级路由：RoutingRule 匹配 → default_route_id → default_provider_id
+/// 路由匹配（2）：RoutingRule 匹配 → default_route_id → default_provider_id
 async fn try_route_fallback(
     runtime: &GatewayContext,
     mut ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
-    let route_result = runtime
+
+    // 路由匹配：路由规则表
+    let route = match runtime
         .route_manager
         .resolve(
             ctx.host.as_deref(),
@@ -156,63 +163,16 @@ async fn try_route_fallback(
             &ctx.path,
             ctx.content_type.as_deref(),
         )
-        .await;
-
-    let route = match route_result {
+        .await
+    {
         Some(r) => r,
         None => {
-            // 2.1 路由未命中时，尝试使用 settings 中的默认路由/Provider 兜底
-            let settings = runtime.settings.read().await;
-
-            // 优先尝试 default_route_id
-            if let Some(ref default_route_id) = settings.default_route_id {
-                if !default_route_id.is_empty() {
-                    if let Ok(Some(fallback_route)) =
-                        crate::persistence::RoutingRuleRepo::find_by_id(&runtime.pool, default_route_id).await
-                    {
-                        let (provider_id, group_member) = runtime
-                            .route_manager
-                            .resolve_provider_id(&fallback_route, &runtime.group_manager)
-                            .await;
-
-                        if let Some(pid) = provider_id {
-                            let provider = load_provider_with_cache(runtime, &pid, error_ctx.clone()).await?;
-                            ctx.route = Some(fallback_route.clone());
-                            ctx.provider = Some(provider);
-                            ctx.selected_group_member = group_member;
-                            ctx.inbound_protocol = fallback_route.inbound_protocol.clone();
-                            ctx.outbound_protocol = fallback_route.outbound_protocol.clone();
-                            ctx.adapter_registry = Some(runtime.adapter_registry.clone());
-                            return Ok(ctx);
-                        }
-                    }
-                }
-            }
-
-            // 再尝试 default_provider_id
-            if let Some(ref default_provider_id) = settings.default_provider_id {
-                if !default_provider_id.is_empty() {
-                    let provider = load_provider_with_cache(runtime, default_provider_id, error_ctx.clone()).await?;
-                    // 使用 Provider 的第一个协议做 outbound
-                    let outbound = resolve_protocol_adapter(&provider);
-                    // 用缓存或真实请求体推断入站协议（避免误判为 openai_chat）
-                    let body_json = ctx.get_parsed_body().cloned().unwrap_or(serde_json::Value::Null);
-                    let inbound = detect_inbound_protocol(&ctx.path, &body_json);
-                    ctx.provider = Some(provider);
-                    ctx.inbound_protocol = Some(inbound.to_string());
-                    ctx.outbound_protocol = Some(outbound);
-                    ctx.adapter_registry = Some(runtime.adapter_registry.clone());
-                    return Ok(ctx);
-                }
-            }
-
-            return Err(StageError::new(
-                error_ctx.clone(),
-                GatewayError::NotFound(format!("未找到匹配路由: {} {}", ctx.method, ctx.path)),
-            ));
+            // 路由未命中，走 settings 兜底
+            return try_settings_default(runtime, ctx).await;
         }
     };
 
+    // 候选选择：从路由规则解析 provider_id（含分组负载均衡）
     let (provider_id, group_member) = runtime
         .route_manager
         .resolve_provider_id(&route, &runtime.group_manager)
@@ -225,17 +185,138 @@ async fn try_route_fallback(
         )
     })?;
 
-    let provider = load_provider_with_cache(runtime, &provider_id, error_ctx.clone()).await?;
-
-    ctx.route = Some(route.clone());
-    ctx.provider = Some(provider);
+    // 上下文填充：协议由路由规则指定（为 None 时由下游 transform 自动处理）
+    let provider = load_provider_with_cache(runtime, &provider_id, error_ctx).await?;
+    let inbound = route.inbound_protocol.clone().unwrap_or_default();
+    let outbound = route.outbound_protocol.clone().unwrap_or_default();
+    ctx.route = Some(route);
     ctx.selected_group_member = group_member;
-    ctx.inbound_protocol = route.inbound_protocol.clone();
-    ctx.outbound_protocol = route.outbound_protocol.clone();
-    ctx.adapter_registry = Some(runtime.adapter_registry.clone());
+    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
 
     Ok(ctx)
 }
+
+/// 路由匹配（2b）：settings 中的默认路由/Provider 兜底（try_route_fallback 的内部降级）
+async fn try_settings_default(
+    runtime: &GatewayContext,
+    mut ctx: RequestContext,
+) -> Result<RequestContext, StageError> {
+    let error_ctx = ctx.clone();
+    let settings = runtime.settings.read().await;
+
+    // 优先尝试 default_route_id
+    if let Some(ref default_route_id) = settings.default_route_id {
+        if !default_route_id.is_empty() {
+            if let Ok(Some(fallback_route)) =
+                crate::persistence::RoutingRuleRepo::find_by_id(&runtime.pool, default_route_id).await
+            {
+                let (provider_id, group_member) = runtime
+                    .route_manager
+                    .resolve_provider_id(&fallback_route, &runtime.group_manager)
+                    .await;
+
+                if let Some(pid) = provider_id {
+                    let provider = load_provider_with_cache(runtime, &pid, error_ctx.clone()).await?;
+                    let inbound = fallback_route.inbound_protocol.clone().unwrap_or_default();
+                    let outbound = fallback_route.outbound_protocol.clone().unwrap_or_default();
+                    ctx.route = Some(fallback_route);
+                    ctx.selected_group_member = group_member;
+                    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
+                    return Ok(ctx);
+                }
+            }
+        }
+    }
+
+    // 再尝试 default_provider_id
+    if let Some(ref default_provider_id) = settings.default_provider_id {
+        if !default_provider_id.is_empty() {
+            let provider = load_provider_with_cache(runtime, default_provider_id, error_ctx.clone()).await?;
+            let outbound = resolve_protocol_adapter(&provider);
+            let body_json = ctx.get_parsed_body().cloned().unwrap_or(serde_json::Value::Null);
+            let inbound = detect_inbound_protocol(&ctx.path, &body_json).to_string();
+            fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
+            return Ok(ctx);
+        }
+    }
+
+    Err(StageError::new(
+        error_ctx.clone(),
+        GatewayError::NotFound(format!("未找到匹配路由: {} {}", ctx.method, ctx.path)),
+    ))
+}
+
+/// 路由匹配（3）：路径兜底，选择任意启用 Provider
+///
+/// 当没有显式路由规则或模型映射匹配时使用。
+/// 检测入站协议 → 选择任意启用 Provider → 利用现有协议转换能力处理协议不匹配。
+async fn try_path_based_default(
+    runtime: &GatewayContext,
+    mut ctx: RequestContext,
+) -> Result<RequestContext, StageError> {
+    let error_ctx = ctx.clone();
+
+    // 路由匹配：路径推断协议
+    let body_json = ctx.get_parsed_body().cloned().unwrap_or(serde_json::Value::Null);
+    let inbound = detect_inbound_protocol(&ctx.path, &body_json).to_string();
+
+    // 候选选择：取第一个可用 Provider
+    let providers = match ProviderRepo::find_enabled(&runtime.pool).await {
+        Ok(p) if !p.is_empty() => p,
+        Ok(_) => {
+            return Err(StageError::new(
+                error_ctx,
+                GatewayError::NotFound(
+                    "未找到可用的渠道（Provider），请先添加并启用至少一个渠道".to_string(),
+                ),
+            ));
+        }
+        Err(e) => {
+            return Err(StageError::new(error_ctx, GatewayError::Database(e)));
+        }
+    };
+
+    let provider = providers.into_iter().next().unwrap();
+    let outbound = resolve_protocol_adapter(&provider);
+
+    tracing::info!(
+        "[path_based_default] inbound={inbound}, outbound={outbound}, provider={}",
+        provider.name
+    );
+
+    // 上下文填充
+    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
+
+    Ok(ctx)
+}
+
+// ===== 阶段2：候选选择（从候选中选一个 Provider） =====
+
+/// 从模型映射渠道中通过负载均衡选择一条渠道
+fn select_via_load_balancer(
+    channels: &[ModelMappingChannel],
+    strategy: &str,
+) -> Option<(String, Vec<String>)> {
+    let strategy = LoadBalanceStrategy::from_str(strategy);
+    let items: Vec<ChannelItem> = channels
+        .iter()
+        .map(|c| ChannelItem { provider_id: c.provider_id.clone() })
+        .collect();
+    let balancer = LoadBalancer::new(items, strategy);
+    let selected = balancer.select()?;
+
+    let selected_models = channels
+        .iter()
+        .find(|c| c.provider_id == selected.provider_id)
+        .map(|c| c.selected_models_vec())
+        .unwrap_or_default();
+
+    Some((selected.provider_id.clone(), selected_models))
+}
+
+// ---------------------------------------------------------------------------
+// 候选选择辅助：失败回退换渠道
+// ---------------------------------------------------------------------------
 
 /// 失败回退：从 channels_available 中选择下一个未失败的渠道
 ///
@@ -244,7 +325,7 @@ pub async fn try_next_channel(
     runtime: &GatewayContext,
     mut ctx: RequestContext,
 ) -> Option<RequestContext> {
-    // 从 channels_available 中找第一个未失败的 provider
+    // 候选选择：从 channels_available 中找第一个未失败的 provider
     let next_provider_id = ctx
         .channels_available
         .iter()
@@ -272,29 +353,46 @@ pub async fn try_next_channel(
                 if let Ok(channels) =
                     ModelMappingRepo::find_enabled_channels(&runtime.pool, &mapping.id).await
                 {
-                    if let Some(channel) = channels.iter().find(|c| c.provider_id == next_provider_id)
-                    {
-                        let sm = channel.selected_models_vec();
-                        apply_model_override(&mut ctx, original_model, &sm);
+                    if let Some(channel) = channels.iter().find(|c| c.provider_id == next_provider_id) {
+                        apply_model_override(&mut ctx, original_model, &channel.selected_models_vec());
                     }
                 }
             }
         }
     }
 
-    // 协议推断（使用缓存的请求体避免被覆盖干扰）
+    // 上下文填充（使用缓存的请求体避免被覆盖干扰）
     let inbound_body = ctx.get_parsed_body().cloned().unwrap_or_default();
-    let inbound_adapter = detect_inbound_protocol(&ctx.path, &inbound_body);
-    let outbound_adapter = resolve_protocol_adapter(&provider);
-    ctx.provider = Some(provider);
-    ctx.inbound_protocol = Some(inbound_adapter.to_string());
-    ctx.outbound_protocol = Some(outbound_adapter);
+    let inbound = detect_inbound_protocol(&ctx.path, &inbound_body).to_string();
+    let outbound = resolve_protocol_adapter(&provider);
+    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
     // 重置 Key 相关的失败记录（新渠道从头开始试 Key）
     ctx.failed_keys.clear();
     ctx.selected_api_key = None;
 
     Some(ctx)
 }
+
+// ===== 阶段3：上下文填充：统一写入路由决策结果 =====
+
+/// 将路由决策结果写入请求上下文（provider + 协议 + 适配器注册表）
+///
+/// 所有 try_* 函数在确定 provider 和协议后，统一通过此函数填充上下文，
+/// 避免在各个路由分支中重复散落相同的字段赋值。
+fn fill_routing_context(
+    ctx: &mut RequestContext,
+    provider: Provider,
+    inbound: String,
+    outbound: String,
+    adapter_registry: Arc<AdapterRegistry>,
+) {
+    ctx.provider = Some(provider);
+    ctx.inbound_protocol = Some(inbound);
+    ctx.outbound_protocol = Some(outbound);
+    ctx.adapter_registry = Some(adapter_registry);
+}
+
+// ===== 工具函数：协议推断 =====
 
 /// 从请求路径 + 请求体中检测客户端使用的入站协议
 ///
@@ -303,54 +401,6 @@ pub async fn try_next_channel(
 ///    /v1/responses → openai_response, /v1/messages → claude_messages
 /// 2. 请求体 JSON 顶层键（兜底）：有 "input" → openai_response,
 ///    有 "messages" → openai_chat, 其他 → openai_chat
-/// 路径兜底路由：根据请求路径自动选择可用 Provider
-///
-/// 当没有显式路由规则或模型映射匹配时使用。
-/// 检测入站协议 → 选择任意启用 Provider → 利用现有协议转换能力处理协议不匹配。
-async fn try_path_based_default(
-    runtime: &GatewayContext,
-    mut ctx: RequestContext,
-) -> Result<RequestContext, StageError> {
-    let error_ctx = ctx.clone();
-
-    // 检测入站协议（从路径推断）
-    let body_json = ctx.get_parsed_body().cloned().unwrap_or(serde_json::Value::Null);
-    let inbound = detect_inbound_protocol(&ctx.path, &body_json);
-
-    // 获取所有启用 Provider
-    let providers = match ProviderRepo::find_enabled(&runtime.pool).await {
-        Ok(p) if !p.is_empty() => p,
-        Ok(_) => {
-            return Err(StageError::new(
-                error_ctx,
-                GatewayError::NotFound("未找到可用的渠道（Provider），请先添加并启用至少一个渠道".to_string()),
-            ));
-        }
-        Err(e) => {
-            return Err(StageError::new(
-                error_ctx,
-                GatewayError::Database(e),
-            ));
-        }
-    };
-
-    // 选择第一个可用 Provider（单用户场景足够；如有多个可用分组后用负载均衡）
-    let provider = providers.into_iter().next().unwrap();
-    let outbound = resolve_protocol_adapter(&provider);
-
-    tracing::info!(
-        "[path_based_default] inbound={inbound}, outbound={outbound}, provider={}",
-        provider.name
-    );
-
-    ctx.provider = Some(provider);
-    ctx.inbound_protocol = Some(inbound.to_string());
-    ctx.outbound_protocol = Some(outbound);
-    ctx.adapter_registry = Some(runtime.adapter_registry.clone());
-
-    Ok(ctx)
-}
-
 fn detect_inbound_protocol(path: &str, body: &serde_json::Value) -> &'static str {
     match path {
         "/v1/chat/completions" => return "openai_chat",
@@ -394,6 +444,8 @@ fn resolve_protocol_adapter(provider: &Provider) -> String {
     "openai_chat".to_string()
 }
 
+// ===== 工具函数：缓存加载 =====
+
 /// 从缓存加载 Provider，miss 或过期则从 DB 加载并回填缓存
 async fn load_provider_with_cache(
     runtime: &GatewayContext,
@@ -416,6 +468,8 @@ async fn load_provider_with_cache(
         Err(err) => Err(StageError::new(error_ctx, GatewayError::Database(err))),
     }
 }
+
+// ===== 工具函数：模型覆盖 =====
 
 /// 应用模型覆盖逻辑
 fn apply_model_override(

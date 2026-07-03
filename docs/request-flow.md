@@ -54,6 +54,9 @@ flowchart TD
   *   **`PromptCachePlugin`**：自动为 Claude 注入 `cache_control` 标记。
   *   **`SlidingWindowPlugin`**：滑动窗口，自动裁剪历史对话。
   *   **`TerminalLogPrunerPlugin`**：控制台/终端大段编译输出日志压缩折叠。
-- 请求先按 `routing_rules`（Host/Path/Method/ContentType）匹配路由，匹配成功后选择对应 Provider；若未匹配到路由规则，再按 body 里的 `model` 走模型映射兜底。
+- 路由决策优先级（由高到低）：
+  1. **模型映射优先**：先读取请求体 `model` 字段，在 `model_mappings` 表中查找启用映射。命中后按映射配置的负载均衡策略选定 Provider 渠道，支持自动回退。
+  2. **路由规则降级**：模型映射未命中时，再按 `RoutingRule` 匹配（Host + Path + Method + ContentType）。
+  3. **路径兜底**：路由规则也未命中时，按请求路径自动推断协议，选择任意启用的 Provider。
 - 日志是异步写入 SQLite，不阻塞主请求。
 - 三级失败回退：单次请求重试 → 换 Key → 换渠道。
