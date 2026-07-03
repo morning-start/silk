@@ -22,10 +22,6 @@ use tauri::State;
 
 use crate::application::gateway_key_service as gks;
 use crate::application::gateway_service::{self, GatewayStartResponse, GatewayStatusResponse, GatewayStopResponse};
-use crate::application::group_service::{
-    self as gs, AddMemberPayload, CreateGroupPayload, GroupWithMembersResponse, UpdateGroupPayload,
-    UpdateMemberPayload,
-};
 use crate::application::log_service;
 use crate::application::model_mapping_service as mms;
 use crate::application::provider_service::{
@@ -69,7 +65,7 @@ pub async fn gateway_restart(state: State<'_, AppState>) -> Result<GatewayStartR
 
 #[tauri::command]
 pub async fn get_gateway_settings() -> Result<GatewaySettingsResponse, String> {
-    settings_service::get().await.map_err(|e| e.to_string())
+    settings_service::get().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -165,70 +161,6 @@ pub async fn update_routing_rule(
 #[tauri::command]
 pub async fn delete_routing_rule(state: State<'_, AppState>, id: String) -> Result<bool, String> {
     routing_service::delete(state.inner(), id).await.map_err(|e| e.to_string())
-}
-
-// ============================================================================
-// Group Commands
-// ============================================================================
-
-#[tauri::command]
-pub async fn list_groups() -> Result<Vec<crate::models::ProviderGroup>, String> {
-    gs::list().await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn find_groups_by_model(model_name: String) -> Result<Vec<crate::models::ProviderGroup>, String> {
-    gs::find_by_model(model_name).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn get_group(id: String) -> Result<GroupWithMembersResponse, String> {
-    gs::get(id).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn create_group(
-    state: State<'_, AppState>,
-    payload: CreateGroupPayload,
-) -> Result<crate::models::ProviderGroup, String> {
-    gs::create(state.inner(), payload).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn update_group(
-    state: State<'_, AppState>,
-    id: String,
-    payload: UpdateGroupPayload,
-) -> Result<crate::models::ProviderGroup, String> {
-    gs::update(state.inner(), id, payload).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn delete_group(state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    gs::delete(state.inner(), id).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn add_group_member(
-    state: State<'_, AppState>,
-    group_id: String,
-    payload: AddMemberPayload,
-) -> Result<crate::models::GroupMember, String> {
-    gs::add_member(state.inner(), group_id, payload).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn update_group_member(
-    state: State<'_, AppState>,
-    id: String,
-    payload: UpdateMemberPayload,
-) -> Result<crate::models::GroupMember, String> {
-    gs::update_member(state.inner(), id, payload).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn remove_group_member(state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    gs::remove_member(state.inner(), id).await.map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -405,12 +337,4 @@ pub async fn update_model_mapping(
 #[tauri::command]
 pub async fn delete_model_mapping(_state: State<'_, AppState>, id: String) -> Result<bool, String> {
     mms::delete(id).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn get_group_providers(
-    _state: State<'_, AppState>,
-    group_id: String,
-) -> Result<Vec<crate::models::GroupProviderInfo>, String> {
-    mms::get_group_providers(group_id).await.map_err(|e| e.to_string())
 }

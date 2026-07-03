@@ -7,9 +7,7 @@ use tokio::sync::RwLock;
 
 use crate::error::ServiceError;
 use crate::gateway::context::{GatewayContext, ProviderCache, RouteManager};
-use crate::gateway::group_manager::GroupManager;
 use crate::gateway::{spawn_gateway_server};
-use crate::persistence::GatewaySettingsRepo;
 use crate::protocol::AdapterRegistry;
 use crate::AppState;
 
@@ -22,15 +20,12 @@ pub struct GatewayStatusResponse {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GatewaySettingsInfo {
-    pub id: String,
     pub bind_host: String,
     pub bind_port: i64,
     pub allow_remote: bool,
     pub log_retention_days: i64,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -150,17 +145,18 @@ pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResp
     })
 }
 
-/// 加载网关上下文（从 DB 读取设置、路由规则、分组等）
+/// 加载网关上下文（从 DB 读取路由规则、从文件读取设置等）
 pub async fn load_gateway_context(
     pool: SqlitePool,
     log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
 ) -> Result<GatewayContext, sqlx::Error> {
-    let settings = GatewaySettingsRepo::load_effective(&pool).await?;
+    let settings_path = crate::get_settings_path().ok_or_else(|| {
+        sqlx::Error::Protocol("网关设置路径未初始化".to_string())
+    })?;
+    let settings = crate::persistence::GatewaySettingsRepo::load_effective(settings_path);
     let route_manager = RouteManager::load(&pool).await?;
     let provider_cache = Arc::new(ProviderCache::new(Duration::from_secs(300)));
     let adapter_registry = Arc::new(AdapterRegistry::new());
-    let group_manager = Arc::new(GroupManager::new());
-    group_manager.load(&pool).await?;
 
     let plugins = crate::gateway::plugins::default_token_saving_plugins();
 
@@ -171,7 +167,6 @@ pub async fn load_gateway_context(
         provider_cache,
         log_sender,
         adapter_registry,
-        group_manager,
         plugins,
     ).map_err(|e| sqlx::Error::Protocol(e))?)
 }
@@ -179,15 +174,12 @@ pub async fn load_gateway_context(
 impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
     fn from(settings: &crate::models::GatewaySettings) -> Self {
         Self {
-            id: settings.id.clone(),
             bind_host: settings.bind_host.clone(),
             bind_port: settings.bind_port,
-            allow_remote: settings.allow_remote != 0,
+            allow_remote: settings.allow_remote,
             log_retention_days: settings.log_retention_days,
             default_provider_id: settings.default_provider_id.clone(),
             default_route_id: settings.default_route_id.clone(),
-            created_at: settings.created_at.to_string(),
-            updated_at: settings.updated_at.to_string(),
         }
     }
 }
