@@ -16,11 +16,9 @@ import {
   GridOutline,
   PeopleOutline,
   CubeOutline,
-  LayersOutline,
   GitBranchOutline,
   DocumentTextOutline,
   SettingsOutline,
-  CodeSlashOutline,
   StatsChartOutline,
   AnalyticsOutline,
   MoonOutline,
@@ -45,7 +43,6 @@ const menuOptions = [
   { label: "渠道管理", key: "services", type: "group" as const, children: [
     { label: "渠道管理", key: "/providers", icon: () => h(NIcon, null, { default: () => h(PeopleOutline) }) },
     { label: "模型池", key: "/model-square", icon: () => h(NIcon, null, { default: () => h(CubeOutline) }) },
-    { label: "分组管理", key: "/groups", icon: () => h(NIcon, null, { default: () => h(LayersOutline) }) },
     { label: "路由规则", key: "/routing-rules", icon: () => h(NIcon, null, { default: () => h(GitBranchOutline) }) },
   ]},
   { type: "divider" as const, key: "d2" },
@@ -57,7 +54,6 @@ const menuOptions = [
   { type: "divider" as const, key: "d3" },
   { label: "系统", key: "system", type: "group" as const, children: [
     { label: "系统设置", key: "/settings", icon: () => h(NIcon, null, { default: () => h(SettingsOutline) }) },
-    { label: "API 调试", key: "/debugger", icon: () => h(NIcon, null, { default: () => h(CodeSlashOutline) }) },
   ]},
 ];
 
@@ -154,7 +150,7 @@ onErrorCaptured((err, _instance, info) => {
     </NLayoutSider>
 
     <!-- Main Content -->
-    <NLayout>
+    <NLayout class="main-area">
       <!-- Topbar -->
       <NLayoutHeader bordered class="app-topbar">
         <div class="topbar-inner">
@@ -233,6 +229,11 @@ onErrorCaptured((err, _instance, info) => {
 <style scoped>
 .app-layout {
   height: 100vh;
+}
+
+/* 主区域：撑满侧边栏右侧的剩余垂直空间 */
+.main-area {
+  height: 100%;
 }
 
 .app-sidebar {
@@ -441,8 +442,6 @@ onErrorCaptured((err, _instance, info) => {
 /* Content area */
 .app-content {
   background: var(--content-bg, #f8fafc);
-  min-height: calc(100vh - 56px);
-  overflow-y: auto;
 }
 
 /* Error Boundary */
