@@ -176,11 +176,3 @@ pub async fn delete(id: String) -> Result<bool, ServiceError> {
     let pool = require_db()?;
     ModelMappingRepo::delete(pool, &id).await.map_err(ServiceError::from)
 }
-
-/// 查询分组内的渠道信息
-pub async fn get_group_providers(group_id: String) -> Result<Vec<crate::models::GroupProviderInfo>, ServiceError> {
-    let pool = require_db()?;
-    ModelMappingRepo::find_group_providers(pool, &group_id)
-        .await
-        .map_err(ServiceError::from)
-}

@@ -102,16 +102,6 @@ pub struct MappingChannelInfo {
     pub enabled: bool,
 }
 
-/// 分组内渠道概要信息（废弃，保留兼容）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupProviderInfo {
-    pub id: String,
-    pub name: String,
-    pub protocols: Vec<String>,
-    pub models_count: i64,
-    pub health_status: Option<String>,
-}
-
 impl ModelMapping {
     /// 解析能力标签为 Vec
     pub fn capabilities_vec(&self) -> Vec<String> {
