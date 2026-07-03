@@ -67,11 +67,11 @@ const columns: DataTableColumns<RequestLog> = [
   },
   {
     title: "耗时",
-    key: "duration_ms",
+    key: "resp_ms",
     width: 80,
     render(row) {
-      if (row.duration_ms == null) return "-";
-      return h("span", { class: "num" }, `${row.duration_ms}ms`);
+      if (row.resp_ms == null) return "-";
+      return h("span", { class: "num" }, `${row.resp_ms}ms`);
     },
   },
   {
@@ -92,7 +92,12 @@ const columns: DataTableColumns<RequestLog> = [
       return h("span", { class: "num" }, `$${row.cost.toFixed(6)}`);
     },
   },
-  { title: "模型", key: "model_used", width: 110 },
+  { title: "模型", key: "model_id", width: 110,
+    render(row) {
+      if (row.model_name) return `${row.model_name} (${row.model_id})`;
+      return row.model_id || "-";
+    },
+  },
   { title: "渠道", key: "provider_name", width: 120,
     render(row) {
       const label = row.provider_name || row.provider_id || "-";
@@ -299,7 +304,7 @@ onMounted(() => {
         </div>
         <div class="detail-row">
           <span class="detail-label">耗时：</span>
-          <span class="detail-value">{{ selectedLog.duration_ms }}ms</span>
+          <span class="detail-value">{{ selectedLog.resp_ms }}ms</span>
         </div>
         <div class="detail-row" v-if="selectedLog.inbound_protocol || selectedLog.outbound_protocol">
           <span class="detail-label">协议(入→出)：</span>
@@ -316,13 +321,18 @@ onMounted(() => {
           <span class="detail-value">{{ selectedLog.provider_name || selectedLog.provider_id }}</span>
           <span v-if="selectedLog.provider_name && selectedLog.provider_name !== selectedLog.provider_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.provider_id }})</span>
         </div>
-        <div class="detail-row" v-if="selectedLog.model_used">
+        <div class="detail-row" v-if="selectedLog.model_id || selectedLog.model_name">
           <span class="detail-label">模型：</span>
-          <span class="detail-value">{{ selectedLog.model_used }}</span>
+          <span class="detail-value">{{ selectedLog.model_name || selectedLog.model_id }}</span>
+          <span v-if="selectedLog.model_name && selectedLog.model_id && selectedLog.model_name !== selectedLog.model_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.model_id }})</span>
         </div>
         <div class="detail-row" v-if="selectedLog.auth_key_name">
           <span class="detail-label">认证 Key：</span>
           <NTag size="small" type="success">{{ selectedLog.auth_key_name }}</NTag>
+        </div>
+        <div class="detail-row" v-if="selectedLog.channel_key_name">
+          <span class="detail-label">渠道 Key：</span>
+          <NTag size="small" type="info">{{ selectedLog.channel_key_name }}</NTag>
         </div>
         <div class="detail-row">
           <span class="detail-label">请求大小：</span>
@@ -373,35 +383,7 @@ onMounted(() => {
 
 <style scoped>
 .logs-page {
-  max-width: 1200px;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.table-card {
-  border-radius: 12px;
+  width: 100%;
 }
 
 .pagination-bar {
@@ -409,20 +391,6 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-top: 16px;
-}
-
-.text-mono {
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 12px;
-}
-
-.text-sm {
-  font-size: 12px;
-}
-
-.num {
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 12px;
 }
 
 .log-detail {

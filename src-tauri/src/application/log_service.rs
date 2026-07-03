@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::error::{require_db, ServiceError};
 use crate::models::RequestLog;
-use crate::persistence::{LogRepo, StatsRepo};
+use crate::persistence::{LogExtraTokenRepo, LogRepo, StatsRepo};
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -22,12 +22,16 @@ pub struct LogResponse {
     pub inbound_protocol: Option<String>,
     pub outbound_protocol: Option<String>,
     pub response_status: Option<i64>,
-    pub duration_ms: Option<i64>,
+    /// 响应时间（毫秒）
+    pub resp_ms: Option<i64>,
     pub provider_id: Option<String>,
     pub provider_name: Option<String>,
     pub error_message: Option<String>,
     pub error_code: Option<String>,
-    pub model_used: Option<String>,
+    /// 实际使用的模型 ID
+    pub model_id: Option<String>,
+    /// 模型池名称
+    pub model_name: Option<String>,
     pub retry_count: i64,
     pub stream_enabled: bool,
     pub cache_hit: bool,
@@ -37,6 +41,8 @@ pub struct LogResponse {
     pub tokens_output: Option<i64>,
     pub cost: Option<f64>,
     pub auth_key_name: Option<String>,
+    /// 使用的渠道 Key 名称
+    pub channel_key_name: Option<String>,
 }
 
 impl LogResponse {
@@ -48,6 +54,30 @@ impl LogResponse {
             .cloned();
         let mut resp = Self::from(log);
         resp.provider_name = provider_name;
+        resp
+    }
+
+    /// 从主表 + 扩展表构造 LogResponse
+    pub fn from_log_with_extras(
+        log: RequestLog,
+        extras: Option<crate::models::RequestLogExtraToken>,
+        cache: &HashMap<String, String>,
+    ) -> Self {
+        let provider_name = log
+            .provider_id
+            .as_ref()
+            .and_then(|id| cache.get(id))
+            .cloned();
+        let mut resp = Self::from(log);
+        resp.provider_name = provider_name;
+        if let Some(extra) = extras {
+            resp.cache_hit = extra.cache_hit != 0;
+            resp.request_size_bytes = extra.request_size_bytes;
+            resp.response_size_bytes = extra.response_size_bytes;
+            resp.tokens_input = extra.tokens_input;
+            resp.tokens_output = extra.tokens_output;
+            resp.cost = extra.cost;
+        }
         resp
     }
 }
@@ -64,21 +94,23 @@ impl From<RequestLog> for LogResponse {
             inbound_protocol: l.inbound_protocol,
             outbound_protocol: l.outbound_protocol,
             response_status: l.status_code,
-            duration_ms: l.duration_ms,
+            resp_ms: l.resp_ms,
             provider_id: l.provider_id,
             provider_name: None,
             error_message: l.error_message,
             error_code: l.error_code,
-            model_used: l.model_used,
+            model_id: l.model_id,
+            model_name: l.model_name,
             retry_count: l.retry_count,
             stream_enabled: l.stream_enabled != 0,
-            cache_hit: l.cache_hit != 0,
-            request_size_bytes: l.request_size_bytes,
-            response_size_bytes: l.response_size_bytes,
-            tokens_input: l.tokens_input,
-            tokens_output: l.tokens_output,
-            cost: l.cost,
+            cache_hit: false,
+            request_size_bytes: None,
+            response_size_bytes: None,
+            tokens_input: None,
+            tokens_output: None,
+            cost: None,
             auth_key_name: l.auth_key_name,
+            channel_key_name: l.channel_key_name,
         }
     }
 }
@@ -101,7 +133,7 @@ pub struct ExportLogsResponse {
 // Service Functions
 // ---------------------------------------------------------------------------
 
-/// 分页查询日志
+/// 分页查询日志（包含扩展信息）
 pub async fn list(
     state: &AppState,
     limit: Option<i64>,
@@ -115,8 +147,22 @@ pub async fn list(
     let logs = LogRepo::find_paginated(pool, limit, offset).await?;
     let total = LogRepo::count(pool).await?;
 
+    // 批量查询扩展信息（优化：避免 N+1）
+    let request_ids: Vec<String> = logs.iter().map(|l| l.request_id.clone()).collect();
+    let extras = LogExtraTokenRepo::find_by_request_ids(pool, &request_ids).await?;
+    let extras_map: HashMap<String, crate::models::RequestLogExtraToken> = extras
+        .into_iter()
+        .map(|e| (e.request_id.clone(), e))
+        .collect();
+
     Ok(ListLogsResponse {
-        logs: logs.into_iter().map(|l| LogResponse::from_log(l, &cache)).collect(),
+        logs: logs
+            .into_iter()
+            .map(|l| {
+                let extra = extras_map.get(&l.request_id).cloned();
+                LogResponse::from_log_with_extras(l, extra, &cache)
+            })
+            .collect(),
         total,
         limit,
         offset,
@@ -153,8 +199,16 @@ pub async fn export_csv(
         LogRepo::find_paginated(pool, limit, offset).await?
     };
 
+    // 批量查询扩展信息（tokens）
+    let request_ids: Vec<String> = logs.iter().map(|l| l.request_id.clone()).collect();
+    let extras = LogExtraTokenRepo::find_by_request_ids(pool, &request_ids).await?;
+    let extras_map: HashMap<String, crate::models::RequestLogExtraToken> = extras
+        .into_iter()
+        .map(|e| (e.request_id.clone(), e))
+        .collect();
+
     let mut csv_content = String::new();
-    csv_content.push_str("id,request_id,timestamp,method,path,status_code,duration_ms,provider_id,model_used,tokens_input,tokens_output,error_message\n");
+    csv_content.push_str("id,request_id,timestamp,method,path,status_code,resp_ms,provider_id,model_id,model_name,tokens_input,tokens_output,error_message\n");
 
     // CSV 字段转义：含逗号/换行/引号的字段用双引号包裹
     fn csv_escape(field: &str) -> String {
@@ -166,19 +220,21 @@ pub async fn export_csv(
     }
 
     for log in &logs {
+        let extra = extras_map.get(&log.request_id);
         csv_content.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
             csv_escape(&log.id),
             csv_escape(&log.request_id),
             csv_escape(&log.timestamp.to_string()),
             csv_escape(&log.method),
             csv_escape(&log.path),
             log.status_code.unwrap_or(0),
-            log.duration_ms.unwrap_or(0),
+            log.resp_ms.unwrap_or(0),
             csv_escape(log.provider_id.as_deref().unwrap_or("")),
-            csv_escape(log.model_used.as_deref().unwrap_or("")),
-            log.tokens_input.unwrap_or(0),
-            log.tokens_output.unwrap_or(0),
+            csv_escape(log.model_id.as_deref().unwrap_or("")),
+            csv_escape(log.model_name.as_deref().unwrap_or("")),
+            extra.and_then(|e| e.tokens_input).unwrap_or(0),
+            extra.and_then(|e| e.tokens_output).unwrap_or(0),
             csv_escape(log.error_message.as_deref().unwrap_or("")),
         ));
     }
