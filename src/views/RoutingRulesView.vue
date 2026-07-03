@@ -20,16 +20,13 @@ import {
 import { useRoutingRulesStore } from "../stores/routingRules";
 import { AlertCircleOutline } from "@vicons/ionicons5";
 import { useProvidersStore } from "../stores/providers";
-import { useGroupsStore } from "../stores/groups";
 import { storeToRefs } from "pinia";
 import type { RoutingRule } from "../api";
 
 const rulesStore = useRoutingRulesStore();
 const providersStore = useProvidersStore();
-const groupsStore = useGroupsStore();
 const { rules, loading, error } = storeToRefs(rulesStore);
 const { providers } = storeToRefs(providersStore);
-const { groups } = storeToRefs(groupsStore);
 const message = useMessage();
 const dialog = useDialog();
 
@@ -42,7 +39,6 @@ const formValue = ref<any>({
   match_method: "*",
   match_content_type: "",
   target_provider_id: "",
-  target_group_id: null,
   protocol_conversion: true,
   model_name_override: "",
   priority: 100,
@@ -80,10 +76,6 @@ const columns: DataTableColumns<RoutingRule> = [
     key: "target",
     width: 150,
     render(row) {
-      if (row.target_group_id) {
-        const g = groups.value.find((gr) => gr.id === row.target_group_id);
-        return h(NTag, { size: "small", type: "success" }, { default: () => `分组: ${g?.name || row.target_group_id}` });
-      }
       const p = providers.value.find((pr) => pr.id === row.target_provider_id);
       return h(NTag, { size: "small", type: "primary" }, { default: () => p?.name || row.target_provider_id });
     },
@@ -133,7 +125,6 @@ function handleAdd() {
     match_method: "*",
     match_content_type: "",
     target_provider_id: "",
-    target_group_id: null,
     protocol_conversion: true,
     model_name_override: "",
     priority: 100,
@@ -145,7 +136,6 @@ function handleAdd() {
 function handleEdit(row: RoutingRule) {
   editingId.value = row.id;
   formValue.value = { ...row };
-  targetType.value = row.target_group_id ? "group" : "provider";
   showModal.value = true;
 }
 
@@ -190,12 +180,9 @@ async function handleSubmit() {
   }
 }
 
-const targetType = ref<"provider" | "group">("provider");
-
 onMounted(() => {
   rulesStore.fetchAll();
   providersStore.fetchAll();
-  groupsStore.fetchAll();
 });
 </script>
 
@@ -269,33 +256,11 @@ onMounted(() => {
             <NInput v-model:value="formValue.match_content_type" placeholder="可选" />
           </NFormItem>
         </div>
-        <NFormItem label="目标类型">
-          <NSelect
-            :value="formValue.target_group_id ? 'group' : 'provider'"
-            @update:value="(v: string) => {
-              targetType = v as any;
-              if (v === 'group') { formValue.target_provider_id = ''; }
-              else { formValue.target_group_id = null; }
-            }"
-            :options="[
-              { label: '单个渠道', value: 'provider' },
-              { label: '负载均衡分组', value: 'group' },
-            ]"
-          />
-        </NFormItem>
-        <NFormItem v-if="!formValue.target_group_id" label="目标渠道">
+        <NFormItem label="目标渠道">
           <NSelect
             v-model:value="formValue.target_provider_id"
             :options="providers.map((p) => ({ label: p.name, value: p.id }))"
             placeholder="选择渠道"
-            clearable
-          />
-        </NFormItem>
-        <NFormItem v-if="formValue.target_group_id || targetType === 'group'" label="目标分组">
-          <NSelect
-            v-model:value="formValue.target_group_id"
-            :options="groups.map((g) => ({ label: g.name, value: g.id }))"
-            placeholder="选择分组"
             clearable
           />
         </NFormItem>
@@ -328,71 +293,6 @@ onMounted(() => {
 
 <style scoped>
 .rules-page {
-  max-width: 1200px;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.table-card {
-  border-radius: 12px;
-}
-
-.form-row {
-  display: flex;
-  gap: 12px;
-}
-
-.text-mono {
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
-  font-size: 12px;
-}
-
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 24px;
-  text-align: center;
-}
-
-.error-icon {
-  margin-bottom: 16px;
-}
-
-.error-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-color, #1e293b);
-  margin: 0 0 8px;
-}
-
-.error-desc {
-  font-size: 13px;
-  color: var(--text-color-3, #94a3b8);
-  margin: 0 0 20px;
-  max-width: 400px;
+  width: 100%;
 }
 </style>
