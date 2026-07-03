@@ -9,7 +9,7 @@ pub mod persistence;
 pub mod protocol;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use sqlx::sqlite::SqliteConnectOptions;
@@ -23,6 +23,9 @@ use crate::gateway::{GatewayContext, GatewayServerHandle};
 
 /// 数据库连接池（全局唯一）
 static DB_POOL: tokio::sync::OnceCell<SqlitePool> = tokio::sync::OnceCell::const_new();
+
+/// 网关设置文件路径（全局唯一）
+static SETTINGS_PATH: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
 
 /// 运行时网关状态
 #[derive(Clone)]
@@ -44,16 +47,6 @@ impl AppState {
     /// 从 DB 重载路由规则到网关
     pub async fn reload_routes(&self, pool: &SqlitePool) {
         self.gateway.read().await.route_manager.reload(pool).await.ok();
-    }
-
-    /// 重载指定分组的成员到网关
-    pub async fn reload_group(&self, pool: &SqlitePool, group_id: &str) {
-        self.gateway.read().await.group_manager.reload_group(pool, group_id).await.ok();
-    }
-
-    /// 重载所有分组到网关
-    pub async fn reload_all_groups(&self, pool: &SqlitePool) {
-        self.gateway.read().await.group_manager.reload_all(pool).await.ok();
     }
 
     /// 刷新渠道名称缓存（从 providers 表重新加载）
@@ -127,9 +120,6 @@ pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx:
 
             sqlx::migrate!("./migrations").run(&pool).await?;
 
-            // 初始化默认数据（仅首次运行）
-            seed_default_data(&pool).await?;
-
             Ok(pool)
         })
         .await
@@ -139,17 +129,17 @@ pub fn get_db_pool() -> Option<&'static SqlitePool> {
     DB_POOL.get()
 }
 
-/// 初始化默认种子数据（仅首次运行时生效）
-async fn seed_default_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    // 默认网关设置
-    sqlx::query(
-        r#"INSERT OR IGNORE INTO gateway_settings (id, bind_host, bind_port, allow_remote, log_retention_days, created_at, updated_at)
-        VALUES ('default', '127.0.0.1', 2013, 0, 30, datetime('now'), datetime('now'))"#
-    )
-    .execute(pool)
-    .await?;
+/// 获取网关设置文件路径
+pub fn get_settings_path() -> Option<&'static Path> {
+    SETTINGS_PATH.get().map(|p| p.as_path())
+}
 
-    tracing::info!("默认种子数据已就绪");
+/// 初始化网关设置文件（首次运行时创建默认配置）
+async fn init_gateway_settings(data_dir: &Path) -> Result<(), String> {
+    let settings_path = data_dir.join("gateway.json");
+    SETTINGS_PATH.set(settings_path.clone()).map_err(|_| "网关设置路径已初始化".to_string())?;
+    let _ = crate::models::GatewaySettings::load(&settings_path)?;
+    tracing::info!("网关设置文件已就绪: {}", settings_path.display());
     Ok(())
 }
 
@@ -171,10 +161,15 @@ pub fn run() {
             eprintln!("[silk] 应用数据目录: {}", data_dir.display());
 
             if let Err(err) = tauri::async_runtime::block_on(async {
+                // 初始化数据库
                 let pool = init_database(&data_dir).await?;
 
                 let db_path = data_dir.join("silk.db");
                 eprintln!("[silk] 数据库文件: {}", db_path.display());
+
+                // 初始化网关设置文件
+                init_gateway_settings(&data_dir).await
+                    .map_err(|e| sqlx::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
                 // 启动后台日志写入任务
                 let log_writer_handle =
@@ -286,23 +281,12 @@ pub fn run() {
             commands::create_model_mapping,
             commands::update_model_mapping,
             commands::delete_model_mapping,
-            commands::get_group_providers,
             // 网关 Key 管理
             commands::list_gateway_keys,
             commands::get_gateway_key,
             commands::create_gateway_key,
             commands::update_gateway_key,
             commands::delete_gateway_key,
-            // 分组管理
-            commands::list_groups,
-            commands::find_groups_by_model,
-            commands::get_group,
-            commands::create_group,
-            commands::update_group,
-            commands::delete_group,
-            commands::add_group_member,
-            commands::update_group_member,
-            commands::remove_group_member,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
