@@ -19,8 +19,6 @@ import {
   GitBranchOutline,
   DocumentTextOutline,
   SettingsOutline,
-  StatsChartOutline,
-  AnalyticsOutline,
   MoonOutline,
   SunnyOutline,
   PowerOutline,
@@ -41,19 +39,17 @@ const menuOptions = [
   { label: "仪表盘", key: "/dashboard", icon: () => h(NIcon, null, { default: () => h(GridOutline) }) },
   { type: "divider" as const, key: "d1" },
   { label: "渠道管理", key: "services", type: "group" as const, children: [
-    { label: "渠道管理", key: "/providers", icon: () => h(NIcon, null, { default: () => h(PeopleOutline) }) },
-    { label: "模型池", key: "/model-square", icon: () => h(NIcon, null, { default: () => h(CubeOutline) }) },
-    { label: "路由规则", key: "/routing-rules", icon: () => h(NIcon, null, { default: () => h(GitBranchOutline) }) },
+    { label: "渠道", key: "/providers", icon: () => h(NIcon, null, { default: () => h(PeopleOutline) }) },
+    { label: "模型", key: "/model-square", icon: () => h(NIcon, null, { default: () => h(CubeOutline) }) },
+    { label: "路由", key: "/routing-rules", icon: () => h(NIcon, null, { default: () => h(GitBranchOutline) }) },
   ]},
   { type: "divider" as const, key: "d2" },
-  { label: "监控与日志", key: "monitoring", type: "group" as const, children: [
-    { label: "请求日志", key: "/logs", icon: () => h(NIcon, null, { default: () => h(DocumentTextOutline) }) },
-    { label: "实时监控", key: "/monitoring", icon: () => h(NIcon, null, { default: () => h(StatsChartOutline) }) },
-    { label: "用量分析", key: "/analytics", icon: () => h(NIcon, null, { default: () => h(AnalyticsOutline) }) },
+  { label: "排障", key: "monitoring", type: "group" as const, children: [
+    { label: "日志", key: "/logs", icon: () => h(NIcon, null, { default: () => h(DocumentTextOutline) }) },
   ]},
   { type: "divider" as const, key: "d3" },
   { label: "系统", key: "system", type: "group" as const, children: [
-    { label: "系统设置", key: "/settings", icon: () => h(NIcon, null, { default: () => h(SettingsOutline) }) },
+    { label: "设置", key: "/settings", icon: () => h(NIcon, null, { default: () => h(SettingsOutline) }) },
   ]},
 ];
 

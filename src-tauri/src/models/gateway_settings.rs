@@ -30,6 +30,15 @@ pub struct LogConfig {
     pub retention_days: i64,
 }
 
+/// 桌面行为配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopBehaviorConfig {
+    pub launch_at_startup: bool,
+    pub minimize_to_tray: bool,
+    pub close_to_tray: bool,
+    pub auto_start_gateway: bool,
+}
+
 // ---------------------------------------------------------------------------
 // 主设置结构（JSON 配置映射）
 // ---------------------------------------------------------------------------
@@ -40,6 +49,10 @@ pub struct GatewaySettings {
     pub bind_port: i64,
     pub allow_remote: bool,
     pub log_retention_days: i64,
+    pub launch_at_startup: bool,
+    pub minimize_to_tray: bool,
+    pub close_to_tray: bool,
+    pub auto_start_gateway: bool,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
     pub rate_limit_enabled: bool,
@@ -54,6 +67,10 @@ impl Default for GatewaySettings {
             bind_port: defaults::DEFAULT_BIND_PORT,
             allow_remote: false,
             log_retention_days: defaults::DEFAULT_LOG_RETENTION_DAYS,
+            launch_at_startup: false,
+            minimize_to_tray: true,
+            close_to_tray: true,
+            auto_start_gateway: false,
             default_provider_id: None,
             default_route_id: None,
             rate_limit_enabled: false,
@@ -123,6 +140,16 @@ impl GatewaySettings {
             retention_days: self.log_retention_days,
         }
     }
+
+    /// 获取桌面行为配置子集
+    pub fn desktop_behavior_config(&self) -> DesktopBehaviorConfig {
+        DesktopBehaviorConfig {
+            launch_at_startup: self.launch_at_startup,
+            minimize_to_tray: self.minimize_to_tray,
+            close_to_tray: self.close_to_tray,
+            auto_start_gateway: self.auto_start_gateway,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +158,10 @@ pub struct UpdateGatewaySettings {
     pub bind_port: Option<i64>,
     pub allow_remote: Option<bool>,
     pub log_retention_days: Option<i64>,
+    pub launch_at_startup: Option<bool>,
+    pub minimize_to_tray: Option<bool>,
+    pub close_to_tray: Option<bool>,
+    pub auto_start_gateway: Option<bool>,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
     pub rate_limit_enabled: Option<bool>,
@@ -145,6 +176,10 @@ impl Default for UpdateGatewaySettings {
             bind_port: None,
             allow_remote: None,
             log_retention_days: None,
+            launch_at_startup: None,
+            minimize_to_tray: None,
+            close_to_tray: None,
+            auto_start_gateway: None,
             default_provider_id: None,
             default_route_id: None,
             rate_limit_enabled: None,

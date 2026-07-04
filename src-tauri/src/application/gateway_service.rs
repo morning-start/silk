@@ -24,6 +24,10 @@ pub struct GatewaySettingsInfo {
     pub bind_port: i64,
     pub allow_remote: bool,
     pub log_retention_days: i64,
+    pub launch_at_startup: bool,
+    pub minimize_to_tray: bool,
+    pub close_to_tray: bool,
+    pub auto_start_gateway: bool,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
 }
@@ -201,6 +205,10 @@ impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
             bind_port: settings.bind_port,
             allow_remote: settings.allow_remote,
             log_retention_days: settings.log_retention_days,
+            launch_at_startup: settings.launch_at_startup,
+            minimize_to_tray: settings.minimize_to_tray,
+            close_to_tray: settings.close_to_tray,
+            auto_start_gateway: settings.auto_start_gateway,
             default_provider_id: settings.default_provider_id.clone(),
             default_route_id: settings.default_route_id.clone(),
         }

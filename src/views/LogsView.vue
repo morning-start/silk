@@ -12,12 +12,14 @@ import {
   NPagination,
   NCard,
   NPopconfirm,
+  NGrid,
+  NGi,
   useMessage,
   type DataTableColumns,
 } from "naive-ui";
 import { useLogsStore } from "../stores/logs";
 import { storeToRefs } from "pinia";
-import type { RequestLog } from "../api";
+import type { HourlyStats, ProviderStats, RequestLog } from "../api";
 import { api } from "../api";
 
 const logsStore = useLogsStore();
@@ -28,6 +30,9 @@ const selectedLog = ref<RequestLog | null>(null);
 const showDetail = ref(false);
 
 const statusFilter = ref("all");
+const metricRange = ref(24);
+const providerStats = ref<ProviderStats[]>([]);
+const hourlyData = ref<HourlyStats[]>([]);
 
 const columns: DataTableColumns<RequestLog> = [
   {
@@ -203,6 +208,41 @@ async function handleExportCsv() {
   }
 }
 
+async function loadStats(hours = metricRange.value) {
+  metricRange.value = hours;
+  try {
+    const [hourly, providers] = await Promise.all([
+      api.hourlyStats(hours),
+      api.statsByProvider(5),
+    ]);
+    hourlyData.value = hourly;
+    providerStats.value = providers;
+  } catch {
+    // keep logs usable even if stats fail
+  }
+}
+
+const totalRequestsInRange = computed(() =>
+  hourlyData.value.reduce((sum, item) => sum + item.request_count, 0)
+);
+
+const averageDurationInRange = computed(() => {
+  if (hourlyData.value.length === 0) return 0;
+  return Math.round(
+    hourlyData.value.reduce((sum, item) => sum + item.avg_duration_ms, 0) / hourlyData.value.length
+  );
+});
+
+const totalTokensInRange = computed(() =>
+  hourlyData.value.reduce((sum, item) => sum + item.total_tokens, 0)
+);
+
+const estimatedCostInRange = computed(() => totalTokensInRange.value / 1_000_000 * 3);
+
+const activeProvidersInRange = computed(() =>
+  providerStats.value.filter((item) => item.request_count > 0).length
+);
+
 const paginationText = computed(() => {
   const start = (page.value - 1) * 50 + 1;
   const end = Math.min(page.value * 50, total.value);
@@ -211,11 +251,50 @@ const paginationText = computed(() => {
 
 onMounted(() => {
   logsStore.fetchAll();
+  loadStats();
 });
 </script>
 
 <template>
   <div class="logs-page">
+    <NGrid :x-gap="16" :y-gap="16" :cols="5" class="mb-16">
+      <NGi>
+        <NCard :bordered="false" class="metric-card">
+          <div class="stat-label">请求数 ({{ metricRange }}h)</div>
+          <div class="stat-value accent">{{ totalRequestsInRange.toLocaleString() }}</div>
+          <div class="stat-sub">本地网关总请求</div>
+        </NCard>
+      </NGi>
+      <NGi>
+        <NCard :bordered="false" class="metric-card">
+          <div class="stat-label">平均响应</div>
+          <div class="stat-value success">{{ averageDurationInRange }}<span class="stat-unit">ms</span></div>
+          <div class="stat-sub">轻量监控</div>
+        </NCard>
+      </NGi>
+      <NGi>
+        <NCard :bordered="false" class="metric-card">
+          <div class="stat-label">Token 消耗</div>
+          <div class="stat-value accent">{{ (totalTokensInRange / 1000).toFixed(1) }}<span class="stat-unit">K</span></div>
+          <div class="stat-sub">最近 {{ metricRange }} 小时</div>
+        </NCard>
+      </NGi>
+      <NGi>
+        <NCard :bordered="false" class="metric-card">
+          <div class="stat-label">估算费用</div>
+          <div class="stat-value">${{ estimatedCostInRange.toFixed(2) }}</div>
+          <div class="stat-sub">按 $3/1M tokens</div>
+        </NCard>
+      </NGi>
+      <NGi>
+        <NCard :bordered="false" class="metric-card">
+          <div class="stat-label">活跃渠道</div>
+          <div class="stat-value">{{ activeProvidersInRange }}</div>
+          <div class="stat-sub">最近 {{ metricRange }} 小时</div>
+        </NCard>
+      </NGi>
+    </NGrid>
+
     <div class="toolbar">
       <div class="toolbar-left">
         <h2 class="page-title">请求日志</h2>
@@ -223,6 +302,17 @@ onMounted(() => {
       </div>
       <div class="toolbar-right">
         <NSpace :size="8">
+          <NSelect
+            v-model:value="metricRange"
+            :options="[
+              { label: '最近 1 小时', value: 1 },
+              { label: '最近 24 小时', value: 24 },
+              { label: '最近 7 天', value: 168 },
+            ]"
+            style="width: 130px"
+            size="small"
+            @update:value="loadStats"
+          />
           <NSelect
             v-model:value="statusFilter"
             :options="[
@@ -234,6 +324,7 @@ onMounted(() => {
             style="width: 140px"
             size="small"
           />
+          <NButton secondary size="small" @click="() => { logsStore.fetchAll(); loadStats(); }">刷新</NButton>
           <NButton secondary size="small" @click="handleExportCsv">导出 CSV</NButton>
           <NButton secondary size="small" @click="handleCleanup">清理 7 天前</NButton>
           <NPopconfirm @positive-click="handleClearAll">
@@ -278,6 +369,27 @@ onMounted(() => {
         striped
         size="small"
       />
+    </NCard>
+
+    <NCard
+      v-if="providerStats.length > 0"
+      title="渠道请求占比"
+      :bordered="false"
+      class="table-card provider-card"
+      size="small"
+    >
+      <div class="provider-summary-list">
+        <div v-for="item in providerStats" :key="item.provider_name || 'unknown'" class="provider-summary-item">
+          <div class="provider-summary-head">
+            <span class="provider-summary-name">{{ item.provider_name || "未知渠道" }}</span>
+            <span class="provider-summary-count">{{ item.request_count.toLocaleString() }} 次</span>
+          </div>
+          <div class="provider-summary-meta">
+            <span>平均 {{ item.avg_duration_ms }}ms</span>
+            <span>{{ (item.total_tokens / 1000).toFixed(1) }}K tokens</span>
+          </div>
+        </div>
+      </div>
     </NCard>
 
     <div class="pagination-bar">
@@ -412,11 +524,87 @@ onMounted(() => {
   width: 100%;
 }
 
+.metric-card {
+  border-radius: 12px;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: var(--text-color-3, #64748b);
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+
+.stat-value.accent {
+  color: #6366f1;
+}
+
+.stat-value.success {
+  color: #22c55e;
+}
+
+.stat-unit {
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.6;
+}
+
+.stat-sub {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
+}
+
 .pagination-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-top: 16px;
+}
+
+.provider-card {
+  margin-top: 16px;
+}
+
+.provider-summary-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.provider-summary-item {
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--card-color, #ffffff);
+}
+
+.provider-summary-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.provider-summary-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.provider-summary-count,
+.provider-summary-meta {
+  font-size: 12px;
+  color: var(--text-color-3, #64748b);
+}
+
+.provider-summary-meta {
+  display: flex;
+  gap: 12px;
 }
 
 .log-detail {

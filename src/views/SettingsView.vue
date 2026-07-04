@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from "vue";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import {
   NForm,
   NFormItem,
@@ -11,6 +12,8 @@ import {
   NTag,
   NCard,
   NSpace,
+  NAlert,
+  NModal,
   useMessage,
   useDialog,
 } from "naive-ui";
@@ -29,6 +32,9 @@ const formValue = ref({
   bind_port: 9876,
   allow_remote: false,
   log_retention_days: 30,
+  launch_at_startup: false,
+  close_to_tray: true,
+  auto_start_gateway: false,
   default_provider_id: "",
   default_route_id: "",
 });
@@ -126,6 +132,80 @@ async function handleSave() {
   }
 }
 
+async function handleExportConfig() {
+  try {
+    const filePath = await save({
+      title: "导出 Silk 配置",
+      defaultPath: "silk_config_export.json",
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (!filePath) return;
+    const result = await api.exportAppConfig({ file_path: filePath });
+    message.success(`配置已导出到 ${result.file_path}`);
+  } catch {
+    message.error("导出配置失败");
+  }
+}
+
+async function handleBackupDatabase() {
+  try {
+    const filePath = await save({
+      title: "备份 Silk 数据库",
+      defaultPath: "silk_database_backup.db",
+      filters: [{ name: "SQLite", extensions: ["db"] }],
+    });
+    if (!filePath) return;
+    const result = await api.backupDatabase({ file_path: filePath });
+    message.success(`数据库已备份到 ${result.file_path}`);
+  } catch {
+    message.error("备份数据库失败");
+  }
+}
+
+async function handleRestoreDatabase() {
+  try {
+    const accepted = await confirm(
+      "恢复数据库会覆盖当前的渠道、路由、模型映射、日志和网关 Key。是否继续？",
+      { title: "恢复数据库", kind: "warning", okLabel: "继续", cancelLabel: "取消" }
+    );
+    if (!accepted) return;
+
+    const filePath = await open({
+      title: "选择数据库备份文件",
+      multiple: false,
+      directory: false,
+      filters: [{ name: "SQLite", extensions: ["db"] }],
+    });
+    if (!filePath || Array.isArray(filePath)) return;
+
+    const result = await api.restoreDatabase({ file_path: filePath });
+    message.success(`数据库已从 ${result.file_path} 恢复`);
+    await gatewayStore.fetchStatus();
+    await loadKeys();
+  } catch {
+    message.error("恢复数据库失败");
+  }
+}
+
+async function handleImportConfig() {
+  try {
+    const filePath = await open({
+      title: "选择 Silk 配置文件",
+      multiple: false,
+      directory: false,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (!filePath || Array.isArray(filePath)) return;
+
+    const result = await api.importAppConfig({ file_path: filePath });
+    message.success(`配置已从 ${result.file_path} 导入`);
+    await gatewayStore.fetchStatus();
+    await loadKeys();
+  } catch {
+    message.error("导入配置失败");
+  }
+}
+
 watch(
   status,
   (newStatus) => {
@@ -136,6 +216,9 @@ watch(
         bind_port: s.bind_port,
         allow_remote: s.allow_remote,
         log_retention_days: s.log_retention_days,
+        launch_at_startup: s.launch_at_startup,
+        close_to_tray: s.close_to_tray,
+        auto_start_gateway: s.auto_start_gateway,
         default_provider_id: s.default_provider_id || "",
         default_route_id: s.default_route_id || "",
       };
@@ -154,12 +237,16 @@ onMounted(() => {
   <div class="settings-page">
     <div class="toolbar">
       <div class="toolbar-left">
-        <h2 class="page-title">系统设置</h2>
+        <h2 class="page-title">设置</h2>
       </div>
       <div class="toolbar-right">
         <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存更改</NButton>
       </div>
     </div>
+
+    <NAlert type="info" :bordered="false" class="settings-alert">
+      Silk 的设置优先服务本地桌面使用。这里保留网关基础能力，并补充关闭窗口与自动启动网关等桌面行为。
+    </NAlert>
 
     <!-- 网关基础 -->
     <NCard :bordered="false" class="settings-card" size="small" title="网关基础">
@@ -181,6 +268,60 @@ onMounted(() => {
           </NFormItem>
         </div>
       </NForm>
+    </NCard>
+
+    <NCard :bordered="false" class="settings-card" size="small" title="桌面行为">
+      <NForm :model="formValue" label-placement="left" label-width="120">
+        <div class="form-row">
+          <NFormItem label="开机自启" style="flex: 1">
+            <NSwitch v-model:value="formValue.launch_at_startup" />
+          </NFormItem>
+          <NFormItem label="关闭到后台" style="flex: 1">
+            <NSwitch v-model:value="formValue.close_to_tray" />
+          </NFormItem>
+        </div>
+        <div class="form-row">
+          <NFormItem label="启动后自动开网关" style="flex: 1">
+            <NSwitch v-model:value="formValue.auto_start_gateway" />
+          </NFormItem>
+        </div>
+        <NText depth="3" class="settings-help">
+          开启“开机自启”后，Silk 会注册到系统启动项；开启“关闭到后台”后，关闭窗口会隐藏应用而不是直接退出；开启“启动后自动开网关”后，Silk 启动时会自动恢复本地网关。
+        </NText>
+      </NForm>
+    </NCard>
+
+    <NCard :bordered="false" class="settings-card" size="small" title="配置与数据">
+      <div class="data-actions">
+        <div class="data-action">
+          <div>
+            <div class="data-action-title">导出配置</div>
+            <div class="data-action-desc">导出当前网关设置、渠道、路由、模型映射与网关 Key。</div>
+          </div>
+          <NButton size="small" @click="handleExportConfig">导出配置</NButton>
+        </div>
+        <div class="data-action">
+          <div>
+            <div class="data-action-title">导入配置</div>
+            <div class="data-action-desc">从已有配置文件恢复 Silk 配置，不会清理历史日志。</div>
+          </div>
+          <NButton size="small" @click="handleImportConfig">导入配置</NButton>
+        </div>
+        <div class="data-action">
+          <div>
+            <div class="data-action-title">备份数据库</div>
+            <div class="data-action-desc">生成当前 SQLite 数据库副本，适合迁移或长期留档。</div>
+          </div>
+          <NButton size="small" @click="handleBackupDatabase">备份数据库</NButton>
+        </div>
+        <div class="data-action">
+          <div>
+            <div class="data-action-title">恢复数据库</div>
+            <div class="data-action-desc">从已有 `.db` 备份恢复业务数据，不会改动当前桌面设置文件。</div>
+          </div>
+          <NButton size="small" type="warning" @click="handleRestoreDatabase">恢复数据库</NButton>
+        </div>
+      </div>
     </NCard>
 
     <!-- Key 管理 -->
@@ -269,6 +410,44 @@ onMounted(() => {
 .settings-card {
   border-radius: 12px;
   margin-bottom: 16px;
+}
+
+.settings-alert {
+  margin-bottom: 16px;
+  border-radius: 12px;
+}
+
+.settings-help {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.data-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.data-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 10px;
+}
+
+.data-action-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.data-action-desc {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
 }
 
 .add-key-box {

@@ -15,7 +15,10 @@ use std::sync::Arc;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
-use tauri::Manager;
+use tauri::menu::MenuItem;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, Runtime, WindowEvent};
+use tauri_plugin_autostart::MacosLauncher;
 use tokio::sync::RwLock;
 
 use crate::application::gateway_service::{load_gateway_context, start_existing_gateway};
@@ -23,6 +26,7 @@ use crate::gateway::{GatewayContext, GatewayServerHandle};
 
 /// 数据库连接池（全局唯一）
 static DB_POOL: tokio::sync::OnceCell<SqlitePool> = tokio::sync::OnceCell::const_new();
+static DB_PATH: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
 
 /// 网关设置文件路径（全局唯一）
 static SETTINGS_PATH: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
@@ -131,6 +135,7 @@ pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx:
         .get_or_try_init(|| async move {
             std::fs::create_dir_all(&data_dir).map_err(sqlx::Error::Io)?;
             let db_path = data_dir.join("silk.db");
+            let _ = DB_PATH.set(db_path.clone());
 
             eprintln!("[silk] 数据库路径: {}", db_path.display());
 
@@ -179,9 +184,78 @@ pub fn get_db_pool() -> Option<&'static SqlitePool> {
     DB_POOL.get()
 }
 
+pub fn get_db_path() -> Option<&'static Path> {
+    DB_PATH.get().map(|p| p.as_path())
+}
+
 /// 获取网关设置文件路径
 pub fn get_settings_path() -> Option<&'static Path> {
     SETTINGS_PATH.get().map(|p| p.as_path())
+}
+
+fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn hide_main_window<R: Runtime>(window: &tauri::Window<R>) {
+    let _ = window.hide();
+}
+
+fn handle_tray_action<R: Runtime>(app: &AppHandle<R>, action: &str) {
+    match action {
+        "show" => show_main_window(app),
+        "start_gateway" => {
+            let state = app.state::<AppState>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = crate::application::gateway_service::start(&state).await;
+            });
+        }
+        "stop_gateway" => {
+            let state = app.state::<AppState>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = crate::application::gateway_service::stop(&state).await;
+            });
+        }
+        "quit" => app.exit(0),
+        _ => {}
+    }
+}
+
+fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+    let start_item = MenuItem::with_id(app, "start_gateway", "启动网关", true, None::<&str>)?;
+    let stop_item = MenuItem::with_id(app, "stop_gateway", "停止网关", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "退出 Silk", true, None::<&str>)?;
+    let menu = tauri::menu::Menu::with_items(app, &[&show_item, &start_item, &stop_item, &quit_item])?;
+
+    let mut builder = TrayIconBuilder::with_id("main-tray")
+        .menu(&menu)
+        .tooltip("Silk")
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| handle_tray_action(app, event.id().as_ref()))
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } => show_main_window(&tray.app_handle()),
+            TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(&tray.app_handle()),
+            _ => {}
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    let _ = builder.build(app)?;
+    Ok(())
 }
 
 /// 初始化网关设置文件（首次运行时创建默认配置）
@@ -204,7 +278,22 @@ pub fn run() {
         tokio::sync::mpsc::channel::<crate::models::NewRequestLog>(1000);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None::<Vec<&str>>,
+        ))
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if let Some(path) = crate::get_settings_path() {
+                    let settings = crate::persistence::GatewaySettingsRepo::load_effective(path);
+                    if settings.close_to_tray {
+                        api.prevent_close();
+                        hide_main_window(window);
+                    }
+                }
+            }
+        })
         .setup(|app| {
             let data_dir = app.path().app_data_dir().expect("无法解析应用数据目录");
 
@@ -252,12 +341,27 @@ pub fn run() {
                 });
 
                 let state = app.state::<AppState>();
-                start_existing_gateway(state.inner()).await.map_err(|err| {
-                    sqlx::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, err))
-                })?;
+                let should_auto_start = {
+                    let gateway_guard = state.gateway.read().await;
+                    let settings_guard = gateway_guard.settings.read().await;
+                    let _ = crate::application::settings_service::sync_autostart(
+                        &app.handle().clone(),
+                        settings_guard.launch_at_startup,
+                    );
+                    settings_guard.auto_start_gateway
+                };
+                if should_auto_start {
+                    start_existing_gateway(state.inner()).await.map_err(|err| {
+                        sqlx::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, err))
+                    })?;
+                }
                 Ok::<(), sqlx::Error>(())
             }) {
                 panic!("数据库初始化失败: {err}");
+            }
+
+            if let Err(err) = setup_tray(&app.handle()) {
+                panic!("托盘初始化失败: {err}");
             }
 
             // 设置变更监听：配置变更时自动重启网关
@@ -319,6 +423,10 @@ pub fn run() {
             // 设置
             commands::settings::get_gateway_settings,
             commands::settings::update_gateway_settings,
+            commands::config_transfer::export_app_config,
+            commands::config_transfer::import_app_config,
+            commands::config_transfer::backup_database,
+            commands::config_transfer::restore_database,
             // 仪表盘统计
             commands::stats::dashboard_stats,
             commands::stats::recent_requests,
