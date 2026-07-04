@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+use tauri_plugin_autostart::ManagerExt;
 
 use crate::error::{bad_request, ServiceError};
 use crate::models::GatewaySettings;
@@ -11,6 +13,10 @@ pub struct GatewaySettingsResponse {
     pub bind_port: i64,
     pub allow_remote: bool,
     pub log_retention_days: i64,
+    pub launch_at_startup: bool,
+    pub minimize_to_tray: bool,
+    pub close_to_tray: bool,
+    pub auto_start_gateway: bool,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
     pub rate_limit_enabled: bool,
@@ -24,6 +30,10 @@ pub struct UpdateSettingsPayload {
     pub bind_port: Option<i64>,
     pub allow_remote: Option<bool>,
     pub log_retention_days: Option<i64>,
+    pub launch_at_startup: Option<bool>,
+    pub minimize_to_tray: Option<bool>,
+    pub close_to_tray: Option<bool>,
+    pub auto_start_gateway: Option<bool>,
     pub default_provider_id: Option<String>,
     pub default_route_id: Option<String>,
     pub rate_limit_enabled: Option<bool>,
@@ -43,6 +53,7 @@ pub fn get() -> Result<GatewaySettingsResponse, ServiceError> {
 }
 
 pub async fn update(
+    app_handle: &AppHandle,
     state: &AppState,
     payload: UpdateSettingsPayload,
 ) -> Result<GatewaySettingsResponse, ServiceError> {
@@ -64,6 +75,10 @@ pub async fn update(
         bind_port: payload.bind_port,
         allow_remote: payload.allow_remote,
         log_retention_days: payload.log_retention_days,
+        launch_at_startup: payload.launch_at_startup,
+        minimize_to_tray: payload.minimize_to_tray,
+        close_to_tray: payload.close_to_tray,
+        auto_start_gateway: payload.auto_start_gateway,
         default_provider_id: payload.default_provider_id,
         default_route_id: payload.default_route_id,
         rate_limit_enabled: payload.rate_limit_enabled,
@@ -76,6 +91,10 @@ pub async fn update(
             message: format!("保存设置失败: {e}"),
             detail: None,
         })?;
+
+    if previous_settings.launch_at_startup != settings.launch_at_startup {
+        sync_autostart(app_handle, settings.launch_at_startup)?;
+    }
 
     {
         let gateway_guard = state.gateway.read().await;
@@ -109,6 +128,10 @@ impl From<GatewaySettings> for GatewaySettingsResponse {
             bind_port: s.bind_port,
             allow_remote: s.allow_remote,
             log_retention_days: s.log_retention_days,
+            launch_at_startup: s.launch_at_startup,
+            minimize_to_tray: s.minimize_to_tray,
+            close_to_tray: s.close_to_tray,
+            auto_start_gateway: s.auto_start_gateway,
             default_provider_id: s.default_provider_id,
             default_route_id: s.default_route_id,
             rate_limit_enabled: s.rate_limit_enabled,
@@ -151,6 +174,32 @@ fn validate_update_payload(payload: &UpdateSettingsPayload) -> Result<(), Servic
     Ok(())
 }
 
+pub fn sync_autostart(app_handle: &AppHandle, enabled: bool) -> Result<(), ServiceError> {
+    let autostart = app_handle.autolaunch();
+    let current = autostart.is_enabled().map_err(|e| ServiceError::Internal {
+        message: "读取系统自启动状态失败".to_string(),
+        detail: Some(e.to_string()),
+    })?;
+
+    if current == enabled {
+        return Ok(());
+    }
+
+    if enabled {
+        autostart.enable().map_err(|e| ServiceError::Internal {
+            message: "启用系统自启动失败".to_string(),
+            detail: Some(e.to_string()),
+        })?;
+    } else {
+        autostart.disable().map_err(|e| ServiceError::Internal {
+            message: "关闭系统自启动失败".to_string(),
+            detail: Some(e.to_string()),
+        })?;
+    }
+
+    Ok(())
+}
+
 
 
 #[cfg(test)]
@@ -164,6 +213,10 @@ mod tests {
             bind_port: None,
             allow_remote: None,
             log_retention_days: None,
+            launch_at_startup: None,
+            minimize_to_tray: None,
+            close_to_tray: None,
+            auto_start_gateway: None,
             default_provider_id: None,
             default_route_id: None,
             rate_limit_enabled: None,
@@ -176,6 +229,10 @@ mod tests {
             bind_port: Some(0),
             allow_remote: None,
             log_retention_days: None,
+            launch_at_startup: None,
+            minimize_to_tray: None,
+            close_to_tray: None,
+            auto_start_gateway: None,
             default_provider_id: None,
             default_route_id: None,
             rate_limit_enabled: None,
@@ -188,6 +245,10 @@ mod tests {
             bind_port: None,
             allow_remote: None,
             log_retention_days: None,
+            launch_at_startup: None,
+            minimize_to_tray: None,
+            close_to_tray: None,
+            auto_start_gateway: None,
             default_provider_id: None,
             default_route_id: None,
             rate_limit_enabled: None,
@@ -203,6 +264,10 @@ mod tests {
             bind_port: Some(2013),
             allow_remote: Some(false),
             log_retention_days: Some(30),
+            launch_at_startup: Some(false),
+            minimize_to_tray: Some(true),
+            close_to_tray: Some(true),
+            auto_start_gateway: Some(false),
             default_provider_id: None,
             default_route_id: None,
             rate_limit_enabled: Some(true),

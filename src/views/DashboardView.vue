@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, h } from "vue";
+import { ref, onMounted, watch, h, computed } from "vue";
 import { useRouter } from "vue-router";
 import { formatMs } from "../utils/format";
 import {
@@ -36,6 +36,18 @@ const error = ref<string | null>(null);
 const stats = ref<DashboardStats | null>(null);
 const recentLogs = ref<RequestLog[]>([]);
 const logsLoading = ref(false);
+const bindAddress = computed(() => gatewayStore.status?.address ?? "127.0.0.1:9876");
+
+const setupSteps = computed(() => {
+  const providerReady = (stats.value?.active_providers || 0) > 0;
+  const gatewayReady = gatewayStore.status?.running ?? false;
+  return [
+    { label: "添加渠道", done: providerReady, action: goToProviders },
+    { label: "测试连通", done: providerReady, action: goToProviders },
+    { label: "配置模型", done: providerReady, action: () => router.push("/model-square") },
+    { label: "启动网关", done: gatewayReady, action: startGateway },
+  ];
+});
 
 const columns: DataTableColumns<RequestLog> = [
   {
@@ -126,6 +138,14 @@ function goToProviders() {
   router.push("/providers");
 }
 
+function copyGatewayAddress() {
+  navigator.clipboard.writeText(`http://${bindAddress.value}`).then(() => {
+    message.success("本地地址已复制");
+  }).catch(() => {
+    message.error("复制失败");
+  });
+}
+
 async function startGateway() {
   try {
     await gatewayStore.start();
@@ -197,6 +217,7 @@ watch(
               </p>
             </div>
             <NSpace>
+              <NButton quaternary @click="copyGatewayAddress">复制地址</NButton>
               <NButton quaternary @click="goToLogs">查看日志</NButton>
               <NButton type="primary" @click="goToProviders">管理渠道</NButton>
             </NSpace>
@@ -216,6 +237,27 @@ watch(
               <NButton quaternary @click="goToProviders">配置渠道</NButton>
             </NSpace>
           </template>
+        </div>
+      </NCard>
+
+      <NCard
+        v-if="!gatewayStore.status?.running || (stats?.active_providers || 0) === 0"
+        title="首次使用"
+        size="small"
+        :bordered="false"
+        class="section-card mb-16"
+      >
+        <div class="setup-list">
+          <button
+            v-for="step in setupSteps"
+            :key="step.label"
+            type="button"
+            class="setup-item"
+            @click="step.action"
+          >
+            <span class="setup-badge" :class="{ done: step.done }">{{ step.done ? "✓" : "•" }}</span>
+            <span class="setup-label">{{ step.label }}</span>
+          </button>
         </div>
       </NCard>
 
@@ -400,6 +442,53 @@ watch(
 
 .section-card {
   border-radius: 12px;
+}
+
+.setup-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.setup-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 10px;
+  background: var(--card-color, #ffffff);
+  text-align: left;
+  cursor: pointer;
+}
+
+.setup-item:hover {
+  background: #f8fafc;
+}
+
+.setup-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e2e8f0;
+  color: #475569;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.setup-badge.done {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.setup-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-color-1, #0f172a);
 }
 
 .gateway-control-body {

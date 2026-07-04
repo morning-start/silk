@@ -80,6 +80,10 @@ export interface GatewaySettings {
   bind_port: number;
   allow_remote: boolean;
   log_retention_days: number;
+  launch_at_startup: boolean;
+  minimize_to_tray: boolean;
+  close_to_tray: boolean;
+  auto_start_gateway: boolean;
   default_provider_id: string | null;
   default_route_id: string | null;
   rate_limit_enabled: boolean;
@@ -181,6 +185,10 @@ export interface GatewayKey {
   updated_at: string;
 }
 
+export interface FileOperationResponse {
+  file_path: string;
+}
+
 // ---------------------------------------------------------------------------
 // API Client
 // ---------------------------------------------------------------------------
@@ -274,6 +282,16 @@ export const api = {
   // Logs CSV Export
   exportLogsCsv: (data: { provider_id?: string; limit?: number; file_path?: string }) =>
     invoke<{ file_path: string; exported_count: number }>("export_logs_csv", { payload: data }),
+
+  // Config & Data
+  exportAppConfig: (data?: { file_path?: string }) =>
+    invoke<FileOperationResponse>("export_app_config", { payload: data ?? {} }),
+  importAppConfig: (data: { file_path: string }) =>
+    invoke<FileOperationResponse>("import_app_config", { payload: data }),
+  backupDatabase: (data?: { file_path?: string }) =>
+    invoke<FileOperationResponse>("backup_database", { payload: data ?? {} }),
+  restoreDatabase: (data: { file_path: string }) =>
+    invoke<FileOperationResponse>("restore_database", { payload: data }),
 
   // Settings
   updateGatewaySettings: (data: Partial<GatewaySettings>) =>

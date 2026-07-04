@@ -12,6 +12,8 @@ import {
   NSwitch,
   NTag,
   NCard,
+  NAlert,
+  NSpace,
   useMessage,
   useDialog,
   NIcon,
@@ -52,6 +54,48 @@ const methodOptions = [
   { label: "PUT", value: "PUT" },
   { label: "DELETE", value: "DELETE" },
 ];
+
+function applyTemplate(kind: "openai" | "claude" | "media") {
+  editingId.value = null;
+  if (kind === "openai") {
+    formValue.value = {
+      name: "OpenAI 透传",
+      match_path: "/v1/chat/completions",
+      match_method: "POST",
+      match_content_type: "application/json",
+      target_provider_id: "",
+      protocol_conversion: false,
+      model_name_override: "",
+      priority: 100,
+      enabled: true,
+    };
+  } else if (kind === "claude") {
+    formValue.value = {
+      name: "Claude 转 OpenAI",
+      match_path: "/v1/messages",
+      match_method: "POST",
+      match_content_type: "application/json",
+      target_provider_id: "",
+      protocol_conversion: true,
+      model_name_override: "",
+      priority: 100,
+      enabled: true,
+    };
+  } else {
+    formValue.value = {
+      name: "媒体透传",
+      match_path: "/media/*",
+      match_method: "*",
+      match_content_type: "",
+      target_provider_id: "",
+      protocol_conversion: false,
+      model_name_override: "",
+      priority: 100,
+      enabled: true,
+    };
+  }
+  showModal.value = true;
+}
 
 const columns: DataTableColumns<RoutingRule> = [
   { title: "名称", key: "name", width: 130 },
@@ -190,13 +234,25 @@ onMounted(() => {
   <div class="rules-page">
     <div class="toolbar">
       <div class="toolbar-left">
-        <h2 class="page-title">路由规则</h2>
+        <h2 class="page-title">路由</h2>
         <NTag size="small" type="info">{{ rules.length }} 条规则</NTag>
       </div>
       <div class="toolbar-right">
         <NButton type="primary" @click="handleAdd">+ 新增路由</NButton>
       </div>
     </div>
+
+    <NAlert type="info" :bordered="false" class="rules-alert">
+      路由是高级功能。普通使用只需配置“渠道 + 模型”，只有在需要特殊路径转发、协议转换或媒体透传时才需要这里。
+    </NAlert>
+
+    <NCard :bordered="false" class="table-card rule-template-card" size="small" title="快速模板">
+      <NSpace>
+        <NButton secondary size="small" @click="applyTemplate('openai')">OpenAI 透传</NButton>
+        <NButton secondary size="small" @click="applyTemplate('claude')">Claude 转 OpenAI</NButton>
+        <NButton secondary size="small" @click="applyTemplate('media')">媒体透传</NButton>
+      </NSpace>
+    </NCard>
 
     <NCard :bordered="false" class="table-card" size="small">
       <!-- Error State -->
@@ -294,5 +350,14 @@ onMounted(() => {
 <style scoped>
 .rules-page {
   width: 100%;
+}
+
+.rules-alert {
+  margin-bottom: 16px;
+  border-radius: 12px;
+}
+
+.rule-template-card {
+  margin-bottom: 16px;
 }
 </style>

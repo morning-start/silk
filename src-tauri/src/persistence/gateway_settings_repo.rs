@@ -32,6 +32,18 @@ impl GatewaySettingsRepo {
         if let Some(v) = update.log_retention_days {
             settings.log_retention_days = v;
         }
+        if let Some(v) = update.launch_at_startup {
+            settings.launch_at_startup = v;
+        }
+        if let Some(v) = update.minimize_to_tray {
+            settings.minimize_to_tray = v;
+        }
+        if let Some(v) = update.close_to_tray {
+            settings.close_to_tray = v;
+        }
+        if let Some(v) = update.auto_start_gateway {
+            settings.auto_start_gateway = v;
+        }
         if let Some(v) = &update.default_provider_id {
             settings.default_provider_id = Some(v.clone());
         }

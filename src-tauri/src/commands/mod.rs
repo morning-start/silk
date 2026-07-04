@@ -1,3 +1,4 @@
+pub mod config_transfer;
 pub mod gateway;
 pub mod gateway_keys;
 pub mod logs;
@@ -16,6 +17,10 @@ pub use crate::application::provider_service::FetchModelsPayload;
 pub use crate::application::gateway_key_service::{
     CreateGatewayKeyPayload, CreateGatewayKeyResponse, GatewayKeyResponse,
     UpdateGatewayKeyPayload,
+};
+pub use crate::application::config_transfer_service::{
+    BackupDatabasePayload, ExportConfigPayload, FileOperationResponse, ImportConfigPayload,
+    RestoreDatabasePayload,
 };
 pub use crate::application::log_service::{
     ExportLogsResponse, ListLogsResponse, LogResponse,
