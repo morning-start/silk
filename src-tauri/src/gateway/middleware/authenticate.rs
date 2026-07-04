@@ -7,11 +7,10 @@ use axum::http::HeaderMap;
 
 /// 从 headers 中提取认证 token
 ///
-/// 支持多种格式：
+/// 支持多种格式（HeaderName 大小写不敏感）：
 /// - Authorization: Bearer <token>  (OpenAI 风格)
 /// - Authorization: Token <token>   (其他风格)
-/// - x-api-key: <token>             (Anthropic 风格，小写)
-/// - X-API-Key: <token>             (Anthropic 风格，原始大小写)
+/// - x-api-key: <token>             (Anthropic 风格)
 fn extract_auth_token(headers: &HeaderMap) -> Option<String> {
     // 1. 尝试 Authorization: Bearer 或 Authorization: Token
     if let Some(auth_header) = headers.get(axum::http::header::AUTHORIZATION) {
@@ -26,15 +25,8 @@ fn extract_auth_token(headers: &HeaderMap) -> Option<String> {
         }
     }
 
-    // 2. 尝试 x-api-key (小写)
+    // 2. 尝试 x-api-key（HeaderMap 查找大小写不敏感）
     if let Some(api_key) = headers.get("x-api-key") {
-        if let Ok(key_str) = api_key.to_str() {
-            return Some(key_str.trim().to_string());
-        }
-    }
-
-    // 3. 尝试 X-API-Key (原始大小写)
-    if let Some(api_key) = headers.get("X-API-Key") {
         if let Ok(key_str) = api_key.to_str() {
             return Some(key_str.trim().to_string());
         }
@@ -43,13 +35,7 @@ fn extract_auth_token(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-/// 认证中间件：对所有 /v1/* 请求校验网关 Key
-///
-/// 支持的认证方式：
-/// - Authorization: Bearer <sk-gw-xxx>  (OpenAI 风格)
-/// - Authorization: Token <sk-gw-xxx>   (其他风格)
-/// - x-api-key: <sk-gw-xxx>             (Anthropic 风格，小写)
-/// - X-API-Key: <sk-gw-xxx>             (Anthropic 风格，原始大小写)
+/// 认证中间件：对所有 /v1/* 请求校验网关 Key（支持的认证方式见 `extract_auth_token`）
 pub async fn run(
     mut ctx: RequestContext,
     runtime: &GatewayContext,

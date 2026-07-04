@@ -51,6 +51,14 @@ pub fn require_found<T>(value: Option<T>, name: &str) -> Result<T, ServiceError>
     })
 }
 
+/// 便捷函数：构造 BadRequest 错误
+pub(crate) fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
+    Err(ServiceError::BadRequest {
+        message: message.to_string(),
+        code: None,
+    })
+}
+
 impl From<sqlx::Error> for ServiceError {
     fn from(e: sqlx::Error) -> Self {
         ServiceError::Database {

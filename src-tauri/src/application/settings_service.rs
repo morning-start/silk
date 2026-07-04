@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::ServiceError;
+use crate::error::{bad_request, ServiceError};
 use crate::models::GatewaySettings;
 use crate::persistence::GatewaySettingsRepo;
 use crate::AppState;
@@ -151,12 +151,7 @@ fn validate_update_payload(payload: &UpdateSettingsPayload) -> Result<(), Servic
     Ok(())
 }
 
-fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
-    Err(ServiceError::BadRequest {
-        message: message.to_string(),
-        code: None,
-    })
-}
+
 
 #[cfg(test)]
 mod tests {
