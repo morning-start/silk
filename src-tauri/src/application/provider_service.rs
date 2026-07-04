@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::CryptoError;
-use crate::error::{require_db, require_found, ServiceError};
+use crate::error::{bad_request, require_db, require_found, ServiceError};
 use crate::load_balancer::{LoadBalanceStrategy, LoadBalancer};
 use crate::models::{NewProvider, Provider, ProviderKeyEntry, UpdateProvider};
 use crate::persistence::ProviderRepo;
@@ -439,12 +439,7 @@ fn validate_non_empty(field: &str, value: &str) -> Result<(), ServiceError> {
     Ok(())
 }
 
-fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
-    Err(ServiceError::BadRequest {
-        message: message.to_string(),
-        code: None,
-    })
-}
+
 
 #[cfg(test)]
 mod validation_tests {

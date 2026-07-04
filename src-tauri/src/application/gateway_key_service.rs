@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::{require_db, require_found, ServiceError};
+use crate::error::{bad_request, require_db, require_found, ServiceError};
 use crate::models::{GatewayKey, NewGatewayKey, UpdateGatewayKey};
 use crate::persistence::GatewayKeyRepo;
 use crate::{impl_crud_delete, impl_crud_get, impl_crud_list};
@@ -144,12 +144,7 @@ fn validate_max_concurrent(value: Option<i64>) -> Result<(), ServiceError> {
     Ok(())
 }
 
-fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
-    Err(ServiceError::BadRequest {
-        message: message.to_string(),
-        code: None,
-    })
-}
+
 
 #[cfg(test)]
 mod tests {
