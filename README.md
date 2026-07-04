@@ -9,7 +9,7 @@
 - **流式响应** — 完整支持 SSE 流式输出，实时返回生成内容
 - **图片/视频 AI 透传** — 非 LLM 请求直接转发到上游提供方，无需额外配置
 - **Provider 管理** — 支持多家 AI 服务提供商（OpenAI、Claude、通义千问等）统一管理
-- **路由分组** — 按 Host/Path/Method/ContentType 匹配路由，支持 Provider 分组和负载均衡
+- **路由规则** — 按 Host/Path/Method/ContentType 匹配路由，支持模型映射优先、Provider 回退和故障转移
 - **本地存储** — 所有数据（日志、配置、Provider 信息）存于 SQLite，零云端依赖
 
 ## 技术栈
@@ -53,8 +53,8 @@
 ┌─────────────────────▼───────────────────────────────────┐
 │  Persistence (SQLite via SQLx)                          │
 │  ├─ Provider Repo        ├─ Routing Rule Repo           │
-│  ├─ Group Repo           ├─ Log Repo                    │
-│  └─ Gateway Settings     └─ Request Log                 │
+│  ├─ Gateway Key Repo     ├─ Log Repo                    │
+│  └─ Model Mapping Repo   └─ Gateway Settings / Stats    │
 └─────────────────────┬───────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────┐
@@ -336,7 +336,7 @@ silk/
 │   ├── components/               # 可复用组件
 │   ├── router/index.ts           # 页面路由
 │   ├── stores/                   # Pinia 状态管理（useSwrCache + useCrossStoreNotify）
-│   └── views/                    # 页面视图（10 个管理页面）
+│   └── views/                    # 页面视图（8 个管理页面）
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
 │   │   ├── lib.rs                # Tauri 初始化、DB 迁移、命令注册、网关生命周期
@@ -350,12 +350,11 @@ silk/
 │   │   │   ├── context.rs        # GatewayContext + RequestContext (Inner+Deref 模式)
 │   │   │   ├── error.rs          # GatewayError 枚举
 │   │   │   ├── plugin.rs         # GatewayPlugin 生命周期拦截钩子定义
-│   │   │   ├── group_manager.rs  # Provider 分组负载均衡
 │   │   │   ├── header_config.rs  # Header 转发配置
 │   │   │   ├── log_cleanup.rs    # 定时日志清理任务
 │   │   │   ├── log_cost.rs       # Token 费用计算
 │   │   │   ├── plugins/          # 内置网关插件
-│   │   │   └── middleware/       # 中间件实现（12 个模块）
+│   │   │   └── middleware/       # 中间件实现（11 个模块，含 stream_response）
 │   │   │       ├── extract.rs              # 请求提取（initialize + read_body）
 │   │   │       ├── authenticate.rs         # 网关 Key 认证
 │   │   │       ├── rate_limit.rs           # IP 级限流
@@ -379,7 +378,6 @@ silk/
 │   │   │   ├── gateway_service.rs
 │   │   │   ├── provider_service.rs
 │   │   │   ├── routing_service.rs
-│   │   │   ├── group_service.rs
 │   │   │   ├── settings_service.rs
 │   │   │   ├── log_service.rs
 │   │   │   ├── stats_service.rs

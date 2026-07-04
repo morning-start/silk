@@ -12,9 +12,7 @@ pub fn select_api_key(provider: &Provider) -> Result<String, CryptoError> {
     let entries = provider.keys_vec();
     let strategy = LoadBalanceStrategy::from_str(&provider.key_strategy);
     let balancer = LoadBalancer::new(entries, strategy);
-    let selected = balancer
-        .select()
-        .ok_or(CryptoError::InvalidFormat)?;
+    let selected = balancer.select().ok_or(CryptoError::InvalidFormat)?;
 
     if selected.enabled && !selected.value.is_empty() {
         let decrypted = crate::crypto::decrypt(&selected.value)?;
@@ -117,17 +115,21 @@ pub async fn create(
     payload: CreateProviderPayload,
 ) -> Result<ProviderResponse, ServiceError> {
     let pool = require_db()?;
+    validate_create_payload(&payload)?;
 
     let mut keys = payload.keys;
     for entry in &mut keys {
         if !entry.value.is_empty() {
-            entry.value = crate::crypto::encrypt(&entry.value)
-                .map_err(|e| ServiceError::Internal { message: format!("加密 API Key 失败: {e}"), detail: None })?;
+            entry.value =
+                crate::crypto::encrypt(&entry.value).map_err(|e| ServiceError::Internal {
+                    message: format!("加密 API Key 失败: {e}"),
+                    detail: None,
+                })?;
         }
     }
 
     let new = NewProvider {
-        name: payload.name,
+        name: payload.name.trim().to_string(),
         protocols: payload.protocols,
         models: payload.models,
         keys,
@@ -155,13 +157,18 @@ pub async fn update(
     payload: UpdateProviderPayload,
 ) -> Result<ProviderResponse, ServiceError> {
     let pool = require_db()?;
+    validate_update_payload(&payload)?;
 
     let keys = match payload.keys {
         Some(mut ks) => {
             for entry in &mut ks {
                 if !entry.value.is_empty() {
-                    entry.value = crate::crypto::encrypt(&entry.value)
-                        .map_err(|e| ServiceError::Internal { message: format!("加密 API Key 失败: {e}"), detail: None })?;
+                    entry.value = crate::crypto::encrypt(&entry.value).map_err(|e| {
+                        ServiceError::Internal {
+                            message: format!("加密 API Key 失败: {e}"),
+                            detail: None,
+                        }
+                    })?;
                 }
             }
             Some(ks)
@@ -170,14 +177,12 @@ pub async fn update(
     };
 
     let update = UpdateProvider {
-        name: payload.name,
+        name: payload.name.map(|name| name.trim().to_string()),
         protocols: payload.protocols,
         models: payload.models,
         keys,
         key_strategy: payload.key_strategy,
-        api_base_url: payload
-            .api_base_url
-            .map(|u| normalize_api_base_url(&u)),
+        api_base_url: payload.api_base_url.map(|u| normalize_api_base_url(&u)),
         proxy_url: payload.proxy_url,
         timeout_seconds: payload.timeout_seconds,
         max_retries: payload.max_retries,
@@ -207,12 +212,17 @@ pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
-        .map_err(|e| ServiceError::Internal { message: format!("构建 HTTP 客户端失败: {e}"), detail: None })?;
+        .map_err(|e| ServiceError::Internal {
+            message: format!("构建 HTTP 客户端失败: {e}"),
+            detail: None,
+        })?;
 
     let start = std::time::Instant::now();
 
-    let api_key = select_api_key(&provider)
-        .map_err(|e| ServiceError::Internal { message: format!("获取 API Key 失败: {e}"), detail: None })?;
+    let api_key = select_api_key(&provider).map_err(|e| ServiceError::Internal {
+        message: format!("获取 API Key 失败: {e}"),
+        detail: None,
+    })?;
 
     let result = client
         .get(&test_url)
@@ -316,5 +326,203 @@ impl ProviderResponse {
             })
             .collect();
         (decrypted, count)
+    }
+}
+
+fn validate_create_payload(payload: &CreateProviderPayload) -> Result<(), ServiceError> {
+    validate_non_empty("渠道名称", &payload.name)?;
+    validate_protocols(&payload.protocols)?;
+    validate_api_base_url(&payload.api_base_url)?;
+    validate_keys(&payload.keys)?;
+    validate_provider_limits(payload.timeout_seconds, payload.max_retries)?;
+    validate_status(payload.status.as_deref())?;
+    validate_strategy(payload.key_strategy.as_deref())?;
+    Ok(())
+}
+
+fn validate_update_payload(payload: &UpdateProviderPayload) -> Result<(), ServiceError> {
+    if let Some(name) = &payload.name {
+        validate_non_empty("渠道名称", name)?;
+    }
+    if let Some(protocols) = &payload.protocols {
+        validate_protocols(protocols)?;
+    }
+    if let Some(url) = &payload.api_base_url {
+        validate_api_base_url(url)?;
+    }
+    if let Some(keys) = &payload.keys {
+        validate_keys(keys)?;
+    }
+    validate_provider_limits(payload.timeout_seconds, payload.max_retries)?;
+    validate_status(payload.status.as_deref())?;
+    validate_strategy(payload.key_strategy.as_deref())?;
+    Ok(())
+}
+
+fn validate_protocols(protocols: &[String]) -> Result<(), ServiceError> {
+    if protocols.is_empty() || protocols.iter().any(|p| p.trim().is_empty()) {
+        return bad_request("至少选择一个有效协议");
+    }
+    Ok(())
+}
+
+fn validate_api_base_url(url: &str) -> Result<(), ServiceError> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return bad_request("API Base URL 不能为空");
+    }
+    let parsed = reqwest::Url::parse(trimmed).map_err(|_| ServiceError::BadRequest {
+        message: "API Base URL 格式无效".to_string(),
+        code: None,
+    })?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return bad_request("API Base URL 仅支持 http 或 https");
+    }
+    Ok(())
+}
+
+fn validate_keys(keys: &[ProviderKeyEntry]) -> Result<(), ServiceError> {
+    if !keys
+        .iter()
+        .any(|key| key.enabled && !key.value.trim().is_empty())
+    {
+        return bad_request("至少需要一个启用且非空的 API Key");
+    }
+    if keys.iter().any(|key| key.weight < 1) {
+        return bad_request("API Key 权重必须大于 0");
+    }
+    Ok(())
+}
+
+fn validate_provider_limits(
+    timeout_seconds: Option<i64>,
+    max_retries: Option<i64>,
+) -> Result<(), ServiceError> {
+    if let Some(timeout) = timeout_seconds {
+        if !(1..=300).contains(&timeout) {
+            return bad_request("超时时间必须在 1-300 秒之间");
+        }
+    }
+    if let Some(retries) = max_retries {
+        if !(0..=10).contains(&retries) {
+            return bad_request("重试次数必须在 0-10 之间");
+        }
+    }
+    Ok(())
+}
+
+fn validate_status(status: Option<&str>) -> Result<(), ServiceError> {
+    if let Some(status) = status {
+        if !matches!(status, "enabled" | "disabled") {
+            return bad_request("渠道状态必须是 enabled 或 disabled");
+        }
+    }
+    Ok(())
+}
+
+fn validate_strategy(strategy: Option<&str>) -> Result<(), ServiceError> {
+    if let Some(strategy) = strategy {
+        if !matches!(
+            strategy,
+            "round_robin" | "weighted" | "failover" | "least_conn"
+        ) {
+            return bad_request("Key 选择策略无效");
+        }
+    }
+    Ok(())
+}
+
+fn validate_non_empty(field: &str, value: &str) -> Result<(), ServiceError> {
+    if value.trim().is_empty() {
+        return bad_request(&format!("{field}不能为空"));
+    }
+    Ok(())
+}
+
+fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
+    Err(ServiceError::BadRequest {
+        message: message.to_string(),
+        code: None,
+    })
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    #[test]
+    fn validate_provider_rejects_empty_required_fields() {
+        let mut payload = valid_create_payload();
+        payload.name = " ".to_string();
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.protocols.clear();
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.api_base_url = "not-a-url".to_string();
+        assert_bad_request(validate_create_payload(&payload));
+    }
+
+    #[test]
+    fn validate_provider_rejects_no_available_key() {
+        let mut payload = valid_create_payload();
+        payload.keys = vec![ProviderKeyEntry {
+            name: "empty".to_string(),
+            value: " ".to_string(),
+            enabled: true,
+            weight: 1,
+        }];
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.keys[0].enabled = false;
+        assert_bad_request(validate_create_payload(&payload));
+    }
+
+    #[test]
+    fn validate_provider_rejects_invalid_limits_and_strategy() {
+        let mut payload = valid_create_payload();
+        payload.timeout_seconds = Some(0);
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.max_retries = Some(11);
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.key_strategy = Some("random".to_string());
+        assert_bad_request(validate_create_payload(&payload));
+    }
+
+    #[test]
+    fn validate_provider_accepts_valid_create_payload() {
+        validate_create_payload(&valid_create_payload()).expect("valid provider");
+    }
+
+    fn valid_create_payload() -> CreateProviderPayload {
+        CreateProviderPayload {
+            name: "OpenAI".to_string(),
+            protocols: vec!["openai_chat".to_string()],
+            api_base_url: "https://api.openai.com".to_string(),
+            models: vec!["gpt-4o".to_string()],
+            keys: vec![ProviderKeyEntry {
+                name: "main".to_string(),
+                value: "sk-test".to_string(),
+                enabled: true,
+                weight: 1,
+            }],
+            key_strategy: Some("round_robin".to_string()),
+            proxy_url: None,
+            timeout_seconds: Some(30),
+            max_retries: Some(3),
+            status: Some("enabled".to_string()),
+            metadata_json: None,
+        }
+    }
+
+    fn assert_bad_request(result: Result<(), ServiceError>) {
+        assert!(matches!(result, Err(ServiceError::BadRequest { .. })));
     }
 }

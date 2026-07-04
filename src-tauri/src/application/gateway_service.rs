@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 
 use crate::error::ServiceError;
 use crate::gateway::context::{GatewayContext, ProviderCache, RouteManager};
-use crate::gateway::{spawn_gateway_server};
+use crate::gateway::spawn_gateway_server;
 use crate::protocol::AdapterRegistry;
 use crate::AppState;
 
@@ -68,7 +68,10 @@ pub async fn start(state: &AppState) -> Result<GatewayStartResponse, ServiceErro
     // 在写锁内完成检查和启动，避免 TOCTOU 竞态
     let mut server = state.gateway_server.write().await;
     if server.is_some() {
-        return Err(ServiceError::BadRequest { message: "网关已在运行中".to_string(), code: None });
+        return Err(ServiceError::BadRequest {
+            message: "网关已在运行中".to_string(),
+            code: None,
+        });
     }
     // server 仍持有写锁，防止并发 start()
 
@@ -79,10 +82,17 @@ pub async fn start(state: &AppState) -> Result<GatewayStartResponse, ServiceErro
 
     let gateway = load_gateway_context(pool.clone(), log_sender)
         .await
-        .map_err(|e| ServiceError::Internal { message: format!("加载网关上下文失败: {e}"), detail: None })?;
-    let gateway_server = spawn_gateway_server(gateway.clone())
-        .await
-        .map_err(|e| ServiceError::Internal { message: format!("启动网关失败: {e}"), detail: None })?;
+        .map_err(|e| ServiceError::Internal {
+            message: format!("加载网关上下文失败: {e}"),
+            detail: None,
+        })?;
+    let gateway_server =
+        spawn_gateway_server(gateway.clone())
+            .await
+            .map_err(|e| ServiceError::Internal {
+                message: format!("启动网关失败: {e}"),
+                detail: None,
+            })?;
 
     // 先更新 gateway context（锁顺序：gateway -> gateway_server）
     {
@@ -108,7 +118,10 @@ pub async fn stop(state: &AppState) -> Result<GatewayStopResponse, ServiceError>
             message: "网关已停止".to_string(),
         })
     } else {
-        Err(ServiceError::BadRequest { message: "网关未运行".to_string(), code: None })
+        Err(ServiceError::BadRequest {
+            message: "网关未运行".to_string(),
+            code: None,
+        })
     }
 }
 
@@ -124,17 +137,26 @@ pub async fn restart(state: &AppState) -> Result<GatewayStartResponse, ServiceEr
     start(state).await
 }
 
-pub async fn start_existing_gateway(state: &AppState) -> Result<GatewayStartResponse, ServiceError> {
+pub async fn start_existing_gateway(
+    state: &AppState,
+) -> Result<GatewayStartResponse, ServiceError> {
     // 在写锁内完成检查和启动
     let mut server = state.gateway_server.write().await;
     if server.is_some() {
-        return Err(ServiceError::BadRequest { message: "网关已在运行中".to_string(), code: None });
+        return Err(ServiceError::BadRequest {
+            message: "网关已在运行中".to_string(),
+            code: None,
+        });
     }
 
     let gateway = state.gateway.read().await.clone();
-    let gateway_server = spawn_gateway_server(gateway.clone())
-        .await
-        .map_err(|e| ServiceError::Internal { message: format!("启动网关失败: {e}"), detail: None })?;
+    let gateway_server =
+        spawn_gateway_server(gateway.clone())
+            .await
+            .map_err(|e| ServiceError::Internal {
+                message: format!("启动网关失败: {e}"),
+                detail: None,
+            })?;
 
     *server = Some(gateway_server);
 
@@ -150,9 +172,8 @@ pub async fn load_gateway_context(
     pool: SqlitePool,
     log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
 ) -> Result<GatewayContext, sqlx::Error> {
-    let settings_path = crate::get_settings_path().ok_or_else(|| {
-        sqlx::Error::Protocol("网关设置路径未初始化".to_string())
-    })?;
+    let settings_path = crate::get_settings_path()
+        .ok_or_else(|| sqlx::Error::Protocol("网关设置路径未初始化".to_string()))?;
     let settings = crate::persistence::GatewaySettingsRepo::load_effective(settings_path);
     let route_manager = RouteManager::load(&pool).await?;
     let provider_cache = Arc::new(ProviderCache::new(Duration::from_secs(300)));
@@ -168,7 +189,9 @@ pub async fn load_gateway_context(
         log_sender,
         adapter_registry,
         plugins,
-    ).await.map_err(|e| sqlx::Error::Protocol(e))?)
+    )
+    .await
+    .map_err(|e| sqlx::Error::Protocol(e))?)
 }
 
 impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
@@ -186,14 +209,13 @@ impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
 
     use tokio::sync::RwLock;
 
     use crate::persistence::GatewaySettingsRepo;
-    use crate::{init_database, AppState};
+    use crate::{init_database, AppState, LookupCache};
 
     use super::load_gateway_context;
     use super::start_existing_gateway;
@@ -210,9 +232,11 @@ mod tests {
             bind_port: Some(bind_port),
             ..Default::default()
         };
-        GatewaySettingsRepo::update(pool, &update)
+        crate::init_gateway_settings(&data_dir)
             .await
-            .expect("update settings");
+            .expect("init settings");
+        let settings_path = crate::get_settings_path().expect("settings path");
+        GatewaySettingsRepo::update(settings_path, &update).expect("update settings");
 
         let (log_sender, _log_receiver) = tokio::sync::mpsc::channel(1);
         let gateway = load_gateway_context(pool.clone(), log_sender)
@@ -222,6 +246,7 @@ mod tests {
         let state = AppState {
             gateway: Arc::new(RwLock::new(gateway)),
             gateway_server: Arc::new(RwLock::new(None)),
+            lookup_cache: Arc::new(RwLock::new(LookupCache::default())),
             settings_change_tx,
         };
 

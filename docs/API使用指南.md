@@ -6,7 +6,7 @@ Silk（丝路）是一个纯本地桌面 AI 多模型网关客户端。提供统
 
 **路由决策顺序**（由高到低）：
 1. 模型映射（`model_mappings`）— 按请求体 `model` 字段匹配，支持多渠道负载均衡与自动失败回退
-2. 路由规则（`routing_rules`）— 按 Host / Path / Method / ContentType 匹配，支持分组
+2. 路由规则（`routing_rules`）— 按 Host / Path / Method / ContentType 匹配，直接转发到目标 Provider，兼容历史 `target_group_id`
 3. 路径兜底 — 按请求路径推断协议，选取任意启用 Provider
 
 更完整的 HTTP 接口说明见 [网关 API 文档](./网关API文档.md)。
@@ -20,7 +20,7 @@ Silk（丝路）是一个纯本地桌面 AI 多模型网关客户端。提供统
 2. [Gateway 控制](#2-gateway-控制)
 3. [Provider（渠道）管理](#3-provider渠道管理)
 4. [路由规则管理](#4-路由规则管理)
-5. [Provider 分组管理](#5-provider-分组管理)
+5. [历史兼容说明](#5-历史兼容说明)
 6. [网关设置](#6-网关设置)
 7. [网关 API Key 管理](#7-网关-api-key-管理)
 8. [模型映射管理](#8-模型映射管理)
@@ -50,7 +50,6 @@ import { invoke } from '@tauri-apps/api/core';
 | Gateway 控制 | `gateway_status`, `gateway_start`, `gateway_stop`, `gateway_restart` |
 | Provider 管理 | `list_providers`, `get_provider`, `create_provider`, `update_provider`, `test_provider`, `delete_provider`, `fetch_provider_models` |
 | 路由规则 | `list_routing_rules`, `get_routing_rule`, `create_routing_rule`, `update_routing_rule`, `delete_routing_rule` |
-| 分组管理 | `list_groups`, `get_group`, `create_group`, `update_group`, `delete_group`, `add_group_member`, `update_group_member`, `remove_group_member`, `find_groups_by_model`, `get_group_providers` |
 | 网关设置 | `get_gateway_settings`, `update_gateway_settings` |
 | 日志管理 | `list_logs`, `cleanup_logs`, `clear_all_logs`, `export_logs_csv` |
 | 仪表盘统计 | `dashboard_stats`, `recent_requests`, `stats_by_provider`, `hourly_stats` |
@@ -247,7 +246,7 @@ const models = await invoke('fetch_provider_models', {
 | `match_method` | String | 否 | HTTP 方法，默认 `*`（匹配所有） |
 | `match_content_type` | String | 否 | Content-Type 包含匹配，默认空（不检查） |
 | `target_provider_id` | String | 是 | 目标 Provider ID |
-| `target_group_id` | String | 否 | 目标分组 ID（与 provider 二选一） |
+| `target_group_id` | String | 否 | 历史兼容字段；当前不提供独立分组管理入口 |
 | `inbound_protocol` | String | 否 | 入站协议标识，如 `"openai_chat"` |
 | `outbound_protocol` | String | 否 | 出站协议标识，如 `"claude_messages"` |
 | `protocol_conversion` | Boolean | 否 | 是否启用协议转换，默认 false |
@@ -325,74 +324,9 @@ await invoke('delete_routing_rule', { id: 'rule-uuid' });
 
 ---
 
-## 5. Provider 分组管理
+## 5. 历史兼容说明
 
-Provider 分组用于将多个 Provider 组合成一个逻辑单元，实现负载均衡。
-
-### 分组字段
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `name` | String | 是 | 分组名称 |
-| `model_name` | String | 是 | 关联的模型名 |
-| `strategy` | String | 否 | 负载均衡策略，默认 `round_robin` |
-| `enabled` | Boolean | 否 | 是否启用，默认 true |
-
-### 分组支持的负载均衡策略
-
-| 策略值 | 说明 |
-|--------|------|
-| `round_robin`（默认） | 轮询所有启用的成员 |
-| `weighted` | 按权重比例分发 |
-| `failover` | 主备切换 |
-
-### 创建分组
-
-```typescript
-const group = await invoke('create_group', {
-  payload: {
-    name: 'GPT-4 集群',
-    model_name: 'gpt-4',
-    strategy: 'round_robin',
-    enabled: true,
-  }
-});
-```
-
-### 管理分组成员
-
-```typescript
-// 添加成员（weight 仅在 weighted 策略下生效）
-const member = await invoke('add_group_member', {
-  group_id: 'group-uuid',
-  payload: { provider_id: 'provider-uuid', weight: 1 }
-});
-
-// 更新成员
-await invoke('update_group_member', {
-  id: 'member-uuid',
-  payload: { weight: 3, enabled: true }
-});
-
-// 移除成员
-await invoke('remove_group_member', { id: 'member-uuid' });
-```
-
-### 其他分组操作
-
-```typescript
-// 列出所有分组
-const groups = await invoke('list_groups');
-
-// 获取单个分组（含成员列表）
-const detail = await invoke('get_group', { id: 'group-uuid' });
-
-// 按模型名查找分组
-const groups = await invoke('find_groups_by_model', { model_name: 'gpt-4' });
-
-// 获取分组的 Provider 列表
-const providers = await invoke('get_group_providers', { group_id: 'group-uuid' });
-```
+当前实现不再提供独立的 Provider 分组管理命令或页面。`routing_rules.target_group_id` 仅作为历史兼容字段保留。
 
 ---
 
@@ -756,15 +690,11 @@ Silk 完整支持 SSE 流式响应：
 3. 规则匹配的严格程度不影响优先级，只决定是否匹配
 4. 返回第一条完全匹配的规则
 
-### 分组（Provider Group）与模型映射（Model Mapping）的区别
+### 模型映射与路由规则的边界
 
-| 维度 | 分组 | 模型映射 |
-|------|------|----------|
-| 用途 | 同一模型多 Provider 负载均衡 | 模型元信息管理 + 关联渠道 |
-| 关联方式 | 路由规则直接引用 `target_group_id` | 路由规则引用 `target_provider_id`，映射关联多个 Provider |
-| 能力标签 | 无 | 有（chat, vision, function_calling 等） |
-| 价格管理 | 无 | 有（输入/输出价格） |
-| Token 限制 | 无 | 有（上下文/输入/输出 Token 上限） |
+模型映射负责把一个模型名映射到多个 Provider 渠道，并携带能力标签、价格、Token 上限等信息。
+
+路由规则负责按 Host / Path / Method / ContentType 选择目标 Provider，并可选开启协议转换。
 
 ### 命令行 vs IPC 命令名
 
@@ -862,32 +792,35 @@ curl http://127.0.0.1:2013/v1/messages \
   }'
 ```
 
-### 示例：多 Key 轮询 + 分组负载均衡
+### 示例：多 Key 轮询 + 模型映射回退
 
 ```typescript
 // 1. 创建两个 Provider
 const p1 = await invoke('create_provider', {
-  payload: { name: 'API-1', protocols: ['openai_chat'], api_base_url: '...', models: ['gpt-4'], keys: [{ name: 'k1', value: 'sk-1', enabled: true, weight: 1 }], key_strategy: 'round_robin' }
+  payload: { name: 'API-1', protocols: ['openai_chat'], api_base_url: 'https://api-1.example.com', models: ['gpt-4'], keys: [{ name: 'k1', value: 'sk-1', enabled: true, weight: 1 }], key_strategy: 'round_robin' }
 });
 const p2 = await invoke('create_provider', {
-  payload: { name: 'API-2', protocols: ['openai_chat'], api_base_url: '...', models: ['gpt-4'], keys: [{ name: 'k2', value: 'sk-2', enabled: true, weight: 1 }], key_strategy: 'round_robin' }
+  payload: { name: 'API-2', protocols: ['openai_chat'], api_base_url: 'https://api-2.example.com', models: ['gpt-4'], keys: [{ name: 'k2', value: 'sk-2', enabled: true, weight: 1 }], key_strategy: 'round_robin' }
 });
 
-// 2. 创建分组
-const group = await invoke('create_group', {
-  payload: { name: 'GPT-4 集群', model_name: 'gpt-4', strategy: 'round_robin' }
+// 2. 创建模型映射，关联两个渠道
+await invoke('create_model_mapping', {
+  payload: {
+    model_name: 'gpt-4',
+    strategy: 'round_robin',
+    channels: [
+      { provider_id: p1.id, selected_models: ['gpt-4'], enabled: true },
+      { provider_id: p2.id, selected_models: ['gpt-4'], enabled: true },
+    ],
+  }
 });
 
-// 3. 添加分组成员
-await invoke('add_group_member', { group_id: group.id, payload: { provider_id: p1.id, weight: 1 } });
-await invoke('add_group_member', { group_id: group.id, payload: { provider_id: p2.id, weight: 2 } });
-
-// 4. 创建路由规则指向分组
+// 3. 路由规则只负责把请求送到这个模型名
 await invoke('create_routing_rule', {
   payload: {
-    name: 'GPT-4 负载均衡',
+    name: 'GPT-4 路由',
     match_path: '/v1/chat/completions',
-    target_group_id: group.id,
+    target_provider_id: p1.id,
     inbound_protocol: 'openai_chat',
     outbound_protocol: 'openai_chat',
   }

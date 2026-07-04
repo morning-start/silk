@@ -185,7 +185,7 @@ pub fn get_settings_path() -> Option<&'static Path> {
 }
 
 /// 初始化网关设置文件（首次运行时创建默认配置）
-async fn init_gateway_settings(data_dir: &Path) -> Result<(), String> {
+pub(crate) async fn init_gateway_settings(data_dir: &Path) -> Result<(), String> {
     let settings_path = data_dir.join("gateway.json");
     SETTINGS_PATH.set(settings_path.clone()).map_err(|_| "网关设置路径已初始化".to_string())?;
     let _ = crate::models::GatewaySettings::load(&settings_path)?;
