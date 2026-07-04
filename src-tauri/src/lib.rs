@@ -27,6 +27,20 @@ static DB_POOL: tokio::sync::OnceCell<SqlitePool> = tokio::sync::OnceCell::const
 /// 网关设置文件路径（全局唯一）
 static SETTINGS_PATH: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
 
+/// 存放所有非敏感、小型、读频繁的字典表数据。
+/// 启动时一次性加载，写时按分区失效刷新。
+#[derive(Debug, Clone, Default)]
+pub struct LookupCache {
+    /// provider id → name
+    pub provider_names: HashMap<String, String>,
+    /// model mapping id → model_name
+    pub model_mapping_names: HashMap<String, String>,
+    /// routing rule id → name
+    pub routing_rule_names: HashMap<String, String>,
+    /// gateway key id → name
+    pub gateway_key_names: HashMap<String, String>,
+}
+
 /// 运行时网关状态
 #[derive(Clone)]
 pub struct AppState {
@@ -34,6 +48,8 @@ pub struct AppState {
     pub gateway_server: Arc<RwLock<Option<GatewayServerHandle>>>,
     /// 渠道 id → name 映射表，用于日志展示时解析渠道名称
     pub provider_name_cache: Arc<RwLock<HashMap<String, String>>>,
+    /// 通用字典表缓存，启动时一次性加载，写操作后刷新
+    pub lookup_cache: Arc<RwLock<LookupCache>>,
     /// 网关设置变更通知通道（用于解耦 settings_service → gateway_service 循环依赖）
     pub settings_change_tx: tokio::sync::broadcast::Sender<()>,
 }
@@ -56,6 +72,14 @@ impl AppState {
             *self.provider_name_cache.write().await = cache;
         }
     }
+
+    /// 刷新通用字典表缓存（从 DB 一次性重新加载所有字典表）
+    pub async fn refresh_lookup(&self) {
+        if let Some(pool) = crate::get_db_pool() {
+            let cache = crate::load_lookup_cache(pool).await;
+            *self.lookup_cache.write().await = cache;
+        }
+    }
 }
 
 /// 从 providers 表加载 id → name 映射
@@ -72,6 +96,58 @@ pub async fn load_provider_name_cache(pool: &SqlitePool) -> HashMap<String, Stri
             Some((id, name))
         })
         .collect()
+}
+
+/// 从 DB 一次性加载所有字典表到 LookupCache
+pub async fn load_lookup_cache(pool: &SqlitePool) -> LookupCache {
+    use sqlx::Row;
+
+    let provider_names = sqlx::query("SELECT id, name FROM providers")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|r| {
+            Some((r.get::<String, _>("id"), r.get::<String, _>("name")))
+        })
+        .collect();
+
+    let model_mapping_names = sqlx::query("SELECT id, model_name FROM model_mappings")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|r| {
+            Some((r.get::<String, _>("id"), r.get::<String, _>("model_name")))
+        })
+        .collect();
+
+    let routing_rule_names = sqlx::query("SELECT id, name FROM routing_rules")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|r| {
+            Some((r.get::<String, _>("id"), r.get::<String, _>("name")))
+        })
+        .collect();
+
+    let gateway_key_names = sqlx::query("SELECT id, name FROM gateway_keys")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|r| {
+            Some((r.get::<String, _>("id"), r.get::<String, _>("name")))
+        })
+        .collect();
+
+    LookupCache {
+        provider_names,
+        model_mapping_names,
+        routing_rule_names,
+        gateway_key_names,
+    }
 }
 
 /// 初始化数据库连接池并运行迁移
@@ -183,6 +259,10 @@ pub fn run() {
                 let provider_name_cache =
                     Arc::new(RwLock::new(load_provider_name_cache(pool).await));
 
+                // 加载通用字典表缓存
+                let lookup_cache =
+                    Arc::new(RwLock::new(load_lookup_cache(pool).await));
+
                 // 启动后台日志清理任务
                 let cleanup_handle = crate::gateway::log_cleanup::spawn_log_cleanup_task(
                     pool.clone(),
@@ -198,6 +278,7 @@ pub fn run() {
                     gateway: Arc::new(RwLock::new(gateway)),
                     gateway_server: Arc::new(RwLock::new(None)),
                     provider_name_cache,
+                    lookup_cache,
                     settings_change_tx,
                 });
 
@@ -243,50 +324,50 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // Gateway 控制
-            commands::gateway_status,
-            commands::gateway_start,
-            commands::gateway_stop,
-            commands::gateway_restart,
+            commands::gateway::gateway_status,
+            commands::gateway::gateway_start,
+            commands::gateway::gateway_stop,
+            commands::gateway::gateway_restart,
             // Provider 管理
-            commands::list_providers,
-            commands::get_provider,
-            commands::create_provider,
-            commands::update_provider,
-            commands::test_provider,
-            commands::delete_provider,
-            commands::fetch_provider_models,
+            commands::providers::list_providers,
+            commands::providers::get_provider,
+            commands::providers::create_provider,
+            commands::providers::update_provider,
+            commands::providers::test_provider,
+            commands::providers::delete_provider,
+            commands::providers::fetch_provider_models,
             // 路由规则管理
-            commands::list_routing_rules,
-            commands::get_routing_rule,
-            commands::create_routing_rule,
-            commands::update_routing_rule,
-            commands::delete_routing_rule,
+            commands::routing_rules::list_routing_rules,
+            commands::routing_rules::get_routing_rule,
+            commands::routing_rules::create_routing_rule,
+            commands::routing_rules::update_routing_rule,
+            commands::routing_rules::delete_routing_rule,
             // 日志管理
-            commands::list_logs,
-            commands::cleanup_logs,
-            commands::clear_all_logs,
-            commands::export_logs_csv,
+            commands::logs::list_logs,
+            commands::logs::cleanup_logs,
+            commands::logs::clear_all_logs,
+            commands::logs::export_logs_csv,
             // 设置
-            commands::get_gateway_settings,
-            commands::update_gateway_settings,
+            commands::settings::get_gateway_settings,
+            commands::settings::update_gateway_settings,
             // 仪表盘统计
-            commands::dashboard_stats,
-            commands::recent_requests,
-            commands::stats_by_provider,
-            commands::hourly_stats,
+            commands::stats::dashboard_stats,
+            commands::stats::recent_requests,
+            commands::stats::stats_by_provider,
+            commands::stats::hourly_stats,
             // 模型映射管理
-            commands::list_model_mappings,
-            commands::get_model_mapping,
-            commands::find_model_mapping_by_name,
-            commands::create_model_mapping,
-            commands::update_model_mapping,
-            commands::delete_model_mapping,
+            commands::model_mappings::list_model_mappings,
+            commands::model_mappings::get_model_mapping,
+            commands::model_mappings::find_model_mapping_by_name,
+            commands::model_mappings::create_model_mapping,
+            commands::model_mappings::update_model_mapping,
+            commands::model_mappings::delete_model_mapping,
             // 网关 Key 管理
-            commands::list_gateway_keys,
-            commands::get_gateway_key,
-            commands::create_gateway_key,
-            commands::update_gateway_key,
-            commands::delete_gateway_key,
+            commands::gateway_keys::list_gateway_keys,
+            commands::gateway_keys::get_gateway_key,
+            commands::gateway_keys::create_gateway_key,
+            commands::gateway_keys::update_gateway_key,
+            commands::gateway_keys::delete_gateway_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

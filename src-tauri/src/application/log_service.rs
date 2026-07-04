@@ -24,6 +24,8 @@ pub struct LogResponse {
     pub response_status: Option<i64>,
     /// 响应时间（毫秒）
     pub resp_ms: Option<i64>,
+    /// 总耗时（毫秒），从请求开始到最后一个响应字节（流结束）
+    pub total_duration_ms: Option<i64>,
     pub provider_id: Option<String>,
     pub provider_name: Option<String>,
     pub error_message: Option<String>,
@@ -39,6 +41,8 @@ pub struct LogResponse {
     pub response_size_bytes: Option<i64>,
     pub tokens_input: Option<i64>,
     pub tokens_output: Option<i64>,
+    /// 发送给上游渠道的请求 token 估算（反应插件优化效果）
+    pub tokens_sent: Option<i64>,
     pub cost: Option<f64>,
     pub auth_key_name: Option<String>,
     /// 使用的渠道 Key 名称
@@ -46,19 +50,11 @@ pub struct LogResponse {
 }
 
 impl LogResponse {
-    pub fn from_log(log: RequestLog, cache: &HashMap<String, String>) -> Self {
-        let provider_name = log
-            .provider_id
-            .as_ref()
-            .and_then(|id| cache.get(id))
-            .cloned();
-        let mut resp = Self::from(log);
-        resp.provider_name = provider_name;
-        resp
-    }
-
-    /// 从主表 + 扩展表构造 LogResponse
-    pub fn from_log_with_extras(
+    /// 从 RequestLog 构造 LogResponse
+    ///
+    /// - `extras`: 可选的扩展信息（tokens、cost 等），如果为 None 则这些字段填充默认值
+    /// - `cache`: provider_id → provider_name 的映射
+    pub fn from_log(
         log: RequestLog,
         extras: Option<crate::models::RequestLogExtraToken>,
         cache: &HashMap<String, String>,
@@ -76,6 +72,7 @@ impl LogResponse {
             resp.response_size_bytes = extra.response_size_bytes;
             resp.tokens_input = extra.tokens_input;
             resp.tokens_output = extra.tokens_output;
+            resp.tokens_sent = extra.tokens_sent;
             resp.cost = extra.cost;
         }
         resp
@@ -95,6 +92,7 @@ impl From<RequestLog> for LogResponse {
             outbound_protocol: l.outbound_protocol,
             response_status: l.status_code,
             resp_ms: l.resp_ms,
+            total_duration_ms: l.total_duration_ms,
             provider_id: l.provider_id,
             provider_name: None,
             error_message: l.error_message,
@@ -108,6 +106,7 @@ impl From<RequestLog> for LogResponse {
             response_size_bytes: None,
             tokens_input: None,
             tokens_output: None,
+            tokens_sent: None,
             cost: None,
             auth_key_name: l.auth_key_name,
             channel_key_name: l.channel_key_name,
@@ -160,7 +159,7 @@ pub async fn list(
             .into_iter()
             .map(|l| {
                 let extra = extras_map.get(&l.request_id).cloned();
-                LogResponse::from_log_with_extras(l, extra, &cache)
+                LogResponse::from_log(l, extra, &cache)
             })
             .collect(),
         total,
@@ -265,9 +264,11 @@ pub async fn export_csv(
 }
 
 /// 获取最近 N 条请求（用于仪表盘）
-pub async fn recent_requests(limit: Option<i64>) -> Result<Vec<LogResponse>, ServiceError> {
+pub async fn recent_requests(state: &AppState, limit: Option<i64>) -> Result<Vec<LogResponse>, ServiceError> {
     let pool = require_db()?;
     let limit = limit.unwrap_or(20);
     let logs = StatsRepo::recent_requests(pool, limit).await?;
-    Ok(logs.into_iter().map(LogResponse::from).collect())
+    // 从 LookupCache 获取 Provider 名称映射，替代直接查全表
+    let cache = state.lookup_cache.read().await;
+    Ok(logs.into_iter().map(|log| LogResponse::from_log(log, None, &cache.provider_names)).collect())
 }

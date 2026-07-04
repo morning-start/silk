@@ -4,6 +4,11 @@ use crate::error::{require_db, require_found, ServiceError};
 use crate::models::{NewRoutingRule, RoutingRule, UpdateRoutingRule};
 use crate::persistence::RoutingRuleRepo;
 use crate::AppState;
+use crate::{impl_crud_list, impl_crud_get};
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Clone)]
 pub struct RoutingRuleResponse {
@@ -59,20 +64,14 @@ pub struct UpdateRoutingRulePayload {
     pub enabled: Option<bool>,
 }
 
-pub async fn list() -> Result<Vec<RoutingRuleResponse>, ServiceError> {
-    let pool = require_db()?;
-    let rules = RoutingRuleRepo::find_all(pool).await?;
+// ---------------------------------------------------------------------------
+// CRUD（list / get 由宏生成，create / update / delete 手写）
+// ---------------------------------------------------------------------------
 
-    Ok(rules.into_iter().map(RoutingRuleResponse::from).collect())
-}
+impl_crud_list!(RoutingRuleResponse, RoutingRuleRepo, "路由规则");
+impl_crud_get!(RoutingRuleResponse, RoutingRuleRepo, "路由规则");
 
-pub async fn get(id: String) -> Result<RoutingRuleResponse, ServiceError> {
-    let pool = require_db()?;
-    let rule = require_found(RoutingRuleRepo::find_by_id(pool, &id).await?, "路由规则")?;
-
-    Ok(RoutingRuleResponse::from(rule))
-}
-
+/// 创建路由规则
 pub async fn create(
     state: &AppState,
     payload: CreateRoutingRulePayload,
@@ -99,6 +98,7 @@ pub async fn create(
     let rule = RoutingRuleRepo::create(pool, &new).await?;
 
     state.reload_routes(pool).await;
+    state.refresh_lookup().await;
 
     Ok(RoutingRuleResponse::from(rule))
 }
@@ -130,6 +130,7 @@ pub async fn update(
     let rule = require_found(RoutingRuleRepo::update(pool, &id, &update).await?, "路由规则")?;
 
     state.reload_routes(pool).await;
+    state.refresh_lookup().await;
 
     Ok(RoutingRuleResponse::from(rule))
 }
@@ -140,6 +141,7 @@ pub async fn delete(state: &AppState, id: String) -> Result<bool, ServiceError> 
 
     if deleted {
         state.reload_routes(pool).await;
+        state.refresh_lookup().await;
     }
 
     Ok(deleted)
