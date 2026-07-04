@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::{require_db, require_found, ServiceError};
+use crate::error::{bad_request, require_db, require_found, validate_non_empty, ServiceError};
 use crate::impl_crud_delete;
 use crate::models::{
     MappingChannelInfo, ModelMapping, NewMappingChannel, NewModelMapping, UpdateModelMapping,
@@ -266,20 +266,6 @@ fn validate_non_negative_f64(value: Option<f64>, field: &str) -> Result<(), Serv
         }
     }
     Ok(())
-}
-
-fn validate_non_empty(field: &str, value: &str) -> Result<(), ServiceError> {
-    if value.trim().is_empty() {
-        return bad_request(&format!("{field}不能为空"));
-    }
-    Ok(())
-}
-
-fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
-    Err(ServiceError::BadRequest {
-        message: message.to_string(),
-        code: None,
-    })
 }
 
 #[cfg(test)]

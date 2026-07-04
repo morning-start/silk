@@ -59,6 +59,14 @@ pub(crate) fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
     })
 }
 
+/// 便捷函数：校验字符串字段非空（trim 后），失败返回 BadRequest
+pub(crate) fn validate_non_empty(field: &str, value: &str) -> Result<(), ServiceError> {
+    if value.trim().is_empty() {
+        return bad_request(&format!("{field}不能为空"));
+    }
+    Ok(())
+}
+
 impl From<sqlx::Error> for ServiceError {
     fn from(e: sqlx::Error) -> Self {
         ServiceError::Database {
