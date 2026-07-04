@@ -5,6 +5,7 @@ use crate::models::{
     MappingChannelInfo, ModelMapping, ModelMappingChannel, NewMappingChannel, NewModelMapping,
     UpdateModelMapping,
 };
+use crate::persistence::defaults;
 
 pub struct ModelMappingRepo;
 
@@ -16,11 +17,9 @@ impl ModelMappingRepo {
     ) -> Result<ModelMapping, sqlx::Error> {
         let mut tx = pool.begin().await?;
 
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().naive_utc();
-        let enabled = if new.enabled.unwrap_or(true) { 1 } else { 0 };
-        let capabilities = serde_json::to_string(&new.capabilities.as_deref().unwrap_or(&[]))
-            .unwrap_or_else(|_| "[]".to_string());
+        let (id, now) = defaults::new_id_and_now();
+        let enabled = defaults::bool_to_i64(new.enabled, true);
+        let capabilities = defaults::to_json(&new.capabilities.as_deref().unwrap_or(&[]));
         let strategy = new.strategy.as_deref().unwrap_or("round_robin");
 
         let mapping = sqlx::query_as::<_, ModelMapping>(
@@ -128,12 +127,9 @@ impl ModelMappingRepo {
         let mut tx = pool.begin().await?;
 
         let now = chrono::Utc::now().naive_utc();
-        let enabled = update.enabled.map(|v| if v { 1 } else { 0 });
+        let enabled = update.enabled.map(|v| defaults::bool_to_i64(Some(v), false));
 
-        let capabilities = update
-            .capabilities
-            .as_ref()
-            .map(|caps| serde_json::to_string(caps).unwrap_or_else(|_| "[]".to_string()));
+        let capabilities = defaults::to_json_opt(update.capabilities.as_ref());
 
         let Some(mapping) = sqlx::query_as::<_, ModelMapping>(
             r#"
@@ -281,8 +277,7 @@ impl ModelMappingRepo {
                 0
             };
             let selected_models =
-                serde_json::to_string(&channel.selected_models.as_deref().unwrap_or(&[]))
-                    .unwrap_or_else(|_| "[]".to_string());
+                defaults::to_json(&channel.selected_models.as_deref().unwrap_or(&[]));
             sqlx::query(
                 r#"
                 INSERT INTO model_mapping_channels (id, mapping_id, provider_id, selected_models, enabled, created_at)

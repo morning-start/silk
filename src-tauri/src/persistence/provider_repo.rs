@@ -8,8 +8,7 @@ pub struct ProviderRepo;
 impl ProviderRepo {
     /// 创建新 Provider
     pub async fn create(pool: &SqlitePool, new: &NewProvider) -> Result<Provider, sqlx::Error> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().naive_utc();
+        let (id, now) = defaults::new_id_and_now();
 
         sqlx::query_as::<_, Provider>(
             r#"
@@ -22,9 +21,9 @@ impl ProviderRepo {
         )
         .bind(id)
         .bind(new.name.as_str())
-        .bind(serde_json::to_string(&new.protocols).unwrap_or_default())
-        .bind(serde_json::to_string(&new.models).unwrap_or_default())
-        .bind(serde_json::to_string(&new.keys).unwrap_or_default())
+        .bind(defaults::to_json(&new.protocols))
+        .bind(defaults::to_json(&new.models))
+        .bind(defaults::to_json(&new.keys))
         .bind(new.key_strategy.as_deref().unwrap_or("round_robin"))
         .bind(new.api_base_url.as_str())
         .bind(new.proxy_url.as_deref())
@@ -95,24 +94,9 @@ impl ProviderRepo {
         )
         .bind(id)
         .bind(update.name.as_deref())
-        .bind(
-            update
-                .protocols
-                .as_ref()
-                .map(|p| serde_json::to_string(p).unwrap_or_default()),
-        )
-        .bind(
-            update
-                .models
-                .as_ref()
-                .map(|m| serde_json::to_string(m).unwrap_or_default()),
-        )
-        .bind(
-            update
-                .keys
-                .as_ref()
-                .map(|k| serde_json::to_string(k).unwrap_or_default()),
-        )
+        .bind(defaults::to_json_opt(update.protocols.as_ref()))
+        .bind(defaults::to_json_opt(update.models.as_ref()))
+        .bind(defaults::to_json_opt(update.keys.as_ref()))
         .bind(update.key_strategy.as_deref())
         .bind(update.api_base_url.as_deref())
         .bind(update.proxy_url.as_deref())

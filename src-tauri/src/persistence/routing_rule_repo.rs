@@ -11,14 +11,9 @@ impl RoutingRuleRepo {
         pool: &SqlitePool,
         new: &NewRoutingRule,
     ) -> Result<RoutingRule, sqlx::Error> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().naive_utc();
-        let protocol_conversion = if new.protocol_conversion.unwrap_or(true) {
-            1
-        } else {
-            0
-        };
-        let enabled = if new.enabled.unwrap_or(true) { 1 } else { 0 };
+        let (id, now) = defaults::new_id_and_now();
+        let protocol_conversion = defaults::bool_to_i64(new.protocol_conversion, true);
+        let enabled = defaults::bool_to_i64(new.enabled, true);
 
         sqlx::query_as::<_, RoutingRule>(
             r#"
@@ -92,8 +87,8 @@ impl RoutingRuleRepo {
         update: &UpdateRoutingRule,
     ) -> Result<Option<RoutingRule>, sqlx::Error> {
         let now = chrono::Utc::now().naive_utc();
-        let protocol_conversion = update.protocol_conversion.map(|v| if v { 1 } else { 0 });
-        let enabled = update.enabled.map(|v| if v { 1 } else { 0 });
+        let protocol_conversion = update.protocol_conversion.map(|v| defaults::bool_to_i64(Some(v), false));
+        let enabled = update.enabled.map(|v| defaults::bool_to_i64(Some(v), false));
 
         sqlx::query_as::<_, RoutingRule>(
             r#"
