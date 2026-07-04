@@ -5,6 +5,7 @@ use crate::models::{
     MappingChannelInfo, ModelMapping, NewMappingChannel, NewModelMapping, UpdateModelMapping,
 };
 use crate::persistence::ModelMappingRepo;
+use crate::impl_crud_delete;
 
 // ---------------------------------------------------------------------------
 // Response Types
@@ -85,8 +86,10 @@ pub struct UpdateModelMappingPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Service Functions
+// CRUD（delete 由宏生成，list / get / create / update 手写）
 // ---------------------------------------------------------------------------
+
+impl_crud_delete!(ModelMappingRepo);
 
 /// 查询所有模型映射
 pub async fn list() -> Result<Vec<ModelMappingResponse>, ServiceError> {
@@ -169,10 +172,4 @@ pub async fn update(id: String, payload: UpdateModelMappingPayload) -> Result<Mo
         .await
         .unwrap_or_default();
     Ok(ModelMappingResponse::from_model(mapping, channels))
-}
-
-/// 删除模型映射
-pub async fn delete(id: String) -> Result<bool, ServiceError> {
-    let pool = require_db()?;
-    ModelMappingRepo::delete(pool, &id).await.map_err(ServiceError::from)
 }

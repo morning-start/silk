@@ -1,3 +1,4 @@
+pub mod crud_macro;
 pub mod gateway_key_service;
 pub mod gateway_service;
 pub mod log_service;
