@@ -26,7 +26,7 @@ const dialog = useDialog();
 const formRef = ref<any>(null);
 const formValue = ref({
   bind_host: "127.0.0.1",
-  bind_port: 2013,
+  bind_port: 9876,
   allow_remote: false,
   log_retention_days: 30,
   default_provider_id: "",

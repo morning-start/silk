@@ -52,6 +52,8 @@ export interface RequestLog {
   response_status: number | null;
   /** 响应时间（毫秒） */
   resp_ms: number | null;
+  /** 总耗时（毫秒），流式场景末字节 */
+  total_duration_ms: number | null;
   provider_id: string | null;
   provider_name: string | null;
   error_message: string | null;
@@ -67,6 +69,7 @@ export interface RequestLog {
   response_size_bytes: number | null;
   tokens_input: number | null;
   tokens_output: number | null;
+  tokens_sent: number | null;
   cost: number | null;
   auth_key_name: string | null;
   channel_key_name: string | null;
