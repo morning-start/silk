@@ -25,11 +25,11 @@ pub async fn recent_requests(
 
 #[tauri::command]
 pub async fn stats_by_provider(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     limit: Option<i64>,
 ) -> Result<Vec<ProviderStatsResponse>, String> {
     let limit = limit.unwrap_or(10);
-    stats_service::stats_by_provider(state.inner(), limit)
+    stats_service::stats_by_provider(limit)
         .await
         .map_err(|e| e.to_string())
 }

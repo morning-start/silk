@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, h, computed } from "vue";
+import { formatMs } from "../utils/format";
 import {
   NButton,
   NDataTable,
@@ -70,9 +71,7 @@ const columns: DataTableColumns<RequestLog> = [
     key: "resp_ms",
     width: 65,
     render(row) {
-      if (row.resp_ms == null) return "-";
-      const ms = row.resp_ms;
-      return h("span", { class: "num" }, ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
+      return h("span", { class: "num" }, formatMs(row.resp_ms));
     },
   },
   {
@@ -80,9 +79,7 @@ const columns: DataTableColumns<RequestLog> = [
     key: "total_duration_ms",
     width: 65,
     render(row) {
-      if (row.total_duration_ms == null) return "-";
-      const ms = row.total_duration_ms;
-      return h("span", { class: "num" }, ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
+      return h("span", { class: "num" }, formatMs(row.total_duration_ms));
     },
   },
   {
@@ -322,7 +319,7 @@ onMounted(() => {
             {{ selectedLog.response_status }}
           </NTag>
         </div>
-        <div class="detail-row">
+        <div class="detail-row" v-if="selectedLog.resp_ms != null">
           <span class="detail-label">响应：</span>
           <span class="detail-value">{{ selectedLog.resp_ms }}ms</span>
         </div>

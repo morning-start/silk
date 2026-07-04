@@ -2,7 +2,6 @@ use serde::Serialize;
 
 use crate::error::{require_db, ServiceError};
 use crate::persistence::StatsRepo;
-use crate::AppState;
 
 // ---------------------------------------------------------------------------
 // 统计响应类型
@@ -51,21 +50,10 @@ impl From<crate::persistence::stats_repo::HourlyStats> for HourlyStatsResponse {
 // ---------------------------------------------------------------------------
 
 /// 获取按 Provider 分组的请求统计
-pub async fn stats_by_provider(state: &AppState, limit: i64) -> Result<Vec<ProviderStatsResponse>, ServiceError> {
+pub async fn stats_by_provider(limit: i64) -> Result<Vec<ProviderStatsResponse>, ServiceError> {
     let pool = require_db()?;
     let stats = StatsRepo::stats_by_provider(pool, limit).await?;
-    // 从 LookupCache 补全 provider_name（聚合查询不含名称字段）
-    let _provider_names = &state.lookup_cache.read().await.provider_names;
-    Ok(stats
-        .into_iter()
-        .map(|s| {
-            let resp = ProviderStatsResponse::from(s);
-            if resp.provider_name.is_none() {
-                // provider_name 未命中时保留原值（None）
-            }
-            resp
-        })
-        .collect())
+    Ok(stats.into_iter().map(ProviderStatsResponse::from).collect())
 }
 
 /// 获取按小时分组的时序统计
