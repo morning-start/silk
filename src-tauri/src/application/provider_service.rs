@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::CryptoError;
-use crate::error::{bad_request, require_db, require_found, ServiceError};
+use crate::error::{bad_request, require_db, require_found, validate_non_empty, ServiceError};
 use crate::load_balancer::{LoadBalanceStrategy, LoadBalancer};
 use crate::models::{NewProvider, Provider, ProviderKeyEntry, UpdateProvider};
 use crate::persistence::ProviderRepo;
@@ -428,13 +428,6 @@ fn validate_strategy(strategy: Option<&str>) -> Result<(), ServiceError> {
         ) {
             return bad_request("Key 选择策略无效");
         }
-    }
-    Ok(())
-}
-
-fn validate_non_empty(field: &str, value: &str) -> Result<(), ServiceError> {
-    if value.trim().is_empty() {
-        return bad_request(&format!("{field}不能为空"));
     }
     Ok(())
 }

@@ -110,7 +110,6 @@ pub fn build_log(ctx: &RequestContext) -> crate::models::NewRequestLog {
     // 模型池名称：来自路由的 model_name_override
     let model_name = route.and_then(|r| r.model_name_override.clone());
 
-    let _retry_total = ctx.failed_keys.len() as i64 + ctx.failed_providers.len() as i64;
     let retry_attempts = ctx.total_retry_attempts as i64;
 
     crate::models::NewRequestLog {
