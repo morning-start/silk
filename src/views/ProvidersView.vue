@@ -1,22 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
-import {
-  NButton,
-  NModal,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputNumber,
-  NSelect,
-  NSwitch,
-  NTag,
-  NIcon,
-  useMessage,
-  useDialog,
-} from "naive-ui";
-import {
-  SearchOutline,
-} from "@vicons/ionicons5";
+import { useMessage, useDialog } from "naive-ui";
 import { useProvidersStore } from "../stores/providers";
 import { storeToRefs } from "pinia";
 import type { Provider } from "../api";
@@ -58,12 +42,6 @@ const formValue = ref({
 
 // 模型获取
 const fetchingModels = ref(false);
-
-const protocolOptions = [
-  { label: "OpenAI Chat", value: "openai_chat" },
-  { label: "Claude Messages", value: "claude_messages" },
-  { label: "OpenAI Response", value: "openai_response" },
-];
 
 function handleAdd() {
   editingId.value = null;
@@ -204,188 +182,155 @@ async function handleSubmit() {
 onMounted(() => {
   providersStore.fetchAll();
 });
+
+// Template-used functions (vue-tsc tracking)
+void [addKey, removeKey, fetchModels, handleSubmit];
 </script>
 
 <template>
   <div class="providers-page">
+    <!-- Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
         <h2 class="page-title">渠道管理</h2>
-        <NTag size="small" type="info">{{ providers.length }} 个渠道</NTag>
+        <span class="badge badge-accent">{{ providers.length }} 个渠道</span>
       </div>
       <div class="toolbar-right">
-        <NInput
-          v-model:value="searchQuery"
-          placeholder="搜索渠道..."
-          clearable
-          style="width: 200px"
-          size="small"
-        >
-          <template #prefix>
-            <NIcon><SearchOutline /></NIcon>
-          </template>
-        </NInput>
-        <NButton type="primary" @click="handleAdd">+ 新增渠道</NButton>
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input class="input" placeholder="搜索渠道名称..." v-model="searchQuery">
+        </div>
+        <button class="btn btn-primary" @click="handleAdd">+ 新增渠道</button>
       </div>
     </div>
 
-    <NCard :bordered="false" class="table-card" size="small">
-      <!-- Error State -->
-      <template v-if="error">
-        <div class="error-state">
-          <div class="error-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          </div>
-          <h3 class="error-title">数据加载失败</h3>
-          <p class="error-desc">{{ error }}</p>
-          <NButton type="primary" @click="providersStore.fetchAll()">重新加载</NButton>
+    <div class="page-content">
+      <div v-if="error" class="error-state">
+        <div class="error-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:var(--danger)"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         </div>
-      </template>
+        <h3 class="error-title">数据加载失败</h3>
+        <p class="error-desc">{{ error }}</p>
+        <button class="btn btn-primary" @click="providersStore.fetchAll()">重新加载</button>
+      </div>
 
-      <!-- Empty State -->
-      <template v-else-if="!loading && filteredProviders.length === 0">
-        <div class="empty-state">
-          <div class="empty-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          </div>
-          <h3 class="empty-title" v-if="searchQuery">未找到匹配的渠道</h3>
-          <h3 class="empty-title" v-else>暂无渠道</h3>
-          <p class="empty-desc" v-if="!searchQuery">添加第一个 AI 渠道，开始配置您的 API 网关</p>
-          <NButton v-if="!searchQuery" type="primary" @click="handleAdd">+ 新增渠道</NButton>
+      <div v-else-if="!loading && filteredProviders.length === 0" class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:var(--muted)"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </div>
-      </template>
+        <h3 class="empty-title" v-if="searchQuery">未找到匹配的渠道</h3>
+        <h3 class="empty-title" v-else>暂无渠道</h3>
+        <p class="empty-desc" v-if="!searchQuery">添加第一个 AI 渠道，开始配置您的 API 网关</p>
+        <button v-if="!searchQuery" class="btn btn-primary" @click="handleAdd">+ 新增渠道</button>
+      </div>
 
-      <template v-else>
-        <div
-          v-for="item in filteredProviders"
-          :key="item.id"
-          class="provider-card"
-        >
-          <div class="pc-header">
+      <div v-else class="provider-grid">
+        <div v-for="item in filteredProviders" :key="item.id" class="provider-card">
+          <div>
+            <div class="pc-header">
             <span class="pc-name">{{ item.name }}</span>
             <div class="pc-header-right">
-              <span class="pc-status-dot" :class="item.status === 'enabled' ? 'online' : 'offline'"></span>
+              <span class="status-dot-sm" :class="item.status === 'enabled' ? 'online' : 'offline'"></span>
               <span class="pc-status-text" :class="item.status === 'enabled' ? 'text-success' : ''">
                 {{ item.status === 'enabled' ? (item.health_status === 'healthy' ? '正常' : '异常') : '禁用' }}
               </span>
             </div>
           </div>
-
           <div class="pc-url">{{ item.api_base_url.replace(/^https?:\/\//, '') }}</div>
-
           <div class="pc-meta">
-            <span class="pc-meta-item">
-              🔑 {{ item.key_count || 0 }} key{{ item.key_count !== 1 ? 's' : '' }}
-            </span>
-            <span class="pc-meta-item" v-if="item.models?.length">
-              {{ item.models.length }} 模型
-            </span>
-            <span class="pc-meta-item">超时 {{ item.timeout_seconds }}s</span>
-          </div>
-
-          <div class="pc-actions">
-            <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
-            <NButton size="tiny" quaternary :loading="testingStates[item.id]" @click="handleTest(item)">测试</NButton>
-            <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
+            <span class="pc-keys">{{ item.key_count || 0 }} Keys</span>
+            <span class="badge badge-success" v-if="item.models?.length">{{ item.models.length }} 模型</span>
+            <span class="badge badge-neutral">超时 {{ item.timeout_seconds }}s</span>
           </div>
         </div>
-      </template>
-    </NCard>
+        <div class="pc-actions">
+          <button class="btn btn-ghost btn-sm" @click="handleEdit(item)">编辑</button>
+          <button class="btn btn-ghost btn-sm" :disabled="testingStates[item.id]" @click="handleTest(item)">{{ testingStates[item.id] ? '测试中...' : '测试' }}</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" @click="handleDelete(item)">删除</button>
+        </div>
+        </div>
+      </div>
+    </div>
 
-    <NModal
-      v-model:show="showModal"
-      preset="card"
-      :title="editingId ? '编辑渠道' : '新增渠道'"
-      style="max-width: 600px"
-      :bordered="false"
-      :segmented="{ footer: true }"
-    >
-      <NForm ref="formRef" :model="formValue" label-placement="left" label-width="100">
-        <NFormItem label="名称" required>
-          <NInput v-model:value="formValue.name" placeholder="如：OpenAI 官方" />
-        </NFormItem>
-        <NFormItem label="接口协议" required>
-          <NSelect
-            v-model:value="formValue.protocols"
-            :options="protocolOptions"
-            multiple
-            placeholder="选择支持的接口协议"
-          />
-        </NFormItem>
-        <NFormItem label="API 地址" required>
-          <NInput v-model:value="formValue.api_base_url" placeholder="https://api.openai.com" @blur="normalizeUrl" />
-        </NFormItem>
-
-        <!-- API 密钥 -->
-        <NFormItem label="密钥策略">
-          <NSelect
-            v-model:value="formValue.key_strategy"
-            :options="[
-              { label: '轮询', value: 'round_robin' },
-              { label: '加权轮询', value: 'weighted' },
-              { label: '顺序故障转移', value: 'failover' },
-            ]"
-            style="width: 200px"
-          />
-        </NFormItem>
-        <NFormItem label="密钥">
-          <div style="width: 100%">
-            <div v-for="(k, i) in formValue.keys" :key="i" style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
-              <NInput v-model:value="k.name" placeholder="名称" size="small" style="flex:0 0 80px" />
-              <NInput v-model:value="k.value" type="password" placeholder="sk-..." size="small" style="flex:1" show-password-on="click" />
-              <NInputNumber v-if="formValue.key_strategy === 'weighted'" v-model:value="k.weight" :min="1" :max="100" size="small" style="width:70px" placeholder="权重" />
-              <NSwitch v-model:value="k.enabled" size="small" />
-              <NButton quaternary size="tiny" type="error" @click="removeKey(i)">×</NButton>
+    <!-- Modal -->
+    <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>{{ editingId ? '编辑渠道' : '新增渠道' }}</h3>
+          <button class="btn-icon" @click="showModal = false">×</button>
+        </div>
+        <div class="modal-body form-stack">
+          <div class="field">
+            <label>名称</label>
+            <input class="input" v-model="formValue.name" placeholder="如：OpenAI 官方" />
+          </div>
+          <div class="field">
+            <label>接口协议</label>
+            <select class="input" v-model="formValue.protocols" multiple>
+              <option value="openai_chat">OpenAI Chat</option>
+              <option value="claude_messages">Claude Messages</option>
+              <option value="openai_response">OpenAI Response</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>API 地址</label>
+            <input class="input" v-model="formValue.api_base_url" placeholder="https://api.openai.com" @blur="normalizeUrl" />
+          </div>
+          <div class="field">
+            <label>密钥策略</label>
+            <select class="input" v-model="formValue.key_strategy" style="width:200px">
+              <option value="round_robin">轮询</option>
+              <option value="weighted">加权轮询</option>
+              <option value="failover">顺序故障转移</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>密钥</label>
+            <div style="display:flex;flex-direction:column;gap:8px;width:100%">
+              <div v-for="(k, i) in formValue.keys" :key="i" class="pc-key-row">
+                <input class="input" v-model="k.name" placeholder="名称" style="width:80px;flex-shrink:0" />
+                <input class="input" v-model="k.value" type="password" placeholder="sk-..." style="flex:1;font-family:var(--font-mono)" />
+                <input v-if="formValue.key_strategy === 'weighted'" class="input" v-model.number="k.weight" type="number" min="1" max="100" style="width:70px" placeholder="权重" />
+                <label class="toggle" :class="{ on: k.enabled }" @click="k.enabled = !k.enabled"></label>
+                <button class="btn-icon" @click="removeKey(i)">×</button>
+              </div>
+              <button class="btn btn-ghost btn-sm" @click="addKey" style="align-self:flex-start">+ 添加密钥</button>
             </div>
-            <NButton size="tiny" quaternary @click="addKey">+ 添加密钥</NButton>
           </div>
-        </NFormItem>
-        <NFormItem label="模型">
-          <div style="display: flex; gap: 8px; width: 100%; flex-wrap: wrap; align-items: center">
-            <template v-if="formValue.models.length > 0">
-              <NTag
-                v-for="(m, i) in formValue.models"
-                :key="i"
-                closable
-                size="small"
-                @close="formValue.models.splice(i, 1)"
-              >
-                {{ m }}
-              </NTag>
-            </template>
-            <NButton
-              secondary
-              size="small"
-              @click="fetchModels"
-              :loading="fetchingModels"
-              :disabled="!formValue.api_base_url || formValue.keys.length === 0"
-            >
-              获取模型
-            </NButton>
+          <div class="field">
+            <label>模型</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <span v-for="(m, i) in formValue.models" :key="i" class="badge badge-neutral" style="cursor:pointer" @click="formValue.models.splice(i, 1)">{{ m }} ×</span>
+              <button class="btn btn-ghost btn-sm" @click="fetchModels" :disabled="!formValue.api_base_url || formValue.keys.length === 0">{{ fetchingModels ? '获取中...' : '获取模型' }}</button>
+            </div>
           </div>
-        </NFormItem>
-        <NFormItem label="代理地址">
-          <NInput v-model:value="formValue.proxy_url" placeholder="可选" />
-        </NFormItem>
-        <div class="form-row">
-          <NFormItem label="超时(秒)" style="flex: 1">
-            <NInputNumber v-model:value="formValue.timeout_seconds" :min="5" :max="300" style="width: 100%" />
-          </NFormItem>
-          <NFormItem label="最大重试" style="flex: 1">
-            <NInputNumber v-model:value="formValue.max_retries" :min="0" :max="10" style="width: 100%" />
-          </NFormItem>
+          <div class="field">
+            <label>代理地址</label>
+            <input class="input" v-model="formValue.proxy_url" placeholder="可选" />
+          </div>
+          <div class="form-row">
+            <div class="field">
+              <label>超时（秒）</label>
+              <input class="input" v-model.number="formValue.timeout_seconds" type="number" min="5" max="300" />
+            </div>
+            <div class="field">
+              <label>最大重试</label>
+              <input class="input" v-model.number="formValue.max_retries" type="number" min="0" max="10" />
+            </div>
+          </div>
+          <div class="field">
+            <div class="row-between">
+              <label>启用</label>
+              <label class="toggle" :class="{ on: formValue.status === 'enabled' }" @click="formValue.status = formValue.status === 'enabled' ? 'disabled' : 'enabled'"></label>
+            </div>
+          </div>
         </div>
-        <NFormItem label="启用">
-          <NSwitch v-model:value="formValue.status" checked-value="enabled" unchecked-value="disabled" />
-        </NFormItem>
-      </NForm>
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
-          <NButton @click="showModal = false">取消</NButton>
-          <NButton type="primary" @click="handleSubmit">{{ editingId ? '保存修改' : '确认添加' }}</NButton>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showModal = false">取消</button>
+          <button class="btn btn-primary" @click="handleSubmit">{{ editingId ? '保存修改' : '确认添加' }}</button>
         </div>
-      </template>
-    </NModal>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -394,45 +339,40 @@ onMounted(() => {
   width: 100%;
 }
 
-.providers-page > .provider-card {
-  margin-bottom: 0;
-}
-
-.providers-page {
-  width: 100%;
+.provider-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
-  align-content: start;
-}
-
-.providers-page > .toolbar {
-  grid-column: 1 / -1;
-}
-
-.providers-page > .error-state,
-.providers-page > .empty-state {
-  grid-column: 1 / -1;
 }
 
 .provider-card {
-  border-radius: 12px;
-  background: var(--card-color, #ffffff);
-  border: 1px solid var(--border-color, #e2e8f0);
-  padding: 16px;
-  transition: box-shadow 0.2s;
-  cursor: pointer;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-soft, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  padding: 20px;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
+  transition: all 150ms ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 
 .provider-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border-color: var(--accent, #0891b2);
+  box-shadow: var(--shadow, 0 4px 6px -1px rgba(0,0,0,0.1));
 }
 
 .pc-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.pc-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg, #0f172a);
 }
 
 .pc-header-right {
@@ -441,40 +381,19 @@ onMounted(() => {
   gap: 6px;
 }
 
-.pc-name {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.pc-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #94a3b8;
-}
-
-.pc-status-dot.online {
-  background: #22c55e;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
-}
-
-.pc-status-dot.offline {
-  background: #94a3b8;
-}
-
 .pc-status-text {
-  font-size: 13px;
-  color: #94a3b8;
+  font-size: 12px;
+  color: var(--muted, #64748b);
 }
 
 .pc-status-text.text-success {
-  color: #22c55e;
+  color: var(--success, #10b981);
 }
 
 .pc-url {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 12px;
-  color: var(--text-color-3, #94a3b8);
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  color: var(--muted, #64748b);
   margin-bottom: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -485,21 +404,27 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
-.pc-meta-item {
-  font-size: 12px;
-  color: var(--text-color-2, #64748b);
-  background: var(--tag-bg, #f1f5f9);
+.pc-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 8px;
+  background: var(--accent-soft, rgba(8,145,178,0.08));
+  color: var(--accent, #0891b2);
   border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 .pc-actions {
   display: flex;
-  gap: 4px;
-  border-top: 1px solid var(--border-color, #e2e8f0);
-  padding-top: 10px;
+  gap: 6px;
+  border-top: 1px solid var(--border-soft, #e2e8f0);
+  padding-top: 12px;
+  margin-top: auto;
 }
 </style>
