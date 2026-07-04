@@ -168,7 +168,7 @@ pub async fn load_gateway_context(
         log_sender,
         adapter_registry,
         plugins,
-    ).map_err(|e| sqlx::Error::Protocol(e))?)
+    ).await.map_err(|e| sqlx::Error::Protocol(e))?)
 }
 
 impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
@@ -222,7 +222,6 @@ mod tests {
         let state = AppState {
             gateway: Arc::new(RwLock::new(gateway)),
             gateway_server: Arc::new(RwLock::new(None)),
-            provider_name_cache: Arc::new(RwLock::new(HashMap::new())),
             settings_change_tx,
         };
 

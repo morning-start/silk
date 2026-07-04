@@ -46,8 +46,6 @@ pub struct LookupCache {
 pub struct AppState {
     pub gateway: Arc<RwLock<GatewayContext>>,
     pub gateway_server: Arc<RwLock<Option<GatewayServerHandle>>>,
-    /// 渠道 id → name 映射表，用于日志展示时解析渠道名称
-    pub provider_name_cache: Arc<RwLock<HashMap<String, String>>>,
     /// 通用字典表缓存，启动时一次性加载，写操作后刷新
     pub lookup_cache: Arc<RwLock<LookupCache>>,
     /// 网关设置变更通知通道（用于解耦 settings_service → gateway_service 循环依赖）
@@ -65,14 +63,6 @@ impl AppState {
         self.gateway.read().await.route_manager.reload(pool).await.ok();
     }
 
-    /// 刷新渠道名称缓存（从 providers 表重新加载）
-    pub async fn refresh_name_cache(&self) {
-        if let Some(pool) = crate::get_db_pool() {
-            let cache = crate::load_provider_name_cache(pool).await;
-            *self.provider_name_cache.write().await = cache;
-        }
-    }
-
     /// 刷新通用字典表缓存（从 DB 一次性重新加载所有字典表）
     pub async fn refresh_lookup(&self) {
         if let Some(pool) = crate::get_db_pool() {
@@ -80,22 +70,6 @@ impl AppState {
             *self.lookup_cache.write().await = cache;
         }
     }
-}
-
-/// 从 providers 表加载 id → name 映射
-pub async fn load_provider_name_cache(pool: &SqlitePool) -> HashMap<String, String> {
-    use sqlx::Row;
-    let rows = sqlx::query("SELECT id, name FROM providers")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
-    rows.iter()
-        .filter_map(|row| {
-            let id: String = row.get("id");
-            let name: String = row.get("name");
-            Some((id, name))
-        })
-        .collect()
 }
 
 /// 从 DB 一次性加载所有字典表到 LookupCache
@@ -255,10 +229,6 @@ pub fn run() {
                 // 加载网关上下文（不启动 HTTP 服务，由用户手动启动）
                 let gateway = load_gateway_context(pool.clone(), log_sender).await?;
 
-                // 加载渠道名称缓存
-                let provider_name_cache =
-                    Arc::new(RwLock::new(load_provider_name_cache(pool).await));
-
                 // 加载通用字典表缓存
                 let lookup_cache =
                     Arc::new(RwLock::new(load_lookup_cache(pool).await));
@@ -277,7 +247,6 @@ pub fn run() {
                 app.manage(AppState {
                     gateway: Arc::new(RwLock::new(gateway)),
                     gateway_server: Arc::new(RwLock::new(None)),
-                    provider_name_cache,
                     lookup_cache,
                     settings_change_tx,
                 });

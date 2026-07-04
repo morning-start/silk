@@ -81,6 +81,16 @@ pub async fn update(
         let gateway_guard = state.gateway.read().await;
         let mut current = gateway_guard.settings.write().await;
         *current = settings.clone();
+
+        // 热更新限流配置（不影响已有计数器）
+        gateway_guard
+            .rate_limit_state
+            .update_config(
+                settings.rate_limit_enabled,
+                settings.rate_limit_max_requests_per_minute as u64,
+                settings.rate_limit_max_tokens_per_minute as u64,
+            )
+            .await;
     }
 
     if runtime_settings_changed(&previous_settings, &settings) {

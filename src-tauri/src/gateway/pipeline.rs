@@ -5,8 +5,8 @@ use axum::response::Response;
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::middleware::{
-    authenticate, dispatch_upstream, extract, finalize, persist_log, resolve_route, select_channel,
-    transform_request, transform_response,
+    authenticate, dispatch_upstream, extract, finalize, persist_log, rate_limit, resolve_route,
+    select_channel, transform_request, transform_response,
 };
 
 pub struct StageError {
@@ -110,6 +110,9 @@ impl GatewayPipeline {
         let ctx = authenticate::run(ctx, &self.runtime).await?;
         let mut ctx = resolve_route::run(&self.runtime, ctx).await?;
 
+        // 限流检查（resolve_route 之后，基于已确定的 provider）
+        ctx = rate_limit::run(ctx, &self.runtime).await?;
+
         // 执行插件 before_route 钩子
         for plugin in &self.runtime.plugins {
             ctx = plugin.before_route(ctx, &self.runtime).await?;
@@ -156,6 +159,7 @@ impl GatewayPipeline {
                     Err(stage_err) => {
                         // 记录失败的 Key
                         ctx = stage_err.context;
+                        ctx.total_retry_attempts += 1;
                         let failed_key = ctx.selected_api_key.clone();
                         if let Some(ref key) = failed_key {
                             ctx.failed_keys.push(key.clone());

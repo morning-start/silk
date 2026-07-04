@@ -141,7 +141,7 @@ pub async fn list(
     let pool = require_db()?;
     let limit = limit.unwrap_or(50).clamp(1, 500);
     let offset = offset.unwrap_or(0);
-    let cache = state.provider_name_cache.read().await;
+    let cache = state.lookup_cache.read().await;
 
     let logs = LogRepo::find_paginated(pool, limit, offset).await?;
     let total = LogRepo::count(pool).await?;
@@ -159,7 +159,7 @@ pub async fn list(
             .into_iter()
             .map(|l| {
                 let extra = extras_map.get(&l.request_id).cloned();
-                LogResponse::from_log(l, extra, &cache)
+                LogResponse::from_log(l, extra, &cache.provider_names)
             })
             .collect(),
         total,

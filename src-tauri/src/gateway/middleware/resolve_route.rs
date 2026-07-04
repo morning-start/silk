@@ -190,6 +190,10 @@ async fn try_route_fallback(
     let inbound = route.inbound_protocol.clone().unwrap_or_default();
     let outbound = route.outbound_protocol.clone().unwrap_or_default();
     ctx.route = Some(route);
+
+    // 填充渠道列表以支持 3 级回退
+    ctx.channels_available = all_enabled_provider_ids(runtime).await;
+
     fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
 
     Ok(ctx)
@@ -219,6 +223,7 @@ async fn try_settings_default(
                     let inbound = fallback_route.inbound_protocol.clone().unwrap_or_default();
                     let outbound = fallback_route.outbound_protocol.clone().unwrap_or_default();
                     ctx.route = Some(fallback_route);
+                    ctx.channels_available = all_enabled_provider_ids(runtime).await;
                     fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
                     return Ok(ctx);
                 }
@@ -233,6 +238,7 @@ async fn try_settings_default(
             let outbound = resolve_protocol_adapter(&provider);
             let body_json = ctx.get_parsed_body().cloned().unwrap_or(serde_json::Value::Null);
             let inbound = detect_inbound_protocol(&ctx.path, &body_json).to_string();
+            ctx.channels_available = all_enabled_provider_ids(runtime).await;
             fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
             return Ok(ctx);
         }
@@ -273,6 +279,9 @@ async fn try_path_based_default(
             return Err(StageError::new(error_ctx, GatewayError::Database(e)));
         }
     };
+
+    // 填充渠道列表以支持 3 级回退
+    ctx.channels_available = providers.iter().map(|p| p.id.clone()).collect();
 
     let provider = providers.into_iter().next().unwrap();
     let outbound = resolve_protocol_adapter(&provider);
@@ -490,5 +499,13 @@ fn apply_model_override(
             }
             ctx.remote_model_override = Some(remote_model.clone());
         }
+    }
+}
+
+/// 查询所有已启用的 Provider ID 列表（用于 3 级回退的渠道填充）
+async fn all_enabled_provider_ids(runtime: &GatewayContext) -> Vec<String> {
+    match ProviderRepo::find_enabled(&runtime.pool).await {
+        Ok(providers) => providers.into_iter().map(|p| p.id).collect(),
+        Err(_) => Vec::new(),
     }
 }
