@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use tokio::sync::{oneshot, RwLock};
 
 use crate::gateway::header_config::HeaderConfig;
+use crate::gateway::middleware::rate_limit::RateLimitState;
 use crate::models::{GatewaySettings, Provider, RoutingRule};
 use crate::persistence::RoutingRuleRepo;
 use crate::protocol::AdapterRegistry;
@@ -31,10 +32,12 @@ pub struct GatewayContext {
     pub header_config: HeaderConfig,
     /// 网关插件列表
     pub plugins: Vec<Arc<dyn crate::gateway::plugin::GatewayPlugin>>,
+    /// 限流状态（全局共享，配置可热更新）
+    pub rate_limit_state: RateLimitState,
 }
 
 impl GatewayContext {
-    pub fn new(
+    pub async fn new(
         pool: SqlitePool,
         settings: Arc<RwLock<GatewaySettings>>,
         route_manager: Arc<RouteManager>,
@@ -55,6 +58,15 @@ impl GatewayContext {
             .build()
             .map_err(|e| format!("创建流式 HTTP 客户端失败: {e}"))?;
 
+        let rate_limit_state = {
+            let settings_guard = settings.read().await;
+            RateLimitState::new(
+                settings_guard.rate_limit_enabled,
+                settings_guard.rate_limit_max_requests_per_minute as u64,
+                settings_guard.rate_limit_max_tokens_per_minute as u64,
+            )
+        };
+
         Ok(Self {
             pool,
             settings,
@@ -66,6 +78,7 @@ impl GatewayContext {
             http_client_streaming,
             header_config: HeaderConfig::default(),
             plugins,
+            rate_limit_state,
         })
     }
 }
@@ -244,6 +257,8 @@ pub struct RequestContextInner {
     pub failed_providers: Vec<String>,
     /// 模型池映射中可用的渠道列表（provider_id），用于失败回退
     pub channels_available: Vec<String>,
+    /// 累计回退尝试次数（换 Key + 换 Provider），用于日志统计
+    pub total_retry_attempts: u32,
 }
 
 /// 请求上下文 — 整个网关管道的核心数据结构
@@ -354,6 +369,7 @@ impl RequestContext {
                 failed_keys: Vec::new(),
                 failed_providers: Vec::new(),
                 channels_available: Vec::new(),
+                total_retry_attempts: 0,
             },
             response: None,
             stream_complete_rx: None,

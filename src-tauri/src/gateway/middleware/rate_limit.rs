@@ -60,32 +60,47 @@ impl RateCounter {
     }
 }
 
+/// 限流配置（可热更新）
+#[derive(Debug, Clone)]
+struct RateLimitConfig {
+    enabled: bool,
+    max_requests_per_minute: u64,
+    max_tokens_per_minute: u64,
+}
+
 /// 限流状态（全局共享）
 #[derive(Debug, Clone)]
 pub struct RateLimitState {
-    /// 是否启用限流
-    pub enabled: bool,
-    /// 每分钟请求上限
-    max_requests_per_minute: u64,
-    /// 每分钟 token 上限
-    max_tokens_per_minute: u64,
-    /// 按客户端 IP 的计数器
+    /// 可热更新的限流配置
+    config: Arc<tokio::sync::RwLock<RateLimitConfig>>,
+    /// 按客户端 IP 的计数器（穿越配置更新持久保留）
     counters: Arc<DashMap<String, Arc<Mutex<RateCounter>>>>,
 }
 
 impl RateLimitState {
     pub fn new(enabled: bool, max_requests_per_minute: u64, max_tokens_per_minute: u64) -> Self {
         Self {
-            enabled,
-            max_requests_per_minute,
-            max_tokens_per_minute,
+            config: Arc::new(tokio::sync::RwLock::new(RateLimitConfig {
+                enabled,
+                max_requests_per_minute,
+                max_tokens_per_minute,
+            })),
             counters: Arc::new(DashMap::new()),
         }
     }
 
+    /// 热更新限流配置（不影响已有计数器）
+    pub async fn update_config(&self, enabled: bool, max_requests_per_minute: u64, max_tokens_per_minute: u64) {
+        let mut cfg = self.config.write().await;
+        cfg.enabled = enabled;
+        cfg.max_requests_per_minute = max_requests_per_minute;
+        cfg.max_tokens_per_minute = max_tokens_per_minute;
+    }
+
     /// 检查请求是否允许
     pub async fn check(&self, client_ip: String, tokens: u64) -> bool {
-        if !self.enabled {
+        let cfg = self.config.read().await;
+        if !cfg.enabled {
             return true;
         }
 
@@ -97,8 +112,8 @@ impl RateLimitState {
 
         let mut counter = counter.lock().await;
         counter.check_and_increment(
-            self.max_requests_per_minute,
-            self.max_tokens_per_minute,
+            cfg.max_requests_per_minute,
+            cfg.max_tokens_per_minute,
             tokens,
         )
     }
@@ -125,23 +140,18 @@ fn client_ip_from_headers(ctx: &RequestContext) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// 管道级限流检查（在认证之后、路由之前调用）
+/// 管道级限流检查（在 resolve_route 之后、select_channel 之前调用）
 ///
 /// 使用 `ip:provider_id` 作为隔离键，实现 per-provider 独立限流。
 /// 若 provider 未知则降级为 IP 级别。
 pub async fn run(mut ctx: RequestContext, runtime: &GatewayContext) -> Result<RequestContext, StageError> {
-    let state = &runtime.rate_limit_state;
-    if !state.enabled {
-        return Ok(ctx);
-    }
-
     let client_ip = client_ip_from_headers(&ctx);
     let key = match ctx.provider.as_ref() {
         Some(p) => format!("{}:{}", client_ip, p.id),
         None => client_ip,
     };
 
-    if !state.check(key, 0).await {
+    if !runtime.rate_limit_state.check(key, 0).await {
         let err = GatewayError::TooManyRequests;
         ctx.mark_error(err.to_string(), err.error_code().to_string(), err.status_code());
         return Err(StageError::new(ctx, err));

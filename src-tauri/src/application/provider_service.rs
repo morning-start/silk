@@ -144,7 +144,6 @@ pub async fn create(
 
     let provider = ProviderRepo::create(pool, &new).await?;
 
-    state.refresh_name_cache().await;
     state.refresh_lookup().await;
 
     Ok(ProviderResponse::from_provider(provider))
@@ -191,7 +190,6 @@ pub async fn update(
     let provider = require_found(ProviderRepo::update(pool, &id, &update).await?, "Provider")?;
 
     state.invalidate_cache(&id).await;
-    state.refresh_name_cache().await;
     state.refresh_lookup().await;
 
     Ok(ProviderResponse::from_provider(provider))
@@ -268,7 +266,6 @@ pub async fn delete(state: &AppState, id: String) -> Result<bool, ServiceError> 
 
     if deleted {
         state.invalidate_cache(&id).await;
-        state.refresh_name_cache().await;
         state.refresh_lookup().await;
     }
 
