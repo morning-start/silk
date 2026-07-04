@@ -47,16 +47,19 @@ export const useLogsStore = defineStore("logs", () => {
     }
   }
 
-  async function nextPage() {
-    if (page.value < totalPages.value) {
-      await fetchPage(page.value + 1);
+  async function goPage(delta: number) {
+    const targetPage = page.value + delta;
+    if (targetPage >= 1 && targetPage <= totalPages.value) {
+      await fetchPage(targetPage);
     }
   }
 
+  async function nextPage() {
+    await goPage(1);
+  }
+
   async function prevPage() {
-    if (page.value > 1) {
-      await fetchPage(page.value - 1);
-    }
+    await goPage(-1);
   }
 
   async function cleanup(beforeDays: number) {
