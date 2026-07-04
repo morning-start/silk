@@ -11,11 +11,7 @@ impl LogRepo {
     pub async fn insert(pool: &SqlitePool, log: &NewRequestLog) -> Result<RequestLog, sqlx::Error> {
         let id = uuid::Uuid::new_v4().to_string();
         let retry_count = log.retry_count.unwrap_or(0);
-        let stream_enabled = if log.stream_enabled.unwrap_or(false) {
-            1
-        } else {
-            0
-        };
+        let stream_enabled = defaults::bool_to_i64(log.stream_enabled, false);
 
         sqlx::query_as::<_, RequestLog>(
             r#"
@@ -62,11 +58,7 @@ impl LogRepo {
         for log in logs {
             let id = uuid::Uuid::new_v4().to_string();
             let retry_count = log.retry_count.unwrap_or(0);
-            let stream_enabled = if log.stream_enabled.unwrap_or(false) {
-                1
-            } else {
-                0
-            };
+            let stream_enabled = defaults::bool_to_i64(log.stream_enabled, false);
             let result = sqlx::query(
                 r#"
                 INSERT INTO request_logs (id, request_id, method, path, route_id, inbound_protocol, outbound_protocol,

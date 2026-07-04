@@ -13,9 +13,8 @@ impl GatewayKeyRepo {
         pool: &SqlitePool,
         new: &NewGatewayKey,
     ) -> Result<(GatewayKey, String), sqlx::Error> {
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().naive_utc();
-        let enabled = if new.enabled.unwrap_or(true) { 1 } else { 0 };
+        let (id, now) = defaults::new_id_and_now();
+        let enabled = defaults::bool_to_i64(new.enabled, true);
         let key_hash = hash_api_key(&new.key_value);
         let key_prefix = format!("sk-gw-{}", &new.key_value[..8.min(new.key_value.len())]);
         let max_concurrent = new
