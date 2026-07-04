@@ -1,19 +1,43 @@
 import { createRouter, createWebHashHistory } from "vue-router";
-import DashboardView from "../views/DashboardView.vue";
-import ProvidersView from "../views/ProvidersView.vue";
-import ModelSquareView from "../views/ModelSquareView.vue";
-import LogsView from "../views/LogsView.vue";
-import SettingsView from "../views/SettingsView.vue";
-import RoutingRulesView from "../views/RoutingRulesView.vue";
 
 const routes = [
   { path: "/", redirect: "/dashboard" },
-  { path: "/dashboard", name: "dashboard", component: DashboardView, meta: { title: "仪表盘" } },
-  { path: "/providers", name: "providers", component: ProvidersView, meta: { title: "渠道" } },
-  { path: "/model-square", name: "model-square", component: ModelSquareView, meta: { title: "模型" } },
-  { path: "/logs", name: "logs", component: LogsView, meta: { title: "请求日志" } },
-  { path: "/settings", name: "settings", component: SettingsView, meta: { title: "设置" } },
-  { path: "/routing-rules", name: "routing-rules", component: RoutingRulesView, meta: { title: "路由" } },
+  {
+    path: "/dashboard",
+    name: "dashboard",
+    component: () => import("../views/DashboardView.vue"),
+    meta: { title: "仪表盘" },
+  },
+  {
+    path: "/providers",
+    name: "providers",
+    component: () => import("../views/ProvidersView.vue"),
+    meta: { title: "渠道" },
+  },
+  {
+    path: "/model-square",
+    name: "model-square",
+    component: () => import("../views/ModelSquareView.vue"),
+    meta: { title: "模型" },
+  },
+  {
+    path: "/logs",
+    name: "logs",
+    component: () => import("../views/LogsView.vue"),
+    meta: { title: "请求日志" },
+  },
+  {
+    path: "/settings",
+    name: "settings",
+    component: () => import("../views/SettingsView.vue"),
+    meta: { title: "设置" },
+  },
+  {
+    path: "/routing-rules",
+    name: "routing-rules",
+    component: () => import("../views/RoutingRulesView.vue"),
+    meta: { title: "路由" },
+  },
 ];
 
 const router = createRouter({
