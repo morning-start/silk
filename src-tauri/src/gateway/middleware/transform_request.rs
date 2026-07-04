@@ -29,6 +29,8 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         let mut json = body.clone();
         if !json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false) {
             json["stream"] = serde_json::Value::Bool(true);
+            // 请求上游在流式最终 chunk 返回精确 token 用量
+            json["stream_options"] = serde_json::json!({"include_usage": true});
             ctx.update_body(json).map_err(|e| {
                 StageError::new(
                     ctx.clone(),

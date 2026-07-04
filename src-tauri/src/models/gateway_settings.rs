@@ -73,8 +73,18 @@ impl GatewaySettings {
         }
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("读取设置文件失败: {e}"))?;
-        serde_json::from_str::<Self>(&content)
-            .map_err(|e| format!("解析设置文件失败: {e}"))
+        let mut settings = serde_json::from_str::<Self>(&content)
+            .map_err(|e| format!("解析设置文件失败: {e}"))?;
+
+        // 自动迁移：端口 2013 在部分 Windows 系统上被排除范围占用（Hyper-V/Docker），
+        // 静默迁移到新默认端口 9876
+        if settings.bind_port == 2013 {
+            tracing::info!(old_port = 2013, new_port = defaults::DEFAULT_BIND_PORT, "自动迁移网关端口");
+            settings.bind_port = defaults::DEFAULT_BIND_PORT;
+            settings.save(path)?;
+        }
+
+        Ok(settings)
     }
 
     /// 保存网关设置到 JSON 文件

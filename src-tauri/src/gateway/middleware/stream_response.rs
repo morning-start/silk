@@ -387,6 +387,11 @@ impl SseConverter {
     }
 
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
+        // 无需协议转换时直接透传原始事件（inbound == outbound）
+        if self.outbound_to_hub.is_none() && self.hub_to_inbound.is_none() {
+            return Ok(Bytes::from(event.serialize()));
+        }
+
         let data = match &event.data {
             Some(d) => d,
             None => return Ok(Bytes::from(event.serialize())),

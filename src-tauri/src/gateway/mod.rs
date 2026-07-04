@@ -151,6 +151,7 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<NewRequestLog>) {
             response_size_bytes: log.response_size_bytes,
             tokens_input: log.tokens_input,
             tokens_output: log.tokens_output,
+            tokens_sent: log.tokens_sent,
             cost: log.cost,
         })
         .collect();

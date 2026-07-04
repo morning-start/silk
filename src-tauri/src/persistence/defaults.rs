@@ -1,7 +1,7 @@
 //! 数据库层面的默认常量，集中管理 magic numbers
 
 /// 网关默认端口
-pub const DEFAULT_BIND_PORT: i64 = 2013;
+pub const DEFAULT_BIND_PORT: i64 = 9876;
 
 /// 默认日志保留天数
 pub const DEFAULT_LOG_RETENTION_DAYS: i64 = 30;

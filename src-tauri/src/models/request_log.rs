@@ -13,8 +13,10 @@ pub struct RequestLog {
     pub inbound_protocol: Option<String>,
     pub outbound_protocol: Option<String>,
     pub status_code: Option<i64>,
-    /// 响应时间（毫秒）
+    /// 响应时间（毫秒），从请求开始到第一个响应字节
     pub resp_ms: Option<i64>,
+    /// 总耗时（毫秒），从请求开始到最后一个响应字节（流结束）
+    pub total_duration_ms: Option<i64>,
     pub provider_id: Option<String>,
     pub error_message: Option<String>,
     pub error_code: Option<String>,
@@ -40,8 +42,10 @@ pub struct NewRequestLog {
     pub inbound_protocol: Option<String>,
     pub outbound_protocol: Option<String>,
     pub status_code: Option<i64>,
-    /// 响应时间（毫秒）
+    /// 响应时间（毫秒），从请求开始到第一个响应字节
     pub resp_ms: Option<i64>,
+    /// 总耗时（毫秒），从请求开始到最后一个响应字节（流结束）
+    pub total_duration_ms: Option<i64>,
     pub provider_id: Option<String>,
     pub error_message: Option<String>,
     pub error_code: Option<String>,
@@ -56,6 +60,8 @@ pub struct NewRequestLog {
     pub response_size_bytes: Option<i64>,
     pub tokens_input: Option<i64>,
     pub tokens_output: Option<i64>,
+    /// 发送给上游渠道的请求 token 估算（反应插件优化效果）
+    pub tokens_sent: Option<i64>,
     /// 本次请求费用（美元），非流式响应时计算
     pub cost: Option<f64>,
     /// 认证使用的 Gateway Key 名称
@@ -74,6 +80,7 @@ pub struct RequestLogExtraToken {
     pub response_size_bytes: Option<i64>,
     pub tokens_input: Option<i64>,
     pub tokens_output: Option<i64>,
+    pub tokens_sent: Option<i64>,
     pub cost: Option<f64>,
 }
 
@@ -86,5 +93,6 @@ pub struct NewRequestLogExtraToken {
     pub response_size_bytes: Option<i64>,
     pub tokens_input: Option<i64>,
     pub tokens_output: Option<i64>,
+    pub tokens_sent: Option<i64>,
     pub cost: Option<f64>,
 }
