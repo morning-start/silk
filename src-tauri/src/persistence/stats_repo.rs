@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use sqlx::Row;
 use sqlx::SqlitePool;
 
 use crate::models::RequestLog;
@@ -21,7 +20,7 @@ pub struct DashboardAggregate {
 }
 
 impl StatsRepo {
-    /// 单次查询获取所有仪表盘统计数据（替代 6 次独立查询）
+    /// 单次查询获取所有仪表盘统计数据
     pub async fn dashboard_aggregate(pool: &SqlitePool) -> Result<DashboardAggregate, sqlx::Error> {
         use sqlx::Row;
 
@@ -65,102 +64,6 @@ impl StatsRepo {
             total_requests: row.get::<i64, _>("total_requests"),
             yesterday_requests: row.get::<i64, _>("yesterday_requests"),
         })
-    }
-    /// 获取今日请求总数
-    pub async fn today_request_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT COUNT(*) as count FROM request_logs
-            WHERE timestamp >= datetime('now', 'start of day')
-              AND timestamp < datetime('now', 'start of day', '+1 day')
-            "#,
-        )
-        .fetch_one(pool)
-        .await?;
-        Ok(row.get::<i64, _>("count"))
-    }
-
-    /// 获取今日成功请求数（2xx 状态码）
-    pub async fn today_success_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT COUNT(*) as count FROM request_logs
-            WHERE timestamp >= datetime('now', 'start of day')
-              AND timestamp < datetime('now', 'start of day', '+1 day')
-              AND status_code >= 200 AND status_code < 300
-            "#,
-        )
-        .fetch_one(pool)
-        .await?;
-        Ok(row.get::<i64, _>("count"))
-    }
-
-    /// 获取今日平均响应时间（ms）
-    pub async fn today_avg_duration_ms(pool: &SqlitePool) -> Result<Option<f64>, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT AVG(resp_ms) as avg_duration FROM request_logs
-            WHERE timestamp >= datetime('now', 'start of day')
-              AND timestamp < datetime('now', 'start of day', '+1 day')
-              AND resp_ms IS NOT NULL
-            "#,
-        )
-        .fetch_one(pool)
-        .await?;
-        Ok(row.get::<Option<f64>, _>("avg_duration"))
-    }
-
-    /// 获取今日 Token 消耗总量
-    pub async fn today_total_tokens(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT COALESCE(SUM(re.tokens_input + re.tokens_output), 0) as total
-            FROM request_log_extra_token re
-            INNER JOIN request_logs rl ON re.request_id = rl.request_id
-            WHERE rl.timestamp >= datetime('now', 'start of day')
-              AND rl.timestamp < datetime('now', 'start of day', '+1 day')
-            "#,
-        )
-        .fetch_one(pool)
-        .await?;
-        Ok(row.get::<i64, _>("total"))
-    }
-
-    /// 获取活跃 Provider 数量（今日有请求的）
-    pub async fn today_active_providers(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT COUNT(DISTINCT provider_id) as count FROM request_logs
-            WHERE timestamp >= datetime('now', 'start of day')
-              AND timestamp < datetime('now', 'start of day', '+1 day')
-              AND provider_id IS NOT NULL
-            "#,
-        )
-        .fetch_one(pool)
-        .await?;
-        Ok(row.get::<i64, _>("count"))
-    }
-
-    /// 获取总日志数
-    pub async fn total_request_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query(r#"SELECT COUNT(*) as count FROM request_logs"#)
-            .fetch_one(pool)
-            .await?;
-        Ok(row.get::<i64, _>("count"))
-    }
-
-    /// 获取昨日请求数（用于对比）
-    pub async fn yesterday_request_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT COUNT(*) as count FROM request_logs
-            WHERE timestamp >= datetime('now', '-1 day', 'start of day')
-              AND timestamp < datetime('now', 'start of day')
-            "#,
-        )
-        .fetch_one(pool)
-        .await?;
-        Ok(row.get::<i64, _>("count"))
     }
 
     /// 获取最近 N 条请求（用于仪表盘最近请求列表）
