@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{require_db, require_found, ServiceError};
 use crate::models::{GatewayKey, NewGatewayKey, UpdateGatewayKey};
 use crate::persistence::GatewayKeyRepo;
+use crate::{impl_crud_list, impl_crud_get, impl_crud_delete};
 
 // ---------------------------------------------------------------------------
 // Response Types
@@ -66,22 +67,12 @@ pub struct UpdateGatewayKeyPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Service Functions
+// CRUD（list / get / delete 由宏生成）
 // ---------------------------------------------------------------------------
 
-/// 查询所有网关 Key
-pub async fn list() -> Result<Vec<GatewayKeyResponse>, ServiceError> {
-    let pool = require_db()?;
-    let keys = GatewayKeyRepo::find_all(pool).await?;
-    Ok(keys.into_iter().map(GatewayKeyResponse::from).collect())
-}
-
-/// 根据 ID 查询网关 Key
-pub async fn get(id: String) -> Result<GatewayKeyResponse, ServiceError> {
-    let pool = require_db()?;
-    let key = require_found(GatewayKeyRepo::find_by_id(pool, &id).await?, "网关 Key")?;
-    Ok(GatewayKeyResponse::from(key))
-}
+impl_crud_list!(GatewayKeyResponse, GatewayKeyRepo, "网关 Key");
+impl_crud_get!(GatewayKeyResponse, GatewayKeyRepo, "网关 Key");
+impl_crud_delete!(GatewayKeyRepo);
 
 /// 创建网关 Key
 pub async fn create(payload: CreateGatewayKeyPayload) -> Result<CreateGatewayKeyResponse, ServiceError> {
@@ -116,10 +107,4 @@ pub async fn update(id: String, payload: UpdateGatewayKeyPayload) -> Result<Gate
     };
     let key = require_found(GatewayKeyRepo::update(pool, &id, &update).await?, "网关 Key")?;
     Ok(GatewayKeyResponse::from(key))
-}
-
-/// 删除网关 Key
-pub async fn delete(id: String) -> Result<bool, ServiceError> {
-    let pool = require_db()?;
-    GatewayKeyRepo::delete(pool, &id).await.map_err(ServiceError::from)
 }
