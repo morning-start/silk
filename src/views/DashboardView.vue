@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, h } from "vue";
 import { useRouter } from "vue-router";
+import { formatMs } from "../utils/format";
 import {
   NCard,
   NGrid,
@@ -80,17 +81,7 @@ const columns: DataTableColumns<RequestLog> = [
     key: "resp_ms",
     width: 65,
     render(row) {
-      const ms = row.resp_ms;
-      if (ms == null) return "-";
-      let text: string;
-      if (ms < 1000) {
-        text = `${ms}ms`;
-      } else if (ms < 60000) {
-        text = `${(ms / 1000).toFixed(1)}s`;
-      } else {
-        text = `${(ms / 60000).toFixed(1)}m`;
-      }
-      return h("span", { class: "num" }, text);
+      return h("span", { class: "num" }, formatMs(row.resp_ms));
     },
   },
   {
@@ -98,17 +89,7 @@ const columns: DataTableColumns<RequestLog> = [
     key: "total_duration_ms",
     width: 65,
     render(row) {
-      const ms = row.total_duration_ms;
-      if (ms == null) return "-";
-      let text: string;
-      if (ms < 1000) {
-        text = `${ms}ms`;
-      } else if (ms < 60000) {
-        text = `${(ms / 1000).toFixed(1)}s`;
-      } else {
-        text = `${(ms / 60000).toFixed(1)}m`;
-      }
-      return h("span", { class: "num" }, text);
+      return h("span", { class: "num" }, formatMs(row.total_duration_ms));
     },
   },
   { title: "渠道", key: "provider_id", width: 90,
