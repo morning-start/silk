@@ -66,21 +66,41 @@ const columns: DataTableColumns<RequestLog> = [
     },
   },
   {
-    title: "耗时",
+    title: "响应",
     key: "resp_ms",
-    width: 80,
+    width: 65,
     render(row) {
       if (row.resp_ms == null) return "-";
-      return h("span", { class: "num" }, `${row.resp_ms}ms`);
+      const ms = row.resp_ms;
+      return h("span", { class: "num" }, ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
+    },
+  },
+  {
+    title: "耗时",
+    key: "total_duration_ms",
+    width: 65,
+    render(row) {
+      if (row.total_duration_ms == null) return "-";
+      const ms = row.total_duration_ms;
+      return h("span", { class: "num" }, ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
     },
   },
   {
     title: "Token",
-    key: "tokens_input",
-    width: 70,
+    key: "tokens_sent",
+    width: 100,
     render(row) {
-      const total = (row.tokens_input || 0) + (row.tokens_output || 0);
-      return h("span", { class: "num" }, total ? `${total}` : "-");
+      const inp = row.tokens_input || 0;
+      const out = row.tokens_output || 0;
+      const sent = row.tokens_sent || 0;
+      if (inp + out === 0 && sent === 0) return "-";
+      // 显示节省：tokens_input - tokens_sent（正数=优化节省）
+      const saved = inp > sent ? inp - sent : null;
+      const parts = [`↑${((inp + out) / 1000).toFixed(1)}k`];
+      if (saved !== null && saved > 0) {
+        parts.push(`-${saved}`);
+      }
+      return h("span", { class: "num" }, parts.join(" "));
     },
   },
   {
@@ -303,8 +323,12 @@ onMounted(() => {
           </NTag>
         </div>
         <div class="detail-row">
-          <span class="detail-label">耗时：</span>
+          <span class="detail-label">响应：</span>
           <span class="detail-value">{{ selectedLog.resp_ms }}ms</span>
+        </div>
+        <div class="detail-row" v-if="selectedLog.total_duration_ms != null">
+          <span class="detail-label">耗时：</span>
+          <span class="detail-value">{{ selectedLog.total_duration_ms }}ms</span>
         </div>
         <div class="detail-row" v-if="selectedLog.inbound_protocol || selectedLog.outbound_protocol">
           <span class="detail-label">协议(入→出)：</span>
@@ -343,8 +367,13 @@ onMounted(() => {
           <span class="detail-value">{{ (selectedLog.response_size_bytes || 0).toLocaleString() }} bytes</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">Token (输入/输出)：</span>
-          <span class="detail-value">{{ selectedLog.tokens_input || 0 }} / {{ selectedLog.tokens_output || 0 }}</span>
+          <span class="detail-label">Token (输入/发送/输出)：</span>
+          <span class="detail-value">
+            {{ selectedLog.tokens_input || 0 }} / {{ selectedLog.tokens_sent || 0 }} / {{ selectedLog.tokens_output || 0 }}
+            <span v-if="selectedLog.tokens_input != null && selectedLog.tokens_sent != null && selectedLog.tokens_input > selectedLog.tokens_sent" style="color: #22c55e; margin-left: 8px">
+              优化 -{{ selectedLog.tokens_input - selectedLog.tokens_sent }}
+            </span>
+          </span>
         </div>
         <div class="detail-row" v-if="selectedLog.cost != null">
           <span class="detail-label">费用：</span>

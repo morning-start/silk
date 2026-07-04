@@ -76,16 +76,46 @@ const columns: DataTableColumns<RequestLog> = [
     },
   },
   {
-    title: "耗时",
+    title: "响应",
     key: "resp_ms",
-    width: 70,
+    width: 65,
     render(row) {
       const ms = row.resp_ms;
       if (ms == null) return "-";
-      return h("span", { class: "num" }, `${ms}ms`);
+      let text: string;
+      if (ms < 1000) {
+        text = `${ms}ms`;
+      } else if (ms < 60000) {
+        text = `${(ms / 1000).toFixed(1)}s`;
+      } else {
+        text = `${(ms / 60000).toFixed(1)}m`;
+      }
+      return h("span", { class: "num" }, text);
     },
   },
-  { title: "渠道", key: "provider_id", width: 90 },
+  {
+    title: "耗时",
+    key: "total_duration_ms",
+    width: 65,
+    render(row) {
+      const ms = row.total_duration_ms;
+      if (ms == null) return "-";
+      let text: string;
+      if (ms < 1000) {
+        text = `${ms}ms`;
+      } else if (ms < 60000) {
+        text = `${(ms / 1000).toFixed(1)}s`;
+      } else {
+        text = `${(ms / 60000).toFixed(1)}m`;
+      }
+      return h("span", { class: "num" }, text);
+    },
+  },
+  { title: "渠道", key: "provider_id", width: 90,
+    render(row) {
+      return row.provider_name || row.provider_id || "-";
+    },
+  },
 ];
 
 async function loadData() {
