@@ -138,7 +138,7 @@ Authorization: Bearer <gateway-key>
 
 3. **路由规则降级**：如果模型映射未命中，再按 `RoutingRule` 匹配（匹配维度：Host + Path + Method + ContentType）。
    - 如果路由规则命中且指定了 `target_provider_id`，直接使用该 Provider。
-   - 如果路由规则指定了 `target_group_id`，通过 GroupManager 做 Provider 分组负载均衡。
+    - 如果路由规则指定了 `target_group_id`，该字段仅作为历史兼容保留，不再进入独立分组负载均衡流程。
    - 路由规则也决定了入站/出站协议映射。
 
 4. **最终结果**：路由成功后，`resolve_route` 阶段设置 `ctx.provider`、`inbound_protocol`、`outbound_protocol` 和 `adapter_registry`，后续阶段使用这些信息进行协议转换和上游转发。
@@ -309,4 +309,3 @@ curl http://127.0.0.1:1234/v1/responses \
 - `/v1/*` 是否最终转发，取决于本地模型映射和路由规则
 - `/v1/*` 路径的请求需要认证。网关同时支持 `Authorization: Bearer <key>`（OpenAI 风格）和 `x-api-key: <key>`（Anthropic 风格）两种认证方式，认证令牌会做哈希后在本地 `gateway_keys` 表中校验
 - 本文档以当前代码实现为准
-

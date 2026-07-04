@@ -4,7 +4,7 @@ use crate::error::{require_db, require_found, ServiceError};
 use crate::models::{NewRoutingRule, RoutingRule, UpdateRoutingRule};
 use crate::persistence::RoutingRuleRepo;
 use crate::AppState;
-use crate::{impl_crud_list, impl_crud_get};
+use crate::{impl_crud_get, impl_crud_list};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,16 +77,17 @@ pub async fn create(
     payload: CreateRoutingRulePayload,
 ) -> Result<RoutingRuleResponse, ServiceError> {
     let pool = require_db()?;
+    validate_create_payload(&payload)?;
 
     let new = NewRoutingRule {
-        name: payload.name,
+        name: payload.name.trim().to_string(),
         match_host: payload.match_host,
-        match_path: payload.match_path,
+        match_path: payload.match_path.trim().to_string(),
         match_method: payload.match_method,
         match_content_type: payload.match_content_type,
         inbound_protocol: payload.inbound_protocol,
         outbound_protocol: payload.outbound_protocol,
-        target_provider_id: payload.target_provider_id,
+        target_provider_id: payload.target_provider_id.trim().to_string(),
         target_group_id: payload.target_group_id,
         protocol_conversion: payload.protocol_conversion,
         model_name_override: payload.model_name_override,
@@ -109,16 +110,19 @@ pub async fn update(
     payload: UpdateRoutingRulePayload,
 ) -> Result<RoutingRuleResponse, ServiceError> {
     let pool = require_db()?;
+    validate_update_payload(&payload)?;
 
     let update = UpdateRoutingRule {
-        name: payload.name,
+        name: payload.name.map(|name| name.trim().to_string()),
         match_host: payload.match_host,
-        match_path: payload.match_path,
+        match_path: payload.match_path.map(|path| path.trim().to_string()),
         match_method: payload.match_method,
         match_content_type: payload.match_content_type,
         inbound_protocol: payload.inbound_protocol,
         outbound_protocol: payload.outbound_protocol,
-        target_provider_id: payload.target_provider_id,
+        target_provider_id: payload
+            .target_provider_id
+            .map(|provider_id| provider_id.trim().to_string()),
         target_group_id: payload.target_group_id,
         protocol_conversion: payload.protocol_conversion,
         model_name_override: payload.model_name_override,
@@ -127,7 +131,10 @@ pub async fn update(
         ..Default::default()
     };
 
-    let rule = require_found(RoutingRuleRepo::update(pool, &id, &update).await?, "路由规则")?;
+    let rule = require_found(
+        RoutingRuleRepo::update(pool, &id, &update).await?,
+        "路由规则",
+    )?;
 
     state.reload_routes(pool).await;
     state.refresh_lookup().await;
@@ -167,5 +174,134 @@ impl From<RoutingRule> for RoutingRuleResponse {
             created_at: r.created_at.to_string(),
             updated_at: r.updated_at.to_string(),
         }
+    }
+}
+
+fn validate_create_payload(payload: &CreateRoutingRulePayload) -> Result<(), ServiceError> {
+    validate_non_empty("路由名称", &payload.name)?;
+    validate_match_path(&payload.match_path)?;
+    validate_method(payload.match_method.as_deref())?;
+    validate_non_empty("目标渠道", &payload.target_provider_id)?;
+    validate_priority(payload.priority)?;
+    Ok(())
+}
+
+fn validate_update_payload(payload: &UpdateRoutingRulePayload) -> Result<(), ServiceError> {
+    if let Some(name) = &payload.name {
+        validate_non_empty("路由名称", name)?;
+    }
+    if let Some(path) = &payload.match_path {
+        validate_match_path(path)?;
+    }
+    validate_method(payload.match_method.as_deref())?;
+    if let Some(provider_id) = &payload.target_provider_id {
+        validate_non_empty("目标渠道", provider_id)?;
+    }
+    validate_priority(payload.priority)?;
+    Ok(())
+}
+
+fn validate_match_path(path: &str) -> Result<(), ServiceError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return bad_request("匹配路径不能为空");
+    }
+    if !trimmed.starts_with('/') {
+        return bad_request("匹配路径必须以 / 开头");
+    }
+    Ok(())
+}
+
+fn validate_method(method: Option<&str>) -> Result<(), ServiceError> {
+    if let Some(method) = method {
+        if !matches!(method, "GET" | "POST" | "PUT" | "DELETE" | "*") {
+            return bad_request("匹配方法无效");
+        }
+    }
+    Ok(())
+}
+
+fn validate_priority(priority: Option<i64>) -> Result<(), ServiceError> {
+    if let Some(priority) = priority {
+        if priority < 0 {
+            return bad_request("路由优先级不能为负数");
+        }
+    }
+    Ok(())
+}
+
+fn validate_non_empty(field: &str, value: &str) -> Result<(), ServiceError> {
+    if value.trim().is_empty() {
+        return bad_request(&format!("{field}不能为空"));
+    }
+    Ok(())
+}
+
+fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
+    Err(ServiceError::BadRequest {
+        message: message.to_string(),
+        code: None,
+    })
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    #[test]
+    fn validate_route_rejects_empty_required_fields() {
+        let mut payload = valid_create_payload();
+        payload.name = " ".to_string();
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.match_path = " ".to_string();
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.target_provider_id = " ".to_string();
+        assert_bad_request(validate_create_payload(&payload));
+    }
+
+    #[test]
+    fn validate_route_rejects_invalid_method_path_and_priority() {
+        let mut payload = valid_create_payload();
+        payload.match_path = "v1/chat".to_string();
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.match_method = Some("PATCH".to_string());
+        assert_bad_request(validate_create_payload(&payload));
+
+        let mut payload = valid_create_payload();
+        payload.priority = Some(-1);
+        assert_bad_request(validate_create_payload(&payload));
+    }
+
+    #[test]
+    fn validate_route_accepts_valid_create_payload() {
+        validate_create_payload(&valid_create_payload()).expect("valid route");
+    }
+
+    fn valid_create_payload() -> CreateRoutingRulePayload {
+        CreateRoutingRulePayload {
+            name: "chat".to_string(),
+            match_host: None,
+            match_path: "/v1/chat/completions".to_string(),
+            match_method: Some("POST".to_string()),
+            match_content_type: None,
+            inbound_protocol: None,
+            outbound_protocol: None,
+            target_provider_id: "provider-1".to_string(),
+            target_group_id: None,
+            protocol_conversion: Some(true),
+            model_name_override: None,
+            priority: Some(100),
+            enabled: Some(true),
+        }
+    }
+
+    fn assert_bad_request(result: Result<(), ServiceError>) {
+        assert!(matches!(result, Err(ServiceError::BadRequest { .. })));
     }
 }

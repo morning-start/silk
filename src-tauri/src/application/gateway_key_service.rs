@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{require_db, require_found, ServiceError};
 use crate::models::{GatewayKey, NewGatewayKey, UpdateGatewayKey};
 use crate::persistence::GatewayKeyRepo;
-use crate::{impl_crud_list, impl_crud_get, impl_crud_delete};
+use crate::{impl_crud_delete, impl_crud_get, impl_crud_list};
 
 // ---------------------------------------------------------------------------
 // Response Types
@@ -75,15 +75,23 @@ impl_crud_get!(GatewayKeyResponse, GatewayKeyRepo, "网关 Key");
 impl_crud_delete!(GatewayKeyRepo);
 
 /// 创建网关 Key
-pub async fn create(payload: CreateGatewayKeyPayload) -> Result<CreateGatewayKeyResponse, ServiceError> {
+pub async fn create(
+    payload: CreateGatewayKeyPayload,
+) -> Result<CreateGatewayKeyResponse, ServiceError> {
     let pool = require_db()?;
-    let key_value = if payload.key_value.is_empty() {
-        format!("sk-gw-{}", uuid::Uuid::new_v4().to_string().replace("-", ""))
+    validate_name(&payload.name)?;
+    validate_max_concurrent(payload.max_concurrent)?;
+
+    let key_value = if payload.key_value.trim().is_empty() {
+        format!(
+            "sk-gw-{}",
+            uuid::Uuid::new_v4().to_string().replace("-", "")
+        )
     } else {
-        payload.key_value
+        payload.key_value.trim().to_string()
     };
     let new = NewGatewayKey {
-        name: payload.name,
+        name: payload.name.trim().to_string(),
         key_value,
         enabled: payload.enabled,
         expires_at: payload.expires_at,
@@ -97,14 +105,76 @@ pub async fn create(payload: CreateGatewayKeyPayload) -> Result<CreateGatewayKey
 }
 
 /// 更新网关 Key
-pub async fn update(id: String, payload: UpdateGatewayKeyPayload) -> Result<GatewayKeyResponse, ServiceError> {
+pub async fn update(
+    id: String,
+    payload: UpdateGatewayKeyPayload,
+) -> Result<GatewayKeyResponse, ServiceError> {
     let pool = require_db()?;
+    if let Some(name) = &payload.name {
+        validate_name(name)?;
+    }
+    validate_max_concurrent(payload.max_concurrent)?;
+
     let update = UpdateGatewayKey {
-        name: payload.name,
+        name: payload.name.map(|name| name.trim().to_string()),
         enabled: payload.enabled,
         expires_at: payload.expires_at,
         max_concurrent: payload.max_concurrent,
     };
-    let key = require_found(GatewayKeyRepo::update(pool, &id, &update).await?, "网关 Key")?;
+    let key = require_found(
+        GatewayKeyRepo::update(pool, &id, &update).await?,
+        "网关 Key",
+    )?;
     Ok(GatewayKeyResponse::from(key))
+}
+
+fn validate_name(name: &str) -> Result<(), ServiceError> {
+    if name.trim().is_empty() {
+        return bad_request("Key 名称不能为空");
+    }
+    Ok(())
+}
+
+fn validate_max_concurrent(value: Option<i64>) -> Result<(), ServiceError> {
+    if let Some(value) = value {
+        if !(1..=1000).contains(&value) {
+            return bad_request("Key 并发数必须在 1-1000 之间");
+        }
+    }
+    Ok(())
+}
+
+fn bad_request<T>(message: &str) -> Result<T, ServiceError> {
+    Err(ServiceError::BadRequest {
+        message: message.to_string(),
+        code: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_rejects_empty_key_name() {
+        assert_bad_request(validate_name(" "));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_concurrency() {
+        assert_bad_request(validate_max_concurrent(Some(0)));
+        assert_bad_request(validate_max_concurrent(Some(1001)));
+    }
+
+    #[test]
+    fn validate_accepts_gateway_key_bounds() {
+        validate_name("默认 Key").expect("valid name");
+        validate_max_concurrent(Some(1)).expect("min concurrency");
+        validate_max_concurrent(Some(1000)).expect("max concurrency");
+        validate_max_concurrent(None).expect("default concurrency");
+    }
+
+    fn assert_bad_request(result: Result<(), ServiceError>) {
+        assert!(matches!(result, Err(ServiceError::BadRequest { .. })));
+    }
 }
