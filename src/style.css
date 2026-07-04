@@ -1,11 +1,38 @@
 @import "tailwindcss";
 
-/* ===== CSS Variables ===== */
+/* ===== CSS Variables (matching design/index.html) ===== */
 :root {
-  --sidebar-bg: #1e293b;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-alt: #f1f5f9;
+  --fg: #0f172a;
+  --fg-2: #334155;
+  --muted: #64748b;
+  --border: #cbd5e1;
+  --border-soft: #e2e8f0;
+
+  --accent: #0891b2;
+  --accent-hover: #0e7490;
+  --accent-soft: rgba(8, 145, 178, 0.08);
+
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.1);
+
+  --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.1);
+
+  --danger: #ef4444;
+  --danger-soft: rgba(239, 68, 68, 0.1);
+
+  --sidebar-bg: #0f172a;
+  --sidebar-fg: #94a3b8;
+  --sidebar-active: #f8fafc;
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-width: 240px;
+
   --topbar-bg: #ffffff;
   --topbar-border: #e2e8f0;
-  --topbar-title: #1e293b;
+  --topbar-title: #0f172a;
   --content-bg: #f8fafc;
   --status-bg: #f1f5f9;
   --border-color: #e2e8f0;
@@ -13,6 +40,15 @@
   --text-color-3: #64748b;
   --hover-bg: #f8fafc;
   --card-bg: #ffffff;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --transition: 150ms ease;
 }
 
 /* ===== Global Reset ===== */
@@ -36,49 +72,9 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ===== Sidebar overrides ===== */
+/* ===== NLayoutSider ===== */
 .n-layout-sider {
   background: var(--sidebar-bg) !important;
-}
-
-.n-layout-sider .n-menu {
-  background: transparent !important;
-}
-
-.n-layout-sider .n-menu-item-content {
-  border-radius: 6px !important;
-  margin: 2px 8px !important;
-}
-
-.n-layout-sider .n-menu-item-content--hover,
-.n-layout-sider .n-menu-item-content:hover {
-  background: rgba(255, 255, 255, 0.08) !important;
-}
-
-.n-layout-sider .n-menu-item-content--selected {
-  background: rgba(99, 102, 241, 0.2) !important;
-  color: #818cf8 !important;
-}
-
-.n-layout-sider .n-menu-item-content--selected .n-menu-item-content__icon {
-  color: #818cf8 !important;
-}
-
-.n-layout-sider .n-menu-item-content__arrow {
-  color: rgba(255, 255, 255, 0.4) !important;
-}
-
-.n-layout-sider .n-menu-item-group-header {
-  color: rgba(255, 255, 255, 0.35) !important;
-  font-size: 11px !important;
-  font-weight: 600 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
-  padding: 12px 16px 6px !important;
-}
-
-.n-layout-sider .n-menu-item-group-header:hover {
-  background: transparent !important;
 }
 
 /* ===== Scrollbar ===== */
@@ -117,11 +113,11 @@ body {
 }
 
 .n-card:not(.n-card--bordered-true) {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 
 .n-card:not(.n-card--bordered-true):hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow);
 }
 
 /* ===== Data Table ===== */
@@ -132,8 +128,8 @@ body {
 .n-data-table th {
   font-weight: 600 !important;
   font-size: 12px !important;
-  color: #64748b !important;
-  background: #f8fafc !important;
+  color: var(--muted) !important;
+  background: var(--bg) !important;
 }
 
 .n-data-table .n-data-table-tr--striped {
@@ -147,16 +143,16 @@ body {
 
 /* ===== Button ===== */
 .n-button--primary-type.n-button--quaternary {
-  color: #6366f1;
+  color: var(--accent);
 }
 
 /* ===== Modal ===== */
 .n-modal {
-  border-radius: 16px !important;
+  border-radius: var(--radius-xl) !important;
 }
 
 .n-modal .n-card {
-  border-radius: 16px !important;
+  border-radius: var(--radius-xl) !important;
 }
 
 /* ===== Form ===== */
@@ -172,17 +168,32 @@ body {
 
 /* ===== Switch ===== */
 .n-switch--active {
-  --n-rail-color: #6366f1 !important;
+  --n-rail-color: var(--success) !important;
 }
 
 /* ===== Dark Theme ===== */
 body.dark {
-  --sidebar-bg: #0a0a10;
-  --topbar-bg: #16161e;
-  --topbar-border: #2a2a38;
-  --topbar-title: #e8e8ec;
-  --content-bg: #0f0f14;
-  --status-bg: #1a1a24;
+  --bg: #0b0f19;
+  --surface: #131924;
+  --surface-alt: #1a2232;
+  --fg: #f1f5f9;
+  --fg-2: #cbd5e1;
+  --muted: #94a3b8;
+  --border: #242f41;
+  --border-soft: #1e293b;
+  --accent-soft: rgba(8, 145, 178, 0.15);
+  --success-soft: rgba(16, 185, 129, 0.15);
+  --warn-soft: rgba(245, 158, 11, 0.15);
+  --danger-soft: rgba(239, 68, 68, 0.15);
+  --sidebar-bg: #070a13;
+  --sidebar-fg: #64748b;
+  --sidebar-active: #f8fafc;
+  --sidebar-width: 240px;
+  --topbar-bg: #0b0f19;
+  --topbar-border: #1e293b;
+  --topbar-title: #f1f5f9;
+  --content-bg: #0b0f19;
+  --status-bg: #1a2232;
   --border-color: #2a2a38;
   --text-color-2: #a0a0b0;
   --text-color-3: #6b6b7b;
@@ -190,13 +201,26 @@ body.dark {
   --card-bg: #1a1a24;
 }
 
+/* Dark theme topbar — blurred dark glass */
+body.dark .app-topbar {
+  background: rgba(11, 15, 25, 0.88) !important;
+  backdrop-filter: blur(14px) !important;
+}
+
+body.dark .topbar-btn,
+body.dark .theme-toggle,
+body.dark .listen-pill {
+  background: transparent !important;
+  border-color: #242f41 !important;
+}
+
 body.dark .n-card:not(.n-card--bordered-true) {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
 body.dark .n-data-table th {
-  background: #22222f !important;
-  color: #6b6b7b !important;
+  background: var(--surface-alt) !important;
+  color: var(--muted) !important;
 }
 
 body.dark .n-data-table .n-data-table-tr--striped {
@@ -239,11 +263,11 @@ body.dark ::-webkit-scrollbar-thumb:hover {
   font-size: 16px;
   font-weight: 600;
   margin: 0 0 6px;
-  color: var(--text-color-1, #1e293b);
+  color: var(--fg, #0f172a);
 }
 .empty-state .empty-desc {
   font-size: 13px;
-  color: var(--text-color-3, #94a3b8);
+  color: var(--muted, #94a3b8);
   margin: 0 0 20px;
   max-width: 380px;
   line-height: 1.5;
@@ -264,12 +288,12 @@ body.dark ::-webkit-scrollbar-thumb:hover {
 .error-state .error-title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--text-color-1, #1e293b);
+  color: var(--fg, #0f172a);
   margin: 0 0 8px;
 }
 .error-state .error-desc {
   font-size: 13px;
-  color: var(--text-color-3, #94a3b8);
+  color: var(--muted, #94a3b8);
   margin: 0 0 20px;
   max-width: 400px;
 }

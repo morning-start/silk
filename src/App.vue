@@ -7,9 +7,9 @@ const isDark = ref(false);
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: "#6366f1",
-    primaryColorHover: "#818cf8",
-    primaryColorPressed: "#4f46e5",
+    primaryColor: "#0891b2",
+    primaryColorHover: "#0e7490",
+    primaryColorPressed: "#0c6a83",
     bodyColor: "#f8fafc",
     cardColor: "#ffffff",
     modalColor: "#ffffff",
@@ -18,20 +18,20 @@ const themeOverrides: GlobalThemeOverrides = {
 
 const darkOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: "#818cf8",
-    primaryColorHover: "#a5b4fc",
-    primaryColorPressed: "#6366f1",
-    bodyColor: "#0f172a",
-    cardColor: "#1e293b",
-    modalColor: "#1e293b",
-    borderColor: "#334155",
-    dividerColor: "#334155",
+    primaryColor: "#06b6d4",
+    primaryColorHover: "#22d3ee",
+    primaryColorPressed: "#0891b2",
+    bodyColor: "#0b0f19",
+    cardColor: "#131924",
+    modalColor: "#131924",
+    borderColor: "#242f41",
+    dividerColor: "#242f41",
     textColor1: "#f1f5f9",
     textColor2: "#cbd5e1",
-    textColor3: "#64748b",
+    textColor3: "#94a3b8",
     placeholderColor: "#475569",
-    popoverColor: "#1e293b",
-    hoverColor: "#334155",
+    popoverColor: "#131924",
+    hoverColor: "#1e293b",
   },
 };
 </script>

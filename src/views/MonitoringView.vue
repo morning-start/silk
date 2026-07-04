@@ -163,11 +163,11 @@ onMounted(() => loadData(24));
 }
 
 .stat-value.accent {
-  color: #6366f1;
+  color: var(--accent, #0891b2);
 }
 
 .stat-value.success {
-  color: #22c55e;
+  color: var(--success, #10b981);
 }
 
 .stat-unit {

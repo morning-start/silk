@@ -1,28 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, h, computed } from "vue";
+import { ref, onMounted, watch, computed } from "vue";
 import { useRouter } from "vue-router";
 import { formatMs } from "../utils/format";
 import {
-  NCard,
-  NGrid,
-  NGi,
-  NDataTable,
-  NButton,
-  NTag,
-  NText,
-  NSpace,
   NSpin,
-  NIcon,
   useMessage,
-  type DataTableColumns,
 } from "naive-ui";
-import {
-  ArrowForwardOutline,
-  ReloadOutline,
-  StopOutline,
-  PlayOutline,
-  RocketOutline,
-} from "@vicons/ionicons5";
 import { api, type DashboardStats, type RequestLog } from "../api";
 import { useGatewayStore } from "../stores/gateway";
 import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
@@ -37,79 +20,6 @@ const stats = ref<DashboardStats | null>(null);
 const recentLogs = ref<RequestLog[]>([]);
 const logsLoading = ref(false);
 const bindAddress = computed(() => gatewayStore.status?.address ?? "127.0.0.1:9876");
-
-const setupSteps = computed(() => {
-  const providerReady = (stats.value?.active_providers || 0) > 0;
-  const gatewayReady = gatewayStore.status?.running ?? false;
-  return [
-    { label: "添加渠道", done: providerReady, action: goToProviders },
-    { label: "测试连通", done: providerReady, action: goToProviders },
-    { label: "配置模型", done: providerReady, action: () => router.push("/model-square") },
-    { label: "启动网关", done: gatewayReady, action: startGateway },
-  ];
-});
-
-const columns: DataTableColumns<RequestLog> = [
-  {
-    title: "时间",
-    key: "timestamp",
-    width: 130,
-    render(row) {
-      const t = row.timestamp || "";
-      return h("span", { class: "text-mono" }, t.length > 8 ? t.slice(11, 19) : t);
-    },
-  },
-  {
-    title: "方法",
-    key: "method",
-    width: 70,
-    render(row) {
-      const method = row.method || "GET";
-      const color = method === "POST" ? "success" : method === "GET" ? "info" : method === "PUT" ? "warning" : "error";
-      return h(NTag, { size: "small", type: color as any }, { default: () => method });
-    },
-  },
-  {
-    title: "路径",
-    key: "path",
-    ellipsis: { tooltip: true },
-    render(row) {
-      return h("span", { class: "text-mono text-sm" }, row.path || "-");
-    },
-  },
-  {
-    title: "状态",
-    key: "response_status",
-    width: 70,
-    render(row) {
-      const status = row.response_status;
-      if (!status) return h(NText, { depth: 3 }, { default: () => "-" });
-      const type = status < 300 ? "success" : status < 400 ? "warning" : "error";
-      return h(NTag, { size: "small", type: type as any }, { default: () => status });
-    },
-  },
-  {
-    title: "响应",
-    key: "resp_ms",
-    width: 65,
-    render(row) {
-      return h("span", { class: "num" }, formatMs(row.resp_ms));
-    },
-  },
-  {
-    title: "耗时",
-    key: "total_duration_ms",
-    width: 65,
-    render(row) {
-      return h("span", { class: "num" }, formatMs(row.total_duration_ms));
-    },
-  },
-  { title: "渠道", key: "provider_id", width: 90,
-    render(row) {
-      return row.provider_name || row.provider_id || "-";
-    },
-  },
-];
 
 async function loadData() {
   loading.value = true;
@@ -146,47 +56,18 @@ function copyGatewayAddress() {
   });
 }
 
-async function startGateway() {
-  try {
-    await gatewayStore.start();
-    message.success("网关已启动");
-  } catch {
-    message.error("启动失败");
-  }
-}
-
-async function stopGateway() {
-  try {
-    await gatewayStore.stop();
-    message.success("网关已停止");
-  } catch {
-    message.error("停止失败");
-  }
-}
-
-async function restartGateway() {
-  try {
-    await gatewayStore.restart();
-    message.success("网关已重启");
-  } catch {
-    message.error("重启失败");
-  }
-}
-
 onMounted(() => {
   loadData();
   gatewayStore.fetchStatus();
 });
 
-// 跨 Store 联动：当路由规则或渠道数据变更时自动刷新统计
+// 跨 Store 联动
 const providersSignal = useDataChangeSignal("providers");
 const routingRulesSignal = useDataChangeSignal("routingRules");
 
 watch(
   [providersSignal, routingRulesSignal],
-  () => {
-    loadData();
-  },
+  () => { loadData(); },
   { flush: "post" }
 );
 </script>
@@ -195,177 +76,164 @@ watch(
   <NSpin :show="loading" style="min-height: 300px">
     <div class="dashboard">
       <!-- Error Banner -->
-      <div v-if="error" class="error-state" style="margin-bottom: 16px">
+      <div v-if="error" class="error-state">
         <div class="error-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:var(--danger)"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         </div>
         <h3 class="error-title">仪表盘数据加载失败</h3>
         <p class="error-desc">{{ error }}</p>
-        <NButton type="primary" @click="loadData">重新加载</NButton>
+        <button class="btn btn-primary" @click="loadData">重新加载</button>
       </div>
 
-      <!-- Welcome Card - Empty state -->
-      <NCard class="welcome-card mb-16" :bordered="false">
-        <div class="welcome-inner">
-          <template v-if="gatewayStore.status?.running">
-            <div class="welcome-text">
-              <h2 class="welcome-title">欢迎回来 👋</h2>
-              <p class="welcome-desc">
-                网关运行正常，今日已处理
-                <span class="welcome-num">{{ stats?.today_requests?.toLocaleString() || 0 }}</span>
-                个请求
-              </p>
+      <!-- Welcome / Status Card -->
+      <div class="welcome-card card mb-16">
+        <div class="card-body welcome-body">
+          <div class="welcome-left">
+            <span class="welcome-label">
+              <span class="status-dot-sm" :class="gatewayStore.status?.running ? 'online' : 'offline'"></span>
+              {{ gatewayStore.status?.running ? '网关在线' : '网关离线' }}
+            </span>
+            <h2 class="welcome-heading" v-if="gatewayStore.status?.running">Silk 本地网关运行中</h2>
+            <h2 class="welcome-heading" v-else>Silk 本地网关未启动</h2>
+            <p class="welcome-desc" v-if="gatewayStore.status?.running">
+              本地监听 <span class="text-mono">{{ bindAddress }}</span>，
+              今日已处理 <span class="text-mono">{{ stats?.today_requests?.toLocaleString() || 0 }}</span> 次请求
+            </p>
+            <p class="welcome-desc" v-else>
+              网关尚未启动，配置好渠道后即可启动网关转发请求
+            </p>
+            <div class="welcome-meta" v-if="gatewayStore.status?.running && stats">
+              <span class="badge badge-success">可用渠道 {{ stats.active_providers }}</span>
+              <span class="badge badge-accent">运行正常</span>
+              <span class="badge badge-neutral">运行中</span>
             </div>
-            <NSpace>
-              <NButton quaternary @click="copyGatewayAddress">复制地址</NButton>
-              <NButton quaternary @click="goToLogs">查看日志</NButton>
-              <NButton type="primary" @click="goToProviders">管理渠道</NButton>
-            </NSpace>
-          </template>
-          <template v-else>
-            <div class="welcome-text">
-              <h2 class="welcome-title">欢迎使用 Silk Gateway 🚀</h2>
-              <p class="welcome-desc">
-                网关尚未启动，点击右侧按钮开始使用 —— 配置好渠道后即可启动网关转发请求
-              </p>
+            <div class="row gap-md mt-20">
+              <button class="btn btn-primary" @click="copyGatewayAddress">复制本地 API 地址</button>
+              <button class="btn btn-secondary" @click="goToProviders">管理渠道</button>
+              <button class="btn btn-secondary" @click="goToLogs">查看日志</button>
             </div>
-            <NSpace>
-              <NButton type="primary" @click="startGateway">
-                <template #icon><NIcon><RocketOutline /></NIcon></template>
-                启动网关
-              </NButton>
-              <NButton quaternary @click="goToProviders">配置渠道</NButton>
-            </NSpace>
-          </template>
-        </div>
-      </NCard>
-
-      <NCard
-        v-if="!gatewayStore.status?.running || (stats?.active_providers || 0) === 0"
-        title="首次使用"
-        size="small"
-        :bordered="false"
-        class="section-card mb-16"
-      >
-        <div class="setup-list">
-          <button
-            v-for="step in setupSteps"
-            :key="step.label"
-            type="button"
-            class="setup-item"
-            @click="step.action"
-          >
-            <span class="setup-badge" :class="{ done: step.done }">{{ step.done ? "✓" : "•" }}</span>
-            <span class="setup-label">{{ step.label }}</span>
-          </button>
-        </div>
-      </NCard>
-
-      <!-- Stat Cards -->
-      <NGrid :x-gap="16" :y-gap="16" :cols="4" class="mb-16">
-        <NGi>
-          <NCard class="stat-card" :bordered="false">
-            <div class="stat-label">今日请求数</div>
-            <div class="stat-value accent">{{ stats?.today_requests?.toLocaleString() || 0 }}</div>
-            <div class="stat-sub" v-if="stats">
-              {{ stats.yesterday_requests ? ((stats.today_requests / stats.yesterday_requests - 1) * 100).toFixed(1) : 0 }}% 较昨日
-            </div>
-          </NCard>
-        </NGi>
-        <NGi>
-          <NCard class="stat-card" :bordered="false">
-            <div class="stat-label">平均响应时间</div>
-            <div class="stat-value success">{{ stats?.today_avg_duration_ms || 0 }}<span class="stat-unit">ms</span></div>
-            <div class="stat-sub">网关整体延迟</div>
-          </NCard>
-        </NGi>
-        <NGi>
-          <NCard class="stat-card" :bordered="false">
-            <div class="stat-label">今日 Token 消耗</div>
-            <div class="stat-value accent">{{ (stats?.today_tokens ? (stats.today_tokens / 1000).toFixed(1) : '0') + 'K' }}</div>
-            <div class="stat-sub">总 Token 用量</div>
-          </NCard>
-        </NGi>
-        <NGi>
-          <NCard class="stat-card" :bordered="false">
-            <div class="stat-label">活跃渠道</div>
-            <div class="stat-value">{{ stats?.active_providers || 0 }}</div>
-            <div class="stat-sub">全部已配置</div>
-          </NCard>
-        </NGi>
-      </NGrid>
-
-      <!-- Recent Requests + Gateway Control -->
-      <NGrid :x-gap="16" :y-gap="16" :cols="3">
-        <NGi :span="2">
-          <NCard
-            title="最近请求"
-            size="small"
-            :bordered="false"
-            class="section-card"
-          >
-            <template #header-extra>
-              <NButton text size="small" @click="goToLogs">
-                查看全部
-                <template #icon>
-                  <NIcon size="14"><ArrowForwardOutline /></NIcon>
-                </template>
-              </NButton>
-            </template>
-            <NDataTable
-              :columns="columns"
-              :data="recentLogs"
-              :loading="logsLoading"
-              :bordered="false"
-              :single-line="false"
-              size="small"
-              style="margin: -12px"
-              :row-class-name="() => 'dashboard-row'"
-            />
-          </NCard>
-        </NGi>
-        <NGi>
-          <NCard
-            title="网关控制"
-            size="small"
-            :bordered="false"
-            class="section-card"
-          >
-            <div class="gateway-control-body">
-              <div class="gateway-control-info">
-                <div class="control-label">运行状态</div>
-                <div class="control-status">
-                  <span class="status-indicator" :class="{ active: gatewayStore.status?.running }"></span>
-                  <span :class="{ 'text-success': gatewayStore.status?.running }">
-                    {{ gatewayStore.status?.running ? '运行中' : '已停止' }}
-                  </span>
-                </div>
-                <div class="control-detail" v-if="gatewayStore.status?.running">
-                  监听地址：<span class="text-mono">{{ gatewayStore.status?.address }}</span>
+          </div>
+          <div class="welcome-right">
+            <div class="console-panel">
+              <div class="console-panel-head">
+                <div>
+                  <div class="console-panel-title">运行快照</div>
+                  <div class="console-panel-sub">连通度与排障重点</div>
                 </div>
               </div>
-              <NSpace vertical style="width: 100%">
-                <template v-if="gatewayStore.status?.running">
-                  <NButton block secondary @click="restartGateway">
-                    <template #icon><NIcon><ReloadOutline /></NIcon></template>
-                    重启网关
-                  </NButton>
-                  <NButton block type="error" @click="stopGateway">
-                    <template #icon><NIcon><StopOutline /></NIcon></template>
-                    停止网关
-                  </NButton>
-                </template>
-                <template v-else>
-                  <NButton block type="primary" @click="startGateway">
-                    <template #icon><NIcon><PlayOutline /></NIcon></template>
-                    启动网关
-                  </NButton>
-                </template>
-              </NSpace>
+              <div class="console-grid">
+                <div class="console-metric">
+                  <div class="label">平均响应</div>
+                  <div class="value">{{ stats?.today_avg_duration_ms ? stats.today_avg_duration_ms + 'ms' : '-' }}</div>
+                </div>
+                <div class="console-metric">
+                  <div class="label">今日请求</div>
+                  <div class="value">{{ stats?.today_requests?.toLocaleString() || 0 }}</div>
+                </div>
+                <div class="console-metric">
+                  <div class="label">Token 消耗</div>
+                  <div class="value">{{ stats?.today_tokens ? (stats.today_tokens / 1000).toFixed(1) + 'K' : '-' }}</div>
+                </div>
+                <div class="console-metric">
+                  <div class="label">错误请求</div>
+                  <div class="value" :style="{ color: ((stats?.today_requests || 0) - (stats?.today_success || 0)) > 0 ? 'var(--danger)' : undefined }">{{ (stats?.today_requests || 0) - (stats?.today_success || 0) }}</div>
+                </div>
+              </div>
             </div>
-          </NCard>
-        </NGi>
-      </NGrid>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stat Cards Row -->
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">今日请求数</div>
+          <div class="stat-value accent">{{ stats?.today_requests?.toLocaleString() || 0 }}</div>
+          <div class="stat-sub" v-if="stats">
+            {{ stats.yesterday_requests ? ((stats.today_requests / stats.yesterday_requests - 1) * 100).toFixed(1) : 0 }}% 较昨日
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">平均响应时间</div>
+          <div class="stat-value success">{{ stats?.today_avg_duration_ms || 0 }}<span class="stat-unit">ms</span></div>
+          <div class="stat-sub">网关整体延迟</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">今日 Token 消耗</div>
+          <div class="stat-value accent">{{ (stats?.today_tokens ? (stats.today_tokens / 1000).toFixed(1) : '0') + 'K' }}</div>
+          <div class="stat-sub">总 Token 用量</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">活跃渠道</div>
+          <div class="stat-value">{{ stats?.active_providers || 0 }}</div>
+          <div class="stat-sub">全部已配置</div>
+        </div>
+      </div>
+
+      <!-- Main Row: Recent Requests + Quick Actions -->
+      <div class="dashboard-main-row">
+        <div class="card">
+          <div class="card-header">
+            <h3>最新请求</h3>
+            <button class="btn btn-ghost btn-sm" @click="goToLogs">全部日志 →</button>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrap">
+              <table class="ds-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>方法</th>
+                    <th>路径</th>
+                    <th>状态</th>
+                    <th class="text-right">耗时</th>
+                    <th>渠道</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="log in recentLogs" :key="log.id">
+                    <td class="text-mono">{{ (log.timestamp || '').length > 8 ? (log.timestamp || '').slice(11, 19) : (log.timestamp || '-') }}</td>
+                    <td><span class="method" :class="'method-' + (log.method || 'GET')">{{ log.method || 'GET' }}</span></td>
+                    <td class="text-mono text-sm" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ log.path || '-' }}</td>
+                    <td><span class="badge" :class="(log.response_status || 0) < 300 ? 'badge-success' : (log.response_status || 0) < 400 ? 'badge-warning' : 'badge-danger'">{{ log.response_status || '-' }}</span></td>
+                    <td class="num text-right">{{ formatMs(log.total_duration_ms) }}</td>
+                    <td>{{ log.provider_name || log.provider_id || '-' }}</td>
+                  </tr>
+                  <tr v-if="recentLogs.length === 0 && !logsLoading">
+                    <td colspan="6" style="text-align:center; padding:24px; color:var(--muted)">暂无日志记录</td>
+                  </tr>
+                  <tr v-if="logsLoading">
+                    <td colspan="6" style="text-align:center; padding:24px; color:var(--muted)">加载中...</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>快捷操作</h3></div>
+          <div class="card-body form-stack">
+            <button class="btn btn-secondary w-full" style="justify-content:flex-start; gap:10px" @click="goToProviders">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:16px;height:16px;flex-shrink:0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              管理渠道
+            </button>
+            <button class="btn btn-secondary w-full" style="justify-content:flex-start; gap:10px" @click="copyGatewayAddress">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:16px;height:16px;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+              复制 API 地址
+            </button>
+            <button class="btn btn-secondary w-full" style="justify-content:flex-start; gap:10px" @click="goToLogs">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:16px;height:16px;flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+              查看日志
+            </button>
+            <hr class="rule">
+            <div style="font-size:12px; color:var(--muted); line-height:1.6">
+              <strong>提示：</strong>
+              <span v-if="gatewayStore.status?.running">网关运行正常。</span>
+              <span v-else>网关未启动，请先启动网关。</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </NSpin>
 </template>
@@ -375,59 +243,154 @@ watch(
   width: 100%;
 }
 
+/* ===== Welcome Card — design spec ===== */
 .welcome-card {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  border-radius: 12px;
+  background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+  border: 1px solid var(--border-soft, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
 }
 
-.welcome-inner {
-  display: flex;
-  justify-content: space-between;
+.welcome-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
+  gap: 24px;
+  padding: 24px 28px;
+}
+
+.welcome-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.welcome-label {
+  display: inline-flex;
   align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
+  border: 1px solid rgba(8, 145, 178, 0.15);
+  font-size: 11px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--accent, #0891b2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
 }
 
-.welcome-title {
+.welcome-heading {
   font-size: 20px;
-  font-weight: 700;
-  color: #ffffff;
-  margin: 0 0 4px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--fg, #0f172a);
+  margin: 16px 0 10px;
 }
 
 .welcome-desc {
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--fg-2, #334155);
+  font-size: 13.5px;
   margin: 0;
 }
 
-.welcome-num {
+.welcome-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+/* ===== Console Panel — design spec ===== */
+.console-panel {
+  border-radius: var(--radius-lg, 12px);
+  background: var(--sidebar-bg, #0f172a);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 18px;
+}
+
+.console-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.console-panel-title {
+  font-size: 13px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--sidebar-active, #f8fafc);
+}
+
+.console-panel-sub {
+  font-size: 11px;
+  color: var(--sidebar-fg, #94a3b8);
+  margin-top: 2px;
+}
+
+.console-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.console-metric {
+  padding: 10px 12px;
+  border-radius: var(--radius, 8px);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.console-metric .label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--sidebar-fg, #94a3b8);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.console-metric .value {
+  margin-top: 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--sidebar-active, #f8fafc);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ===== Stat Grid — design spec ===== */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
 .stat-card {
-  border-radius: 12px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-soft, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  padding: 20px;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
 }
 
 .stat-label {
-  font-size: 13px;
-  color: var(--text-color-3, #64748b);
-  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted, #64748b);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
 }
 
 .stat-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
-  line-height: 1.2;
-  margin-bottom: 4px;
+  letter-spacing: -0.02em;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--fg, #0f172a);
 }
 
-.stat-value.accent {
-  color: #6366f1;
-}
-
-.stat-value.success {
-  color: #22c55e;
-}
+.stat-value.accent { color: var(--accent, #0891b2); }
+.stat-value.success { color: var(--success, #10b981); }
 
 .stat-unit {
   font-size: 14px;
@@ -436,113 +399,219 @@ watch(
 }
 
 .stat-sub {
-  font-size: 12px;
-  color: var(--text-color-3, #94a3b8);
+  font-size: 11px;
+  color: var(--muted, #64748b);
+  margin-top: 4px;
 }
 
-.section-card {
-  border-radius: 12px;
-}
-
-.setup-list {
+/* ===== Dashboard Main Row — design spec ===== */
+.dashboard-main-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
 }
 
-.setup-item {
+/* ===== Card — design spec ===== */
+.card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-soft, #e2e8f0);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-soft, #e2e8f0);
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 10px;
-  background: var(--card-color, #ffffff);
-  text-align: left;
-  cursor: pointer;
+  justify-content: space-between;
 }
 
-.setup-item:hover {
-  background: #f8fafc;
+.card-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
 }
 
-.setup-badge {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
+.card-body {
+  padding: 20px;
+}
+
+/* ===== Buttons — design spec ===== */
+.btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  background: #e2e8f0;
-  color: #475569;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.setup-badge.done {
-  background: #dcfce7;
-  color: #16a34a;
-}
-
-.setup-label {
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius, 8px);
   font-size: 13px;
   font-weight: 500;
-  color: var(--text-color-1, #0f172a);
+  transition: all 150ms ease;
+  white-space: nowrap;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
 }
 
-.gateway-control-body {
+.btn-primary {
+  background: var(--accent, #0891b2);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover, #0e7490);
+}
+
+.btn-secondary {
+  background: var(--surface, #ffffff);
+  color: var(--fg, #0f172a);
+  border: 1px solid var(--border, #cbd5e1);
+}
+
+.btn-secondary:hover {
+  border-color: var(--fg-2, #334155);
+  background: var(--bg, #f8fafc);
+}
+
+.btn-ghost {
+  color: var(--muted, #64748b);
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+}
+
+.btn-ghost:hover {
+  color: var(--fg, #0f172a);
+  background: var(--surface-alt, #f1f5f9);
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.w-full { width: 100%; }
+
+/* ===== Badges — design spec ===== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.badge-success { background: var(--success-soft, rgba(16,185,129,0.1)); color: var(--success, #10b981); }
+.badge-warning { background: var(--warn-soft, rgba(245,158,11,0.1)); color: var(--warn, #f59e0b); }
+.badge-danger { background: var(--danger-soft, rgba(239,68,68,0.1)); color: var(--danger, #ef4444); }
+.badge-neutral { background: var(--surface-alt, #f1f5f9); color: var(--muted, #64748b); border: 1px solid var(--border-soft, #e2e8f0); }
+.badge-accent { background: var(--accent-soft, rgba(8,145,178,0.08)); color: var(--accent, #0891b2); }
+
+/* ===== Table — design spec ===== */
+.table-wrap {
+  overflow-x: auto;
+}
+
+.ds-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ds-table th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #64748b);
+  border-bottom: 1px solid var(--border-soft, #e2e8f0);
+  background: var(--bg, #f8fafc);
+  font-weight: 500;
+}
+
+.ds-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-soft, #e2e8f0);
+  font-size: 13px;
+  color: var(--fg-2, #334155);
+}
+
+.ds-table tbody tr {
+  transition: background 150ms ease;
+}
+
+.ds-table tbody tr:hover {
+  background: var(--surface-alt, #f1f5f9);
+}
+
+/* ===== Method Badges — design spec ===== */
+.method {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.method-GET { background: #dbeafe; color: #1d4ed8; }
+.method-POST { background: #dcfce7; color: #15803d; }
+.method-PUT { background: #fef3c7; color: #b45309; }
+.method-DELETE { background: #fee2e2; color: #dc2626; }
+
+/* ===== Status Dot Small — design spec ===== */
+.status-dot-sm {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot-sm.online { background: var(--success, #10b981); }
+.status-dot-sm.offline { background: var(--muted, #94a3b8); }
+
+/* ===== Utilities ===== */
+.text-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+}
+
+.text-sm {
+  font-size: 12px;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-16 { margin-bottom: 16px; }
+.mt-20 { margin-top: 20px; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gap-md { gap: 12px; }
+
+.form-stack {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 16px;
-  padding: 8px 0;
 }
 
-.gateway-control-info {
-  text-align: center;
-  width: 100%;
-}
-
-.control-label {
-  font-size: 13px;
-  color: var(--text-color-3, #64748b);
-  margin-bottom: 8px;
-}
-
-.control-status {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.status-indicator {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #94a3b8;
-  transition: all 0.3s;
-}
-
-.status-indicator.active {
-  background: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.2);
-}
-
-.text-success {
-  color: #22c55e;
-}
-
-.control-detail {
-  font-size: 12px;
-  color: var(--text-color-3, #64748b);
-}
-
-:deep(.dashboard-row td) {
-  padding: 8px 12px !important;
+.rule {
+  border: 0;
+  border-top: 1px solid var(--border-soft, #e2e8f0);
+  margin: 4px 0;
 }
 </style>

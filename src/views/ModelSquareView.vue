@@ -626,16 +626,16 @@ onMounted(loadData);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
-  background: #eef2ff;
-  color: #6366f1;
+  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
+  color: var(--accent, #0891b2);
   font-weight: 500;
-  border: 1px solid #e0e7ff;
+  border: 1px solid rgba(8, 145, 178, 0.15);
 }
 
 .channel-badge.healthy {
-  background: #ecfdf5;
-  color: #059669;
-  border-color: #d1fae5;
+  background: var(--success-soft, rgba(16, 185, 129, 0.1));
+  color: var(--success, #10b981);
+  border-color: rgba(16, 185, 129, 0.15);
 }
 
 .cb-models {
@@ -711,15 +711,15 @@ onMounted(loadData);
 }
 
 .channel-item.selected {
-  border-color: #6366f1;
-  background: #eef2ff;
+  border-color: var(--accent, #0891b2);
+  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
 }
 
 .channel-checkbox {
   width: 16px;
   height: 16px;
   cursor: pointer;
-  accent-color: #6366f1;
+  accent-color: var(--accent, #0891b2);
 }
 
 .channel-info {
@@ -804,7 +804,7 @@ onMounted(loadData);
 }
 
 .cmg-item.selected {
-  background: #eef2ff;
+  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
 }
 
 .cmg-check {
@@ -823,8 +823,8 @@ onMounted(loadData);
 }
 
 .cmg-item.selected .cmg-check {
-  background: #6366f1;
-  border-color: #6366f1;
+  background: var(--accent, #0891b2);
+  border-color: var(--accent, #0891b2);
 }
 
 .cmg-check-icon {

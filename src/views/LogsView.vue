@@ -479,7 +479,7 @@ onMounted(() => {
           <span class="detail-label">Token (输入/发送/输出)：</span>
           <span class="detail-value">
             {{ selectedLog.tokens_input || 0 }} / {{ selectedLog.tokens_sent || 0 }} / {{ selectedLog.tokens_output || 0 }}
-            <span v-if="selectedLog.tokens_input != null && selectedLog.tokens_sent != null && selectedLog.tokens_input > selectedLog.tokens_sent" style="color: #22c55e; margin-left: 8px">
+            <span v-if="selectedLog.tokens_input != null && selectedLog.tokens_sent != null && selectedLog.tokens_input > selectedLog.tokens_sent" style="color: var(--success, #10b981); margin-left: 8px">
               优化 -{{ selectedLog.tokens_input - selectedLog.tokens_sent }}
             </span>
           </span>
@@ -542,11 +542,11 @@ onMounted(() => {
 }
 
 .stat-value.accent {
-  color: #6366f1;
+  color: var(--accent, #0891b2);
 }
 
 .stat-value.success {
-  color: #22c55e;
+  color: var(--success, #10b981);
 }
 
 .stat-unit {
