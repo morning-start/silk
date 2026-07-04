@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use axum::http::{HeaderMap, Method, Uri};
 use sqlx::SqlitePool;
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 
 use crate::gateway::header_config::HeaderConfig;
 use crate::models::{GatewaySettings, Provider, RoutingRule};
@@ -255,6 +255,10 @@ pub struct RequestContextInner {
 /// - `clone()` 时 `response` 置为 `None`（克隆上下文时不应携带已构建的响应）。
 pub struct RequestContext {
     pub response: Option<axum::response::Response>,
+    /// SSE 流完成后通知接收端（由 handle_sse_response 设置，pipeline 消费）
+    pub stream_complete_rx: Option<oneshot::Receiver<()>>,
+    /// SSE 流处理共享状态（读取任务 → 主线程，流结束后 pipeline 读取统计）
+    pub stream_shared: Option<Arc<RwLock<StreamSharedState>>>,
     inner: RequestContextInner,
 }
 
@@ -263,6 +267,8 @@ impl Clone for RequestContext {
         Self {
             inner: self.inner.clone(),
             response: None,
+            stream_complete_rx: None,
+            stream_shared: self.stream_shared.clone(),
         }
     }
 }
@@ -289,6 +295,10 @@ pub struct StreamSharedState {
     pub last_event_id: Option<String>,
     /// 已接收的上游字节数
     pub bytes_received: u64,
+    /// 上游返回的精确 prompt_tokens（从最终 SSE chunk 的 usage 字段解析）
+    pub exact_prompt_tokens: Option<i64>,
+    /// 上游返回的精确 completion_tokens（从最终 SSE chunk 的 usage 字段解析）
+    pub exact_completion_tokens: Option<i64>,
 }
 
 impl RequestContext {
@@ -346,6 +356,8 @@ impl RequestContext {
                 channels_available: Vec::new(),
             },
             response: None,
+            stream_complete_rx: None,
+            stream_shared: None,
         }
     }
 

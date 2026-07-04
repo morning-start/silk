@@ -213,6 +213,9 @@ async fn handle_sse_response(
     let inbound_clone = inbound.clone();
     let outbound_clone = outbound.clone();
 
+    // 流结束通知通道：后台任务 → pipeline
+    let (complete_tx, complete_rx) = tokio::sync::oneshot::channel::<()>();
+
     // 启动后台读取任务
     let response_stream = response.bytes_stream();
     let stream_config = config.clone();
@@ -233,11 +236,17 @@ async fn handle_sse_response(
                         Some(Ok(bytes)) => {
                             stream_state.record_data(bytes.len());
 
+                            // 追踪接收字节数
+                            {
+                                let mut state = shared_for_task.write().await;
+                                state.bytes_received += bytes.len() as u64;
+                            }
+
                             // 解析 SSE 事件，追踪 last_event_id
                             let events = parser.feed(&bytes);
                             if events.is_empty() {
                                 // 不完整 chunk，直接转发
-                                if tx.send(Ok(bytes)).await.is_err() { return; }
+                                if tx.send(Ok(bytes)).await.is_err() { break; }
                                 continue;
                             }
 
@@ -245,6 +254,36 @@ async fn handle_sse_response(
 
                             for event in &events {
                                 stream_state.record_event();
+
+                                // 从原始 SSE data 中提取上游返回的精确 token 用量
+                                if let Some(ref data) = event.data {
+                                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                                        let mut state = shared_for_task.write().await;
+                                        // OpenAI chat: {"usage":{"prompt_tokens":X,"completion_tokens":Y}}
+                                        // Anthropic message_start: {"message":{"usage":{"input_tokens":X}}}
+                                        // Anthropic message_delta: {"usage":{"output_tokens":Y}}
+                                        // OpenResponses: {"usage":{"input_tokens":X,"output_tokens":Y}}
+                                        let usage = json.get("usage")
+                                            .or_else(|| json.get("message").and_then(|m| m.get("usage")));
+                                        if let Some(u) = usage {
+                                            if state.exact_prompt_tokens.is_none() {
+                                                let inp = u.get("prompt_tokens")
+                                                    .or_else(|| u.get("input_tokens"))
+                                                    .and_then(|v| v.as_i64());
+                                                if inp.is_some() {
+                                                    state.exact_prompt_tokens = inp;
+                                                }
+                                            }
+                                            // completion_tokens / output_tokens 可能出现在后续事件中覆盖
+                                            let out = u.get("completion_tokens")
+                                                .or_else(|| u.get("output_tokens"))
+                                                .and_then(|v| v.as_i64());
+                                            if let Some(v) = out {
+                                                state.exact_completion_tokens = Some(v);
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // 更新 last_event_id
                                 if let Some(ref id) = event.id {
@@ -254,6 +293,7 @@ async fn handle_sse_response(
 
                                 if event.is_end() {
                                     let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
+                                    let _ = complete_tx.send(());
                                     return;
                                 }
 
@@ -275,17 +315,19 @@ async fn handle_sse_response(
                             }
 
                             if tx.send(Ok(Bytes::from(output))).await.is_err() {
-                                return;
+                                break;
                             }
                         }
                         Some(Err(err)) => {
                             let _ = tx.send(Err(GatewayError::Upstream(err))).await;
+                            let _ = complete_tx.send(());
                             return;
                         }
                         None => {
                             if !stream_state.ended {
                                 let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
                             }
+                            let _ = complete_tx.send(());
                             return;
                         }
                     }
@@ -293,14 +335,16 @@ async fn handle_sse_response(
                 _ = heartbeat.tick() => {
                     if stream_state.is_timed_out(stream_config.stream_timeout) {
                         let _ = tx.send(Err(GatewayError::Timeout)).await;
+                        let _ = complete_tx.send(());
                         return;
                     }
                     if tx.send(Ok(stream_response::heartbeat_comment())).await.is_err() {
-                        return;
+                        break;
                     }
                 }
             }
         }
+        let _ = complete_tx.send(());
     });
 
     // 构建流式响应
@@ -314,6 +358,8 @@ async fn handle_sse_response(
     ctx.upstream_status = Some(axum::http::StatusCode::OK);
     ctx.upstream_headers = Some(headers);
     ctx.upstream_body = None;
+    ctx.stream_shared = Some(shared);
+    ctx.stream_complete_rx = Some(complete_rx);
     ctx.response = Some(stream_response.into_response());
 
     Ok(ctx)

@@ -25,8 +25,8 @@ impl LogExtraTokenRepo {
             let result = sqlx::query(
                 r#"
                 INSERT INTO request_log_extra_token (id, request_id, cache_hit, request_size_bytes,
-                                                response_size_bytes, tokens_input, tokens_output, cost)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                                response_size_bytes, tokens_input, tokens_output, tokens_sent, cost)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 "#,
             )
             .bind(id)
@@ -36,6 +36,7 @@ impl LogExtraTokenRepo {
             .bind(extra.response_size_bytes)
             .bind(extra.tokens_input)
             .bind(extra.tokens_output)
+            .bind(extra.tokens_sent)
             .bind(extra.cost)
             .execute(&mut *tx)
             .await?;

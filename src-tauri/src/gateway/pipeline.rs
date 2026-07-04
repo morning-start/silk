@@ -35,10 +35,7 @@ impl GatewayPipeline {
         let base_ctx = extract::initialize(parts);
 
         match self.run_main(base_ctx, body).await {
-            Ok(mut ctx) => {
-                let _ = persist_log::run(&self.runtime.log_sender, &mut ctx).await;
-                finalize::success(ctx)
-            }
+            Ok(ctx) => self.finalize_with_log(ctx).await,
             Err(mut stage_error) => {
                 let status = stage_error.error.status_code();
                 stage_error.context.mark_error(
@@ -49,6 +46,54 @@ impl GatewayPipeline {
                 let _ = persist_log::run(&self.runtime.log_sender, &mut stage_error.context).await;
                 finalize::failure(stage_error.error)
             }
+        }
+    }
+
+    /// 最终化：流式响应在流结束后异步落日志，非流式同步落日志后返回
+    async fn finalize_with_log(&self, mut ctx: RequestContext) -> Response {
+        if !ctx.path.starts_with("/v1/") {
+            return finalize::success(ctx);
+        }
+
+        let log_sender = self.runtime.log_sender.clone();
+
+        // 流式响应：立即返回响应，后台等待流结束后记录日志
+        if let Some(complete_rx) = ctx.stream_complete_rx.take() {
+            let shared = ctx.stream_shared.clone();
+            // 提前构建日志（流开始前就能确定的字段），resp_ms = 响应时间（首字节）
+            let mut log = persist_log::build_log(&ctx);
+            let started_at = ctx.started_at;
+
+            let response = finalize::success(ctx);
+
+            tokio::spawn(async move {
+                let _ = complete_rx.await;
+
+                // 流结束后计算总耗时（末字节）
+                let total_ms = started_at.elapsed().as_millis() as i64;
+                log.total_duration_ms = Some(total_ms);
+
+                // 填充统计字段
+                if let Some(ref shared) = shared {
+                    let state = shared.read().await;
+                    let bytes_sent = state.bytes_sent as i64;
+                    log.response_size_bytes = Some(bytes_sent);
+
+                    // 优先使用上游返回的精确 token 用量，兜底字节数估算
+                    log.tokens_input = state.exact_prompt_tokens.or(log.tokens_input);
+                    log.tokens_output = state.exact_completion_tokens.or_else(|| {
+                        Some(persist_log::estimate_tokens_from_bytes(bytes_sent))
+                    });
+                }
+
+                persist_log::send_log(&log_sender, log);
+            });
+
+            response
+        } else {
+            // 非流式（错误/兜底路径）
+            let _ = persist_log::run(&log_sender, &mut ctx).await;
+            finalize::success(ctx)
         }
     }
 
