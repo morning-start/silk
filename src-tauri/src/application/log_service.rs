@@ -242,10 +242,10 @@ pub async fn export_csv(
         format!("silk_logs_{}.csv", chrono::Utc::now().format("%Y%m%d_%H%M%S"))
     });
 
-    // 路径安全校验：使用跨平台 is_absolute() 防止路径遍历
-    if file_path.contains("..") || std::path::Path::new(&file_path).is_absolute() {
+    // 路径安全校验：禁止路径遍历，但允许绝对路径（save 对话框返回绝对路径）
+    if file_path.contains("..") {
         return Err(ServiceError::BadRequest {
-            message: "文件路径不安全: 不允许包含 .. 或使用绝对路径".to_string(),
+            message: "文件路径不安全: 不允许包含 ..".to_string(),
             code: None,
         });
     }

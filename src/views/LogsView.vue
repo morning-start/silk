@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, h, computed } from "vue";
 import { formatMs } from "../utils/format";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   NButton,
   NDataTable,
@@ -201,7 +202,13 @@ async function handleClearAll() {
 
 async function handleExportCsv() {
   try {
-    const result = await api.exportLogsCsv({ limit: 10000 });
+    const filePath = await save({
+      title: "导出日志 CSV",
+      defaultPath: `silk_logs_${new Date().toISOString().slice(0, 10)}.csv`,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (!filePath) return;
+    const result = await api.exportLogsCsv({ limit: 10000, file_path: filePath });
     message.success(`已导出 ${result.exported_count} 条日志到 ${result.file_path}`);
   } catch {
     message.error("导出失败");

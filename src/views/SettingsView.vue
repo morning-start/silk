@@ -189,6 +189,12 @@ async function handleRestoreDatabase() {
 
 async function handleImportConfig() {
   try {
+    const accepted = await confirm(
+      "导入配置会覆盖当前的渠道、路由、模型映射与网关 Key。是否继续？",
+      { title: "导入配置", kind: "warning", okLabel: "继续", cancelLabel: "取消" }
+    );
+    if (!accepted) return;
+
     const filePath = await open({
       title: "选择 Silk 配置文件",
       multiple: false,
