@@ -36,7 +36,7 @@
 │  │ application/ (业务服务层)                    │ │
 │  ├─────────────────────────────────────────────┤ │
 │  │ gateway/    (HTTP 网关核心，Axum)             │ │
-│  │  ├─ pipeline (9阶段中间件管道)                │ │
+│  │  ├─ pipeline (10阶段中间件管道)                │ │
 │  │  └─ middleware/ (10个模块)                   │ │
 │  ├─────────────────────────────────────────────┤ │
 │  │ protocol/  (协议适配器，ProviderAdapter trait) │ │
@@ -52,7 +52,7 @@
 
 - **严格分层**：6层结构，依赖方向严格单向（`commands → application → gateway → protocol → persistence → models`）
 - **薄胶水层**：`commands/` 仅做 Tauri IPC 适配，业务逻辑全部下沉到 `application/`
-- **管道核心**：网关采用 9 阶段中间件管道 + 三级失败回退（重试 → 换 Key → 换 Provider）
+- **管道核心**：网关采用 10 阶段中间件管道 + 三级失败回退（重试 → 换 Key → 换 Provider）
 - **协议扩展性**：`ProviderAdapter` trait + `build_upstream<T>()` 泛型复用
 
 ---
@@ -322,7 +322,7 @@
 | 模式 | 应用位置 | 评级 |
 |------|---------|------|
 | **策略模式** | `ProviderAdapter` trait + 3种实现 | ⭐⭐⭐⭐⭐ |
-| **责任链模式** | 9 阶段中间件管道 | ⭐⭐⭐⭐⭐ |
+| **责任链模式** | 10 阶段中间件管道 | ⭐⭐⭐⭐⭐ |
 | **模板方法模式** | `execute()` → `run_main()` → `run_with_failover()` | ⭐⭐⭐⭐⭐ |
 | **适配器模式** | 三种协议适配器实现双向转换 | ⭐⭐⭐⭐⭐ |
 | **注册表模式** | `AdapterRegistry` | ⭐⭐⭐⭐ |
@@ -392,7 +392,7 @@
 Silk 项目整体架构设计质量优秀（8.4/10），在以下维度表现突出：
 
 1. **分层清晰**：6 层架构，依赖严格单向，`application` 层内部完全解耦
-2. **管道设计**：9 阶段中间件 + 三级回退，错误处理无遗漏
+2. **管道设计**：10 阶段中间件 + 三级回退，错误处理无遗漏
 3. **协议扩展**：`ProviderAdapter` trait 极简接口 + `build_upstream<T>()` 泛型复用
 4. **负载均衡**：`LoadBalancer<T>` 通用选择器，LeastConn 连接追踪完整实现
 5. **前端响应**：SWR 缓存 + 跨 Store 事件总线，视图切换不重复拉取
