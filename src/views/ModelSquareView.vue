@@ -3,7 +3,6 @@ import { ref, onMounted, computed } from "vue";
 import {
   NCard,
   NButton,
-  NModal,
   NForm,
   NFormItem,
   NInput,
@@ -11,8 +10,6 @@ import {
   NSelect,
   NSwitch,
   NTag,
-  NEmpty,
-  NSpin,
   NGrid,
   NGi,
   NIcon,
@@ -23,6 +20,8 @@ import {
   SearchOutline,
 } from "@vicons/ionicons5";
 import { api, type ModelMapping, type NewMappingChannel, type Provider } from "../api";
+import AppFormModal from "../components/AppFormModal.vue";
+import AppPageShell from "../components/AppPageShell.vue";
 
 const message = useMessage();
 const dialog = useDialog();
@@ -271,132 +270,125 @@ onMounted(loadData);
 </script>
 
 <template>
-  <div class="model-square">
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <h2 class="page-title">模型池</h2>
-        <NTag size="small" type="info">{{ mappings.length }} 个模型</NTag>
-      </div>
-      <div class="toolbar-right">
+  <AppPageShell
+    title="模型池"
+    :loading="loading"
+    :error="error"
+    :empty="mappings.length === 0"
+    @reload="loadData()"
+  >
+    <template #count>
+      <NTag size="small" type="info">{{ mappings.length }} 个模型</NTag>
+    </template>
+    <template #actions>
+      <NButton type="primary" @click="handleAdd">+ 新增模型映射</NButton>
+    </template>
+    <template #empty>
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+        </div>
+        <h3 class="empty-title">暂无模型映射</h3>
+        <p class="empty-desc">先把多个渠道下的模型归并到同一个模型池，再交给路由或默认转发使用。</p>
         <NButton type="primary" @click="handleAdd">+ 新增模型映射</NButton>
       </div>
-    </div>
+    </template>
 
-    <NSpin :show="loading" style="min-height: 200px">
-      <!-- Error State -->
-      <template v-if="error && !loading">
-        <div class="error-state">
-          <div class="error-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <NGrid :x-gap="16" :y-gap="16" :cols="3" style="margin-top: 16px">
+      <NGi v-for="item in mappings" :key="item.id">
+        <NCard
+          :bordered="false"
+          class="model-card"
+          :class="{ disabled: !item.enabled }"
+        >
+          <div class="mc-header">
+            <div class="mc-name-group">
+              <span class="mc-name">{{ item.model_name }}</span>
+              <NTag size="tiny" type="success" v-if="item.enabled">启用</NTag>
+              <NTag size="tiny" type="warning" v-else>禁用</NTag>
+            </div>
           </div>
-          <h3 class="error-title">数据加载失败</h3>
-          <p class="error-desc">{{ error }}</p>
-          <NButton type="primary" @click="loadData()">重新加载</NButton>
-        </div>
-      </template>
-      <!-- Empty State -->
-      <template v-else-if="mappings.length === 0 && !loading">
-        <NEmpty description="暂无模型映射，点击上方按钮添加" />
-      </template>
 
-      <NGrid v-else :x-gap="16" :y-gap="16" :cols="3" style="margin-top: 16px">
-        <NGi v-for="item in mappings" :key="item.id">
-          <NCard
-            :bordered="false"
-            class="model-card"
-            :class="{ disabled: !item.enabled }"
-          >
-            <div class="mc-header">
-              <div class="mc-name-group">
-                <span class="mc-name">{{ item.model_name }}</span>
-                <NTag size="tiny" type="success" v-if="item.enabled">启用</NTag>
-                <NTag size="tiny" type="warning" v-else>禁用</NTag>
-              </div>
-            </div>
+          <div class="mc-desc" v-if="item.description">{{ item.description }}</div>
 
-            <div class="mc-desc" v-if="item.description">{{ item.description }}</div>
-
-            <!-- 关联渠道展示 -->
-            <div class="mc-stats" v-if="item.channels">
-              <span>渠道 <span class="num">{{ item.channels.length }}</span></span>
-            </div>
-            <div class="mc-channels" v-if="item.channels && item.channels.length > 0">
-              <div
-                v-for="c in item.channels.slice(0, 3)"
-                :key="c.id"
-                class="channel-badge"
-                :class="{ healthy: c.provider_health === 'healthy' }"
-              >
-                <span class="cb-name">{{ c.provider_name }}</span>
-                <span class="cb-models" v-if="c.selected_models && c.selected_models.length > 0">
-                  {{ channelModelSummary(c.selected_models) }}
-                </span>
-              </div>
-              <NTag v-if="item.channels.length > 3" size="tiny" round>
-                +{{ item.channels.length - 3 }}
-              </NTag>
-            </div>
-
-            <div class="mc-specs">
-              <template v-if="item.max_input_tokens">
-                <span>输入 <span class="num">{{ formatTokens(item.max_input_tokens) }}</span></span>
-                <span class="sep">·</span>
-              </template>
-              <template v-if="item.max_context_tokens">
-                <span>上下文 <span class="num">{{ formatTokens(item.max_context_tokens) }}</span></span>
-                <span class="sep">·</span>
-              </template>
-              <template v-if="item.max_output_tokens">
-                <span>输出 <span class="num">{{ formatTokens(item.max_output_tokens) }}</span></span>
-              </template>
-            </div>
-
-            <div class="mc-pricing" v-if="item.input_price_per_1m || item.output_price_per_1m">
-              <span v-if="item.input_price_per_1m">
-                输入 <span class="num">{{ formatPrice(item.input_price_per_1m) }}</span>
-              </span>
-              <span class="sep" v-if="item.input_price_per_1m && item.output_price_per_1m">·</span>
-              <span v-if="item.output_price_per_1m">
-                输出 <span class="num">{{ formatPrice(item.output_price_per_1m) }}</span>
+          <div class="mc-stats" v-if="item.channels">
+            <span>渠道 <span class="num">{{ item.channels.length }}</span></span>
+          </div>
+          <div class="mc-channels" v-if="item.channels && item.channels.length > 0">
+            <div
+              v-for="c in item.channels.slice(0, 3)"
+              :key="c.id"
+              class="channel-badge"
+              :class="{ healthy: c.provider_health === 'healthy' }"
+            >
+              <span class="cb-name">{{ c.provider_name }}</span>
+              <span class="cb-models" v-if="c.selected_models && c.selected_models.length > 0">
+                {{ channelModelSummary(c.selected_models) }}
               </span>
             </div>
+            <NTag v-if="item.channels.length > 3" size="tiny" round>
+              +{{ item.channels.length - 3 }}
+            </NTag>
+          </div>
 
-            <div class="mc-caps" v-if="item.capabilities && item.capabilities.length > 0">
-              <NTag
-                v-for="cap in item.capabilities"
-                :key="cap"
-                :type="capabilityColor(cap) as any"
-                size="tiny"
-                round
-              >
-                {{ capabilityLabel(cap) }}
-              </NTag>
-            </div>
+          <div class="mc-specs">
+            <template v-if="item.max_input_tokens">
+              <span>输入 <span class="num">{{ formatTokens(item.max_input_tokens) }}</span></span>
+              <span class="sep">·</span>
+            </template>
+            <template v-if="item.max_context_tokens">
+              <span>上下文 <span class="num">{{ formatTokens(item.max_context_tokens) }}</span></span>
+              <span class="sep">·</span>
+            </template>
+            <template v-if="item.max_output_tokens">
+              <span>输出 <span class="num">{{ formatTokens(item.max_output_tokens) }}</span></span>
+            </template>
+          </div>
 
-            <div class="mc-actions">
-              <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
-              <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
-            </div>
-          </NCard>
-        </NGi>
-      </NGrid>
-    </NSpin>
+          <div class="mc-pricing" v-if="item.input_price_per_1m || item.output_price_per_1m">
+            <span v-if="item.input_price_per_1m">
+              输入 <span class="num">{{ formatPrice(item.input_price_per_1m) }}</span>
+            </span>
+            <span class="sep" v-if="item.input_price_per_1m && item.output_price_per_1m">·</span>
+            <span v-if="item.output_price_per_1m">
+              输出 <span class="num">{{ formatPrice(item.output_price_per_1m) }}</span>
+            </span>
+          </div>
 
-    <!-- Add/Edit Modal -->
-    <NModal
-      v-model:show="showModal"
-      preset="card"
-      :title="editingId ? '编辑模型映射' : '新增模型映射'"
-      style="max-width: 640px"
-      :bordered="false"
-      :segmented="{ footer: true }"
-    >
-      <NForm :model="formValue" label-placement="left" label-width="90">
+          <div class="mc-caps" v-if="item.capabilities && item.capabilities.length > 0">
+            <NTag
+              v-for="cap in item.capabilities"
+              :key="cap"
+              :type="capabilityColor(cap) as any"
+              size="tiny"
+              round
+            >
+              {{ capabilityLabel(cap) }}
+            </NTag>
+          </div>
+
+          <div class="mc-actions">
+            <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
+            <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
+          </div>
+        </NCard>
+      </NGi>
+    </NGrid>
+
+    <template #after>
+      <AppFormModal
+        v-model:show="showModal"
+        :title="editingId ? '编辑模型映射' : '新增模型映射'"
+        width="640px"
+        :submit-text="editingId ? '保存修改' : '确认添加'"
+        :submit-disabled="!formValue.model_name || formValue.selectedProviderIds.length === 0"
+        @submit="handleSubmit"
+      >
+        <NForm :model="formValue" label-placement="left" label-width="90">
         <NFormItem label="模型名称" required>
           <NInput v-model:value="formValue.model_name" placeholder="例如：gpt-4、claude-3-opus" />
         </NFormItem>
 
-        <!-- 步骤①：关联渠道（多选） -->
         <NFormItem label="关联渠道">
           <div style="width: 100%">
             <div v-if="allProviders.length === 0" style="font-size: 13px; color: #94a3b8; padding: 8px 0">
@@ -418,7 +410,6 @@ onMounted(loadData);
                       formValue.selectedProviderIds.push(p.id);
                     } else {
                       formValue.selectedProviderIds = formValue.selectedProviderIds.filter(id => id !== p.id);
-                      // 取消渠道时清空其选中的模型
                       const map = { ...formValue.selectedModelsMap };
                       delete map[p.id];
                       formValue.selectedModelsMap = map;
@@ -442,10 +433,8 @@ onMounted(loadData);
           </div>
         </NFormItem>
 
-        <!-- 步骤②：从已选渠道中挑选模型（点击切换选中） -->
         <NFormItem v-if="selectedProviders.length > 0" label="选择模型">
           <div style="width: 100%; display: flex; flex-direction: column; gap: 10px">
-            <!-- 模糊搜索 -->
             <NInput
               v-model:value="modelSearchKeyword"
               placeholder="搜索模型名，点击模型切换选中..."
@@ -456,7 +445,6 @@ onMounted(loadData);
               </template>
             </NInput>
 
-            <!-- 按渠道分组展示模型 -->
             <div v-for="grp in channelModels" :key="grp.provider_id" class="channel-model-group">
               <div class="cmg-header">
                 <span class="cmg-name">{{ grp.provider_name }}</span>
@@ -480,7 +468,6 @@ onMounted(loadData);
               </div>
             </div>
 
-            <!-- 无结果提示 -->
             <div v-if="channelModels.length === 0 && modelSearchKeyword" style="font-size:13px;color:#94a3b8;padding:8px 0">
               无匹配模型
             </div>
@@ -541,25 +528,13 @@ onMounted(loadData);
         <NFormItem label="启用">
           <NSwitch v-model:value="formValue.enabled" />
         </NFormItem>
-      </NForm>
-
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
-          <NButton @click="showModal = false">取消</NButton>
-          <NButton type="primary" @click="handleSubmit" :disabled="!formValue.model_name || formValue.selectedProviderIds.length === 0">
-            {{ editingId ? '保存修改' : '确认添加' }}
-          </NButton>
-        </div>
-      </template>
-    </NModal>
-  </div>
+        </NForm>
+      </AppFormModal>
+    </template>
+  </AppPageShell>
 </template>
 
 <style scoped>
-.model-square {
-  width: 100%;
-}
-
 /* toolbar overrides — ModelSquareView 使用更紧凑的间距 */
 .toolbar {
   margin-bottom: 8px;

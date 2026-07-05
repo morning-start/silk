@@ -91,7 +91,7 @@ curl http://127.0.0.1:9876/v1/chat/completions \
 <summary>展开看开发命令</summary>
 
 ```bash
-bun run dev              # Vite 前端开发 (port 1420)
+bun run dev              # Vite 前端开发 (port 1510)
 bun run tauri dev        # 完整桌面应用开发
 bun run tauri build      # 打包安装包
 cargo check              # Rust 类型检查（在 src-tauri/ 下）

@@ -11,6 +11,7 @@ export interface Provider {
   models: string[];
   key_count: number;
   keys: { name: string; value: string; enabled: boolean; weight: number }[];
+  key_strategy: string;
   api_base_url: string;
   proxy_url: string | null;
   timeout_seconds: number;
