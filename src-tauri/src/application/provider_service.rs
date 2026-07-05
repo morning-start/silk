@@ -43,6 +43,7 @@ pub struct ProviderResponse {
     pub key_count: i64,
     /// 密钥条目列表（value 已解密用于展示）
     pub keys: Vec<ProviderKeyEntry>,
+    pub key_strategy: String,
     pub api_base_url: String,
     pub proxy_url: Option<String>,
     pub timeout_seconds: i64,
@@ -294,6 +295,7 @@ impl ProviderResponse {
             models,
             key_count,
             keys,
+            key_strategy: p.key_strategy,
             api_base_url: p.api_base_url,
             proxy_url: p.proxy_url,
             timeout_seconds: p.timeout_seconds,

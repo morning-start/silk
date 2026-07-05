@@ -3,6 +3,7 @@ import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
 
 const host = process.env.TAURI_DEV_HOST;
+const devPort = 1510;
 
 export default defineConfig(async () => ({
   plugins: [vue(), tailwindcss()],
@@ -10,9 +11,9 @@ export default defineConfig(async () => ({
   clearScreen: false,
   server: {
     host: host || "127.0.0.1",
-    port: 1420,
+    port: devPort,
     strictPort: true,
-    hmr: host ? { protocol: "ws", host, port: 1420 } : undefined,
+    hmr: host ? { protocol: "ws", host, port: devPort } : undefined,
     watch: {
       ignored: ["**/src-tauri/**"],
     },

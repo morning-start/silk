@@ -3,7 +3,6 @@ import { ref, onMounted, h } from "vue";
 import {
   NButton,
   NDataTable,
-  NModal,
   NForm,
   NFormItem,
   NInput,
@@ -16,14 +15,14 @@ import {
   NSpace,
   useMessage,
   useDialog,
-  NIcon,
   type DataTableColumns,
 } from "naive-ui";
 import { useRoutingRulesStore } from "../stores/routingRules";
-import { AlertCircleOutline } from "@vicons/ionicons5";
 import { useProvidersStore } from "../stores/providers";
 import { storeToRefs } from "pinia";
 import type { RoutingRule } from "../api";
+import AppFormModal from "../components/AppFormModal.vue";
+import AppPageShell from "../components/AppPageShell.vue";
 
 const rulesStore = useRoutingRulesStore();
 const providersStore = useProvidersStore();
@@ -231,55 +230,45 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="rules-page">
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <h2 class="page-title">路由</h2>
-        <NTag size="small" type="info">{{ rules.length }} 条规则</NTag>
-      </div>
-      <div class="toolbar-right">
+  <AppPageShell
+    title="路由"
+    :loading="loading"
+    :error="error"
+    :empty="rules.length === 0"
+    @reload="rulesStore.fetchAll()"
+  >
+    <template #count>
+      <NTag size="small" type="info">{{ rules.length }} 条规则</NTag>
+    </template>
+    <template #actions>
+      <NButton type="primary" @click="handleAdd">+ 新增路由</NButton>
+    </template>
+    <template #before>
+      <NAlert type="info" :bordered="false" class="rules-alert">
+        路由是高级功能。普通使用只需配置“渠道 + 模型”，只有在需要特殊路径转发、协议转换或媒体透传时才需要这里。
+      </NAlert>
+
+      <NCard :bordered="false" class="table-card rule-template-card" size="small" title="快速模板">
+        <NSpace>
+          <NButton secondary size="small" @click="applyTemplate('openai')">OpenAI 透传</NButton>
+          <NButton secondary size="small" @click="applyTemplate('claude')">Claude 转 OpenAI</NButton>
+          <NButton secondary size="small" @click="applyTemplate('media')">媒体透传</NButton>
+        </NSpace>
+      </NCard>
+    </template>
+    <template #empty>
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <h3 class="empty-title">暂无路由规则</h3>
+        <p class="empty-desc">添加路由规则来匹配 API 请求，将其转发到对应的渠道。</p>
         <NButton type="primary" @click="handleAdd">+ 新增路由</NButton>
       </div>
-    </div>
-
-    <NAlert type="info" :bordered="false" class="rules-alert">
-      路由是高级功能。普通使用只需配置“渠道 + 模型”，只有在需要特殊路径转发、协议转换或媒体透传时才需要这里。
-    </NAlert>
-
-    <NCard :bordered="false" class="table-card rule-template-card" size="small" title="快速模板">
-      <NSpace>
-        <NButton secondary size="small" @click="applyTemplate('openai')">OpenAI 透传</NButton>
-        <NButton secondary size="small" @click="applyTemplate('claude')">Claude 转 OpenAI</NButton>
-        <NButton secondary size="small" @click="applyTemplate('media')">媒体透传</NButton>
-      </NSpace>
-    </NCard>
+    </template>
 
     <NCard :bordered="false" class="table-card" size="small">
-      <!-- Error State -->
-      <template v-if="error">
-        <div class="error-state">
-          <div class="error-icon">
-            <NIcon size="48" color="#ef4444"><AlertCircleOutline /></NIcon>
-          </div>
-          <h3 class="error-title">数据加载失败</h3>
-          <p class="error-desc">{{ error }}</p>
-          <NButton type="primary" @click="rulesStore.fetchAll()">重新加载</NButton>
-        </div>
-      </template>
-      <!-- Empty State -->
-      <template v-else-if="!loading && rules.length === 0">
-        <div class="empty-state">
-          <div class="empty-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          </div>
-          <h3 class="empty-title">暂无路由规则</h3>
-          <p class="empty-desc">添加路由规则来匹配 API 请求，将其转发到对应的渠道</p>
-          <NButton type="primary" @click="handleAdd">+ 新增路由</NButton>
-        </div>
-      </template>
-      <!-- Data Table -->
       <NDataTable
-        v-else
         :columns="columns"
         :data="rules"
         :loading="loading"
@@ -289,15 +278,15 @@ onMounted(() => {
       />
     </NCard>
 
-    <NModal
-      v-model:show="showModal"
-      preset="card"
-      :title="editingId ? '编辑规则' : '添加路由'"
-      style="max-width: 600px"
-      :bordered="false"
-      :segmented="{ footer: true }"
-    >
-      <NForm :model="formValue" label-placement="left" label-width="100">
+    <template #after>
+      <AppFormModal
+        v-model:show="showModal"
+        :title="editingId ? '编辑规则' : '添加路由'"
+        width="600px"
+        :submit-text="editingId ? '保存修改' : '确认添加'"
+        @submit="handleSubmit"
+      >
+        <NForm :model="formValue" label-placement="left" label-width="100">
         <NFormItem label="名称" required>
           <NInput v-model:value="formValue.name" placeholder="如：OpenAI Chat 转发" />
         </NFormItem>
@@ -336,22 +325,13 @@ onMounted(() => {
             <NSwitch v-model:value="formValue.enabled" />
           </NFormItem>
         </div>
-      </NForm>
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
-          <NButton @click="showModal = false">取消</NButton>
-          <NButton type="primary" @click="handleSubmit">{{ editingId ? '保存修改' : '确认添加' }}</NButton>
-        </div>
-      </template>
-    </NModal>
-  </div>
+        </NForm>
+      </AppFormModal>
+    </template>
+  </AppPageShell>
 </template>
 
 <style scoped>
-.rules-page {
-  width: 100%;
-}
-
 .rules-alert {
   margin-bottom: 16px;
   border-radius: 12px;
