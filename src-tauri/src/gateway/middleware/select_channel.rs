@@ -40,7 +40,7 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
     }
 
     // 按 Provider 的策略从可用 Key 中选一个
-    let strategy = LoadBalanceStrategy::from_str(&provider.key_strategy);
+    let strategy = LoadBalanceStrategy::parse(&provider.key_strategy);
     let items: Vec<_> = available.iter().map(|e| (*e).clone()).collect();
     let balancer = LoadBalancer::new(items, strategy);
     let selected = balancer.select().ok_or_else(|| {

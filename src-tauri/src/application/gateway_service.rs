@@ -185,7 +185,7 @@ pub async fn load_gateway_context(
 
     let plugins = crate::gateway::plugins::default_token_saving_plugins();
 
-    Ok(GatewayContext::new(
+    GatewayContext::new(
         pool,
         Arc::new(RwLock::new(settings)),
         Arc::new(route_manager),
@@ -195,7 +195,7 @@ pub async fn load_gateway_context(
         plugins,
     )
     .await
-    .map_err(|e| sqlx::Error::Protocol(e))?)
+    .map_err(sqlx::Error::Protocol)
 }
 
 impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {

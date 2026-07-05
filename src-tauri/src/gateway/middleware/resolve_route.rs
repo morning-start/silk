@@ -62,7 +62,7 @@ pub async fn run(
 
     // 2. 降级：通过 RoutingRule 匹配 + 默认 Provider 兜底
     match try_route_fallback(runtime, ctx.clone()).await {
-        Ok(ctx) => return Ok(ctx),
+        Ok(ctx) => Ok(ctx),
         Err(_) => {
             // 3. 最后兜底：根据路径自动匹配协议，选择任意可用 Provider
             //    利用已有的协议转换能力（transform_request/transform_response）处理协议不匹配
@@ -304,7 +304,7 @@ fn select_via_load_balancer(
     channels: &[ModelMappingChannel],
     strategy: &str,
 ) -> Option<(String, Vec<String>)> {
-    let strategy = LoadBalanceStrategy::from_str(strategy);
+    let strategy = LoadBalanceStrategy::parse(strategy);
     let items: Vec<ChannelItem> = channels
         .iter()
         .map(|c| ChannelItem { provider_id: c.provider_id.clone() })

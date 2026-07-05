@@ -8,7 +8,7 @@ use crate::persistence::ModelMappingRepo;
 /// 在消费侧（日志写入任务）调用，不阻塞请求热路径。
 /// 收集需要计算 cost 的模型名，批量查询 model_mappings 表，
 /// 按 input/output token 用量和单价计算费用。
-pub async fn compute_batch_costs(logs: &mut Vec<NewRequestLog>, pool: &SqlitePool) {
+pub async fn compute_batch_costs(logs: &mut [NewRequestLog], pool: &SqlitePool) {
     // 收集所有需要计算 cost 的模型名
     let uncosted_models: Vec<String> = logs
         .iter()
@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn test_uncosted_models_filter() {
-        let logs = vec![
+        let logs = [
             NewRequestLog {
                 model_id: Some("gpt-4".to_string()),
                 cost: None,

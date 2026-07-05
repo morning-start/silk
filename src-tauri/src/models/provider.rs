@@ -106,29 +106,3 @@ impl Provider {
         serde_json::from_str(&self.models).unwrap_or_default()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_provider(keys: &str, strategy: &str) -> Provider {
-        Provider {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            protocols: r#"["chat"]"#.to_string(),
-            models: r#"["gpt-4"]"#.to_string(),
-            keys: keys.to_string(),
-            key_strategy: strategy.to_string(),
-            api_base_url: "https://api.openai.com".to_string(),
-            proxy_url: None,
-            timeout_seconds: 30,
-            max_retries: 3,
-            status: "enabled".to_string(),
-            health_status: None,
-            last_health_check_at: None,
-            metadata_json: None,
-            created_at: chrono::Utc::now().naive_utc(),
-            updated_at: chrono::Utc::now().naive_utc(),
-        }
-    }
-}

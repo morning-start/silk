@@ -175,8 +175,8 @@ impl GatewayPlugin for SlidingWindowPlugin {
             }));
 
             // 3. 保留最近的历史记录
-            for idx in skip_until..total_messages {
-                pruned_messages.push(messages[idx].clone());
+            for message in messages.iter().take(total_messages).skip(skip_until) {
+                pruned_messages.push(message.clone());
             }
 
             tracing::info!(
@@ -242,8 +242,8 @@ impl TerminalLogPrunerPlugin {
             
             if lines.len() > (first_keep + last_keep + 10) {
                 let mut result = String::new();
-                for i in 0..first_keep {
-                    result.push_str(lines[i]);
+                for line in lines.iter().take(first_keep) {
+                    result.push_str(line);
                     result.push('\n');
                 }
                 
@@ -252,8 +252,8 @@ impl TerminalLogPrunerPlugin {
                     lines.len() - first_keep - last_keep
                 ));
                 
-                for i in (lines.len() - last_keep)..lines.len() {
-                    result.push_str(lines[i]);
+                for line in lines.iter().skip(lines.len() - last_keep) {
+                    result.push_str(line);
                     result.push('\n');
                 }
                 
