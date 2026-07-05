@@ -14,20 +14,7 @@ use crate::gateway::pipeline::StageError;
 use super::build_upstream_url;
 use super::mask_api_key;
 
-fn is_streaming_body(ctx: &RequestContext) -> bool {
-    if let Some(json) = &ctx.parsed_body {
-        json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false)
-    } else {
-        let body_str = String::from_utf8_lossy(&ctx.request_body);
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body_str) {
-            json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false)
-        } else {
-            false
-        }
-    }
-}
-
-/// 请求转发入口：自动判断流式/非流式
+/// 请求转发入口：统一以流式 SSE 方式转发上游请求
 pub async fn run(
     runtime: &GatewayContext,
     ctx: RequestContext,
@@ -52,13 +39,8 @@ pub async fn run(
             .map_err(|error| StageError::new(error_ctx.clone(), error))?
     };
 
-    // 使用 GatewayContext 中的共享客户端，避免每请求创建新 TLS 连接
-    let is_streaming = is_streaming_body(&ctx);
-    let client = if is_streaming {
-        &runtime.http_client_streaming
-    } else {
-        &runtime.http_client
-    };
+    // transform_request 已注入 stream:true，统一使用流式客户端
+    let client = &runtime.http_client_streaming;
 
     let reqwest_method = if let Some(ref method) = ctx.upstream_method {
         reqwest::Method::from_bytes(method.as_bytes()).map_err(|err| {
@@ -91,7 +73,11 @@ pub async fn run(
     let header_config = crate::gateway::header_config::HeaderConfig::default();
     for (name, value) in ctx.headers.iter() {
         // 跳过已经被适配器设置的 header
-        if ctx.upstream_headers.as_ref().map_or(false, |h| h.contains_key(name)) {
+        if ctx
+            .upstream_headers
+            .as_ref()
+            .is_some_and(|h| h.contains_key(name))
+        {
             continue;
         }
         
@@ -159,11 +145,12 @@ pub async fn run(
                     "收到上游响应"
                 );
 
-                // 全部强制走流式 SSE 路径
-                return handle_sse_response(
-                    ctx, response, headers, provider, &stream_config,
-                )
-                .await;
+                if !status.is_success() {
+                    return handle_upstream_error(ctx, response, headers).await;
+                }
+
+                return handle_sse_response(ctx, response, headers, provider, &stream_config)
+                    .await;
             }
             Err(err) => {
                 last_error = Some(err);
@@ -182,6 +169,46 @@ pub async fn run(
     Err(StageError::new(
         error_ctx,
         final_error,
+    ))
+}
+
+
+async fn handle_upstream_error(
+    mut ctx: RequestContext,
+    response: reqwest::Response,
+    headers: axum::http::HeaderMap,
+) -> Result<RequestContext, StageError> {
+    let status = response.status();
+    let body = response.bytes().await.unwrap_or_else(|err| {
+        bytes::Bytes::from(
+            serde_json::json!({
+                "error": {
+                    "message": err.to_string(),
+                    "type": "upstream_error"
+                }
+            })
+            .to_string(),
+        )
+    });
+    let parsed_body = serde_json::from_slice(&body).unwrap_or_else(|_| {
+        serde_json::json!({
+            "error": {
+                "message": String::from_utf8_lossy(&body).chars().take(500).collect::<String>(),
+                "type": "upstream_error"
+            }
+        })
+    });
+
+    ctx.upstream_status = Some(status);
+    ctx.upstream_headers = Some(headers);
+    ctx.upstream_body = Some(body);
+
+    Err(StageError::new(
+        ctx,
+        GatewayError::UpstreamError {
+            status: status.as_u16(),
+            body: parsed_body,
+        },
     ))
 }
 
@@ -206,6 +233,7 @@ async fn handle_sse_response(
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, GatewayError>>(256);
     let shared = Arc::new(RwLock::new(StreamSharedState::default()));
     let mut stream_state = StreamState::new();
+    let status = response.status();
 
     // 判断是否需要流式协议转换
     let inbound = ctx.inbound_protocol.clone().unwrap_or_default();
@@ -349,13 +377,13 @@ async fn handle_sse_response(
 
     // 构建流式响应
     let stream_response = StreamResponse::Sse {
-        status: ctx.upstream_status.unwrap_or(axum::http::StatusCode::OK),
+        status,
         headers: headers.clone(),
         stream: Box::new(tokio_stream::wrappers::ReceiverStream::new(rx)),
     };
 
     ctx.provider = Some(provider);
-    ctx.upstream_status = Some(axum::http::StatusCode::OK);
+    ctx.upstream_status = Some(status);
     ctx.upstream_headers = Some(headers);
     ctx.upstream_body = None;
     ctx.stream_shared = Some(shared);

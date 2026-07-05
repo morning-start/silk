@@ -16,7 +16,7 @@ pub enum LoadBalanceStrategy {
 }
 
 impl LoadBalanceStrategy {
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "weighted" => Self::Weighted,
             "least_conn" => Self::LeastConn,

@@ -265,6 +265,12 @@ impl SseParser {
     }
 }
 
+impl Default for SseParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// 判断是否为 SSE 响应
 pub fn is_sse_response(headers: &HeaderMap) -> bool {
     headers
@@ -324,6 +330,12 @@ impl StreamState {
 
     pub fn is_timed_out(&self, timeout: Duration) -> bool {
         self.last_data_at.elapsed() > timeout
+    }
+}
+
+impl Default for StreamState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

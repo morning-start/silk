@@ -23,8 +23,8 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
     let target_protocol = &outbound;
 
-    // 自动注入 stream:true，使所有请求走流式 SSE 路径
-    // 上游不支持非流式响应时（返回空 body），依赖此机制规避
+    // 注入 stream:true，使所有请求走流式 SSE 路径
+    // 本项目网关以流式为核心处理方式，上游不支持非流式响应时（返回空 body），依赖此机制规避
     if let Some(body) = ctx.get_parsed_body() {
         let mut json = body.clone();
         if !json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false) {
@@ -152,10 +152,91 @@ fn convert_request_body(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Instant;
 
-    #[test]
-    fn test_placeholder() {
-        // 集成测试在端到端测试中覆盖
-        assert!(true);
+    use axum::http::{HeaderMap, Method};
+
+    use crate::gateway::context::RequestContext;
+    use crate::models::Provider;
+    use crate::protocol::AdapterRegistry;
+
+    use super::*;
+
+    fn test_provider() -> Provider {
+        let now = chrono::Utc::now().naive_utc();
+        Provider {
+            id: "provider-1".to_string(),
+            name: "Test Provider".to_string(),
+            protocols: r#"["openai_chat"]"#.to_string(),
+            models: r#"["gpt-4"]"#.to_string(),
+            keys: r#"[]"#.to_string(),
+            key_strategy: "round_robin".to_string(),
+            api_base_url: "https://example.com".to_string(),
+            proxy_url: None,
+            timeout_seconds: 30,
+            max_retries: 0,
+            status: "enabled".to_string(),
+            health_status: None,
+            last_health_check_at: None,
+            metadata_json: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn test_context(body: serde_json::Value) -> RequestContext {
+        let mut ctx = RequestContext::new(
+            "req-1".to_string(),
+            Instant::now(),
+            Method::POST,
+            "/v1/chat/completions".parse().expect("valid uri"),
+            HeaderMap::new(),
+        );
+        ctx.request_body = bytes::Bytes::from(serde_json::to_vec(&body).expect("json body"));
+        ctx.parsed_body = Some(body);
+        ctx.provider = Some(test_provider());
+        ctx.selected_api_key = Some("sk-test".to_string());
+        ctx.inbound_protocol = Some("openai_chat".to_string());
+        ctx.outbound_protocol = Some("openai_chat".to_string());
+        ctx.adapter_registry = Some(Arc::new(AdapterRegistry::new()));
+        ctx
+    }
+
+    #[tokio::test]
+    async fn forces_streaming_for_non_streaming_request() {
+        let body = serde_json::json!({
+            "model": "gpt-4",
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+
+        let ctx = match run(test_context(body)).await {
+            Ok(ctx) => ctx,
+            Err(err) => panic!("transform request failed: {}", err.error),
+        };
+        let transformed: serde_json::Value =
+            serde_json::from_slice(&ctx.request_body).expect("transformed json");
+
+        // 网关强制注入 stream:true + stream_options
+        assert_eq!(transformed.get("stream").and_then(|v| v.as_bool()), Some(true));
+        assert!(transformed.get("stream_options").is_some());
+    }
+
+    #[tokio::test]
+    async fn preserves_explicit_streaming_request() {
+        let body = serde_json::json!({
+            "model": "gpt-4",
+            "stream": true,
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+
+        let ctx = match run(test_context(body)).await {
+            Ok(ctx) => ctx,
+            Err(err) => panic!("transform request failed: {}", err.error),
+        };
+        let transformed: serde_json::Value =
+            serde_json::from_slice(&ctx.request_body).expect("transformed json");
+
+        assert_eq!(transformed.get("stream").and_then(|v| v.as_bool()), Some(true));
     }
 }

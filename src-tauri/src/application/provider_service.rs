@@ -10,7 +10,7 @@ use crate::AppState;
 /// 按负载均衡策略选择一个 API Key（已从 models/provider.rs 移出）
 pub fn select_api_key(provider: &Provider) -> Result<String, CryptoError> {
     let entries = provider.keys_vec();
-    let strategy = LoadBalanceStrategy::from_str(&provider.key_strategy);
+    let strategy = LoadBalanceStrategy::parse(&provider.key_strategy);
     let balancer = LoadBalancer::new(entries, strategy);
     let selected = balancer.select().ok_or(CryptoError::InvalidFormat)?;
 
@@ -25,8 +25,8 @@ pub fn select_api_key(provider: &Provider) -> Result<String, CryptoError> {
 /// 规范化 API Base URL：去除尾部 /v1 或 /v1/
 pub fn normalize_api_base_url(url: &str) -> String {
     let trimmed = url.trim_end_matches('/');
-    if trimmed.ends_with("/v1") {
-        trimmed[..trimmed.len() - 3]
+    if let Some(stripped) = trimmed.strip_suffix("/v1") {
+        stripped
             .trim_end_matches('/')
             .to_string()
     } else {
@@ -207,7 +207,7 @@ pub async fn test(state: &AppState, id: String) -> Result<ProviderTestResponse, 
 
     let base_url = normalize_api_base_url(&provider.api_base_url);
     let test_url = format!("{}/v1/models", base_url);
-    let timeout_secs = provider.timeout_seconds.min(10).max(1) as u64;
+    let timeout_secs = provider.timeout_seconds.clamp(1, 10) as u64;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))

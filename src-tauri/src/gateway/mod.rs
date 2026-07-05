@@ -136,7 +136,7 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<NewRequestLog>) {
         return;
     }
 
-    let mut logs = batch.drain(..).collect::<Vec<_>>();
+    let mut logs = std::mem::take(batch);
 
     // 在消费侧计算 cost，不阻塞请求热路径
     log_cost::compute_batch_costs(&mut logs, pool).await;

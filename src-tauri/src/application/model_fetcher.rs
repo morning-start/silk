@@ -32,7 +32,7 @@ pub async fn fetch_models(
 ) -> Result<Vec<ProviderModelInfo>, ServiceError> {
     let base_url = normalize_api_base_url(&payload.api_base_url);
     let test_url = format!("{}/v1/models", base_url);
-    let timeout_secs = payload.timeout_seconds.unwrap_or(10).min(30).max(1) as u64;
+    let timeout_secs = payload.timeout_seconds.unwrap_or(10).clamp(1, 30) as u64;
 
     info!("[fetch_provider_models] 请求URL: {test_url}, 超时: {timeout_secs}s");
 
