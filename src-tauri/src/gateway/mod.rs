@@ -163,7 +163,7 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<NewRequestLog>) {
             tracing::debug!(count, "批量写入日志成功");
         }
         Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("787") => {
-            // FOREIGN KEY 约束失败：批量将 provider_id 和 route_id 置空后重试
+            // FOREIGN KEY 约束失败：批量将 provider_id 置空后重试
             tracing::warn!("日志 FOREIGN KEY 约束失败，整批降级写入");
             let fallback_logs: Vec<_> = logs
                 .into_iter()
