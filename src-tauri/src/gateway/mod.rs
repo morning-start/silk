@@ -20,7 +20,7 @@ use tokio::task::JoinHandle;
 use crate::models::NewRequestLog;
 use crate::persistence::LogExtraTokenRepo;
 
-pub use context::{GatewayContext, RequestContext, RouteManager};
+pub use context::{GatewayContext, RequestContext};
 pub use error::GatewayError;
 pub use pipeline::{GatewayPipeline, StageError};
 pub use plugin::GatewayPlugin;
@@ -169,7 +169,6 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<NewRequestLog>) {
                 .into_iter()
                 .map(|mut log| {
                     log.provider_id = None;
-                    log.route_id = None;
                     log
                 })
                 .collect();

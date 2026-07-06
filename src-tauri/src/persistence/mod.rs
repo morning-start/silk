@@ -5,7 +5,6 @@ pub mod log_extra_token_repo;
 pub mod log_repo;
 pub mod model_mapping_repo;
 pub mod provider_repo;
-pub mod routing_rule_repo;
 pub mod stats_repo;
 
 pub use gateway_key_repo::GatewayKeyRepo;
@@ -14,5 +13,4 @@ pub use log_extra_token_repo::LogExtraTokenRepo;
 pub use log_repo::LogRepo;
 pub use model_mapping_repo::ModelMappingRepo;
 pub use provider_repo::ProviderRepo;
-pub use routing_rule_repo::RoutingRuleRepo;
 pub use stats_repo::StatsRepo;

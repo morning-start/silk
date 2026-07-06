@@ -47,9 +47,6 @@ impl GatewaySettingsRepo {
         if let Some(v) = &update.default_provider_id {
             settings.default_provider_id = Some(v.clone());
         }
-        if let Some(ref v) = update.default_route_id {
-            settings.default_route_id = Some(v.clone());
-        }
         if let Some(v) = update.rate_limit_enabled {
             settings.rate_limit_enabled = v;
         }

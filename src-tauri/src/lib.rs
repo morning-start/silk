@@ -39,8 +39,6 @@ pub struct LookupCache {
     pub provider_names: HashMap<String, String>,
     /// model mapping id → model_name
     pub model_mapping_names: HashMap<String, String>,
-    /// routing rule id → name
-    pub routing_rule_names: HashMap<String, String>,
     /// gateway key id → name
     pub gateway_key_names: HashMap<String, String>,
 }
@@ -62,12 +60,6 @@ impl AppState {
         self.gateway.read().await.provider_cache.invalidate(id).await;
     }
 
-    /// 从 DB 重载路由规则到网关
-    pub async fn reload_routes(&self, pool: &SqlitePool) {
-        self.gateway.read().await.route_manager.reload(pool).await.ok();
-    }
-
-    /// 刷新通用字典表缓存（从 DB 一次性重新加载所有字典表）
     pub async fn refresh_lookup(&self) {
         if let Some(pool) = crate::get_db_pool() {
             let cache = crate::load_lookup_cache(pool).await;
@@ -100,16 +92,6 @@ pub async fn load_lookup_cache(pool: &SqlitePool) -> LookupCache {
         })
         .collect();
 
-    let routing_rule_names = sqlx::query("SELECT id, name FROM routing_rules")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|r| {
-            Some((r.get::<String, _>("id"), r.get::<String, _>("name")))
-        })
-        .collect();
-
     let gateway_key_names = sqlx::query("SELECT id, name FROM gateway_keys")
         .fetch_all(pool)
         .await
@@ -123,7 +105,6 @@ pub async fn load_lookup_cache(pool: &SqlitePool) -> LookupCache {
     LookupCache {
         provider_names,
         model_mapping_names,
-        routing_rule_names,
         gateway_key_names,
     }
 }
@@ -410,12 +391,6 @@ pub fn run() {
             commands::providers::test_provider,
             commands::providers::delete_provider,
             commands::providers::fetch_provider_models,
-            // 路由规则管理
-            commands::routing_rules::list_routing_rules,
-            commands::routing_rules::get_routing_rule,
-            commands::routing_rules::create_routing_rule,
-            commands::routing_rules::update_routing_rule,
-            commands::routing_rules::delete_routing_rule,
             // 日志管理
             commands::logs::list_logs,
             commands::logs::cleanup_logs,

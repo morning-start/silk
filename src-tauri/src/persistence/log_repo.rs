@@ -15,12 +15,12 @@ impl LogRepo {
 
         sqlx::query_as::<_, RequestLog>(
             r#"
-            INSERT INTO request_logs (id, request_id, method, path, route_id, inbound_protocol, outbound_protocol,
+            INSERT INTO request_logs (id, request_id, method, path, inbound_protocol, outbound_protocol,
                                       status_code, resp_ms, total_duration_ms, provider_id,
                                       error_message, error_code, model_id, model_name, retry_count, stream_enabled,
                                       auth_key_name, channel_key_name)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                    $12, $13, $14, $15, $16, $17, $18, $19)
+                    $12, $13, $14, $15, $16, $17, $18)
             RETURNING *
             "#,
         )
@@ -28,7 +28,6 @@ impl LogRepo {
         .bind(log.request_id.as_str())
         .bind(log.method.as_str())
         .bind(log.path.as_str())
-        .bind(log.route_id.as_deref())
         .bind(log.inbound_protocol.as_deref())
         .bind(log.outbound_protocol.as_deref())
         .bind(log.status_code)
@@ -61,19 +60,18 @@ impl LogRepo {
             let stream_enabled = defaults::bool_to_i64(log.stream_enabled, false);
             let result = sqlx::query(
                 r#"
-                INSERT INTO request_logs (id, request_id, method, path, route_id, inbound_protocol, outbound_protocol,
+                INSERT INTO request_logs (id, request_id, method, path, inbound_protocol, outbound_protocol,
                                           status_code, resp_ms, total_duration_ms, provider_id,
                                           error_message, error_code, model_id, model_name, retry_count, stream_enabled,
                                           auth_key_name, channel_key_name)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                            $12, $13, $14, $15, $16, $17, $18, $19)
+                            $12, $13, $14, $15, $16, $17, $18)
                 "#,
             )
             .bind(id)
             .bind(log.request_id.as_str())
             .bind(log.method.as_str())
             .bind(log.path.as_str())
-            .bind(log.route_id.as_deref())
             .bind(log.inbound_protocol.as_deref())
             .bind(log.outbound_protocol.as_deref())
             .bind(log.status_code)
