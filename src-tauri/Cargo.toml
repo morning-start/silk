@@ -1,6 +1,6 @@
 [package]
 name = "silk"
-version = "0.2.0"
+version = "0.3.0"
 description = "Silk 丝路 — 纯本地桌面 AI 多模型中转客户端"
 authors = ["morning-start"]
 edition = "2021"
