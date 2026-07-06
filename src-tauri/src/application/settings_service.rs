@@ -262,7 +262,6 @@ mod tests {
             close_to_tray: Some(true),
             auto_start_gateway: Some(false),
             default_provider_id: None,
-            default_route_id: None,
             rate_limit_enabled: Some(true),
             rate_limit_max_requests_per_minute: Some(1000),
             rate_limit_max_tokens_per_minute: Some(500000),
