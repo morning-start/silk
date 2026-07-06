@@ -267,7 +267,7 @@ pub async fn import_config(
             sqlx::query(
                 r#"
                 INSERT INTO gateway_keys (
-                    id, name, key_hash, key_prefix, enabled, expires_at, max_concurrent, created_at, updated_at
+                    id, name, key_hash, encrypted_key_value, enabled, expires_at, max_concurrent, created_at, updated_at
                 )
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                 "#,
@@ -275,7 +275,7 @@ pub async fn import_config(
             .bind(&key.id)
             .bind(&key.name)
             .bind(&key.key_hash)
-            .bind(&key.key_prefix)
+            .bind(&key.encrypted_key_value)
             .bind(key.enabled)
             .bind(key.expires_at)
             .bind(key.max_concurrent)
