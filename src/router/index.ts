@@ -32,12 +32,6 @@ const routes = [
     component: () => import("../views/SettingsView.vue"),
     meta: { title: "设置" },
   },
-  {
-    path: "/routing-rules",
-    name: "routing-rules",
-    component: () => import("../views/RoutingRulesView.vue"),
-    meta: { title: "路由" },
-  },
 ];
 
 const router = createRouter({

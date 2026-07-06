@@ -60,8 +60,8 @@ pub async fn run(
         }
     }
 
-    // 2. 降级：通过 RoutingRule 匹配 + 默认 Provider 兜底
-    match try_route_fallback(runtime, ctx.clone()).await {
+    // 2. 降级：通过默认 Provider 兜底
+    match try_settings_default(runtime, ctx.clone()).await {
         Ok(ctx) => Ok(ctx),
         Err(_) => {
             // 3. 最后兜底：根据路径自动匹配协议，选择任意可用 Provider
@@ -147,59 +147,7 @@ async fn try_model_mapping_route(
     Ok(Some(ctx))
 }
 
-/// 路由匹配（2）：RoutingRule 匹配 → default_route_id → default_provider_id
-async fn try_route_fallback(
-    runtime: &GatewayContext,
-    mut ctx: RequestContext,
-) -> Result<RequestContext, StageError> {
-    let error_ctx = ctx.clone();
-
-    // 路由匹配：路由规则表
-    let route = match runtime
-        .route_manager
-        .resolve(
-            ctx.host.as_deref(),
-            ctx.method.as_str(),
-            &ctx.path,
-            ctx.content_type.as_deref(),
-        )
-        .await
-    {
-        Some(r) => r,
-        None => {
-            // 路由未命中，走 settings 兜底
-            return try_settings_default(runtime, ctx).await;
-        }
-    };
-
-    // 候选选择：从路由规则解析 provider_id
-    let provider_id = runtime
-        .route_manager
-        .resolve_provider_id(&route)
-        .await;
-
-    let provider_id = provider_id.ok_or_else(|| {
-        StageError::new(
-            error_ctx.clone(),
-            GatewayError::NotFound("无法解析目标 Provider".to_string()),
-        )
-    })?;
-
-    // 上下文填充：协议由路由规则指定（为 None 时由下游 transform 自动处理）
-    let provider = load_provider_with_cache(runtime, &provider_id, error_ctx).await?;
-    let inbound = route.inbound_protocol.clone().unwrap_or_default();
-    let outbound = route.outbound_protocol.clone().unwrap_or_default();
-    ctx.route = Some(route);
-
-    // 填充渠道列表以支持 3 级回退
-    ctx.channels_available = all_enabled_provider_ids(runtime).await;
-
-    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
-
-    Ok(ctx)
-}
-
-/// 路由匹配（2b）：settings 中的默认路由/Provider 兜底（try_route_fallback 的内部降级）
+/// 路由匹配（2）：settings 中的默认 Provider 兜底
 async fn try_settings_default(
     runtime: &GatewayContext,
     mut ctx: RequestContext,
@@ -207,31 +155,6 @@ async fn try_settings_default(
     let error_ctx = ctx.clone();
     let settings = runtime.settings.read().await;
 
-    // 优先尝试 default_route_id
-    if let Some(ref default_route_id) = settings.default_route_id {
-        if !default_route_id.is_empty() {
-            if let Ok(Some(fallback_route)) =
-                crate::persistence::RoutingRuleRepo::find_by_id(&runtime.pool, default_route_id).await
-            {
-                let provider_id = runtime
-                    .route_manager
-                    .resolve_provider_id(&fallback_route)
-                    .await;
-
-                if let Some(pid) = provider_id {
-                    let provider = load_provider_with_cache(runtime, &pid, error_ctx.clone()).await?;
-                    let inbound = fallback_route.inbound_protocol.clone().unwrap_or_default();
-                    let outbound = fallback_route.outbound_protocol.clone().unwrap_or_default();
-                    ctx.route = Some(fallback_route);
-                    ctx.channels_available = all_enabled_provider_ids(runtime).await;
-                    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
-                    return Ok(ctx);
-                }
-            }
-        }
-    }
-
-    // 再尝试 default_provider_id
     if let Some(ref default_provider_id) = settings.default_provider_id {
         if !default_provider_id.is_empty() {
             let provider = load_provider_with_cache(runtime, default_provider_id, error_ctx.clone()).await?;

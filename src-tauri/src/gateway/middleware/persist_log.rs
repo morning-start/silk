@@ -55,7 +55,6 @@ pub fn estimate_tokens_from_bytes(bytes: i64) -> i64 {
 /// 从请求上下文构建日志条目（不发送）
 #[must_use]
 pub fn build_log(ctx: &RequestContext) -> crate::models::NewRequestLog {
-    let route = ctx.route.as_ref();
     let provider = ctx.provider.as_ref();
     let status = ctx
         .final_status
@@ -96,19 +95,15 @@ pub fn build_log(ctx: &RequestContext) -> crate::models::NewRequestLog {
                 .unwrap_or((None, false))
         });
 
-    // 模型 ID：remote_model_override > 请求体 model > 路由或 Provider
+    // 模型 ID：remote_model_override > 请求体 model > Provider 模型列表
     let model_id = ctx
         .remote_model_override
         .clone()
         .or(model_from_body)
-        .or_else(|| {
-            route
-                .and_then(|r| r.model_name_override.clone())
-                .or_else(|| provider.and_then(|p| p.models_vec().first().cloned()))
-        });
+        .or_else(|| provider.and_then(|p| p.models_vec().first().cloned()));
 
-    // 模型池名称：来自路由的 model_name_override
-    let model_name = route.and_then(|r| r.model_name_override.clone());
+    // 模型池名称：无路由规则时留空
+    let model_name = None;
 
     let retry_attempts = ctx.total_retry_attempts as i64;
 
@@ -116,7 +111,6 @@ pub fn build_log(ctx: &RequestContext) -> crate::models::NewRequestLog {
         request_id: ctx.request_id.clone(),
         method: ctx.method.to_string(),
         path: ctx.path.clone(),
-        route_id: route.map(|route| route.id.clone()),
         inbound_protocol: ctx.inbound_protocol.clone(),
         outbound_protocol: ctx.outbound_protocol.clone(),
         status_code: status,

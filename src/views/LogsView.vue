@@ -452,10 +452,6 @@ onMounted(() => {
           <span style="margin: 0 4px">→</span>
           <NTag size="small">{{ selectedLog.outbound_protocol || '-' }}</NTag>
         </div>
-        <div class="detail-row" v-if="selectedLog.route_id">
-          <span class="detail-label">路由规则：</span>
-          <span class="detail-value text-mono">{{ selectedLog.route_id }}</span>
-        </div>
         <div class="detail-row" v-if="selectedLog.provider_id">
           <span class="detail-label">渠道：</span>
           <span class="detail-value">{{ selectedLog.provider_name || selectedLog.provider_id }}</span>

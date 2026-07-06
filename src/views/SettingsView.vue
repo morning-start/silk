@@ -36,7 +36,6 @@ const formValue = ref({
   close_to_tray: true,
   auto_start_gateway: false,
   default_provider_id: "",
-  default_route_id: "",
 });
 
 // Gateway Keys
@@ -140,7 +139,6 @@ async function handleSave() {
     const payload = {
       ...formValue.value,
       default_provider_id: formValue.value.default_provider_id || null,
-      default_route_id: formValue.value.default_route_id || null,
     };
     await gatewayStore.updateSettings(payload);
     message.success("设置已保存");
@@ -249,7 +247,6 @@ watch(
         close_to_tray: s.close_to_tray,
         auto_start_gateway: s.auto_start_gateway,
         default_provider_id: s.default_provider_id || "",
-        default_route_id: s.default_route_id || "",
       };
     }
   },

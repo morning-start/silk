@@ -22,7 +22,7 @@ import { ref } from "vue";
  */
 
 /** 已支持的通知事件类型 */
-export type DataChangeEvent = "providers" | "routingRules" | "groups" | "gatewaySettings";
+export type DataChangeEvent = "providers" | "groups" | "gatewaySettings";
 
 const _eventVersion = ref<Record<string, number>>({});
 

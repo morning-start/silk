@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 
 use crate::error::ServiceError;
-use crate::gateway::context::{GatewayContext, ProviderCache, RouteManager};
+use crate::gateway::context::{GatewayContext, ProviderCache};
 use crate::gateway::spawn_gateway_server;
 use crate::protocol::AdapterRegistry;
 use crate::AppState;
@@ -29,7 +29,6 @@ pub struct GatewaySettingsInfo {
     pub close_to_tray: bool,
     pub auto_start_gateway: bool,
     pub default_provider_id: Option<String>,
-    pub default_route_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -179,7 +178,6 @@ pub async fn load_gateway_context(
     let settings_path = crate::get_settings_path()
         .ok_or_else(|| sqlx::Error::Protocol("网关设置路径未初始化".to_string()))?;
     let settings = crate::persistence::GatewaySettingsRepo::load_effective(settings_path);
-    let route_manager = RouteManager::load(&pool).await?;
     let provider_cache = Arc::new(ProviderCache::new(Duration::from_secs(300)));
     let adapter_registry = Arc::new(AdapterRegistry::new());
 
@@ -188,7 +186,6 @@ pub async fn load_gateway_context(
     GatewayContext::new(
         pool,
         Arc::new(RwLock::new(settings)),
-        Arc::new(route_manager),
         provider_cache,
         log_sender,
         adapter_registry,
@@ -210,7 +207,6 @@ impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
             close_to_tray: settings.close_to_tray,
             auto_start_gateway: settings.auto_start_gateway,
             default_provider_id: settings.default_provider_id.clone(),
-            default_route_id: settings.default_route_id.clone(),
         }
     }
 }

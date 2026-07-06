@@ -63,10 +63,9 @@ onMounted(() => {
 
 // 跨 Store 联动
 const providersSignal = useDataChangeSignal("providers");
-const routingRulesSignal = useDataChangeSignal("routingRules");
 
 watch(
-  [providersSignal, routingRulesSignal],
+  [providersSignal],
   () => { loadData(); },
   { flush: "post" }
 );

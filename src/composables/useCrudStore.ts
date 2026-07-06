@@ -10,7 +10,7 @@ type CrudApi<T> = {
   delete: (id: string) => Promise<unknown>;
 };
 
-/** 通用 CRUD store — 消除 providers.ts / routingRules.ts 跨文件复制 */
+/** 通用 CRUD store — 消除跨文件复制 */
 export function useCrudStore<T extends { id: string }>(
   id: DataChangeEvent,
   api: CrudApi<T>,

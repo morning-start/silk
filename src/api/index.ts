@@ -22,32 +22,12 @@ export interface Provider {
   updated_at: string;
 }
 
-export interface RoutingRule {
-  id: string;
-  name: string;
-  match_host: string | null;
-  match_path: string;
-  match_method: string;
-  match_content_type: string | null;
-  target_provider_id: string;
-  target_group_id: string | null;
-  inbound_protocol: string | null;
-  outbound_protocol: string | null;
-  protocol_conversion: boolean;
-  model_name_override: string | null;
-  priority: number;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface RequestLog {
   id: string;
   request_id: string;
   timestamp: string;
   method: string;
   path: string;
-  route_id: string | null;
   inbound_protocol: string | null;
   outbound_protocol: string | null;
   response_status: number | null;
@@ -86,7 +66,6 @@ export interface GatewaySettings {
   close_to_tray: boolean;
   auto_start_gateway: boolean;
   default_provider_id: string | null;
-  default_route_id: string | null;
   rate_limit_enabled: boolean;
   rate_limit_max_requests_per_minute: number;
   rate_limit_max_tokens_per_minute: number;
@@ -210,16 +189,6 @@ export const api = {
     invoke<Provider>("update_provider", { id, payload: data }),
   deleteProvider: (id: string) => invoke<boolean>("delete_provider", { id }),
   testProvider: (id: string) => invoke<ProviderTestResponse>("test_provider", { id }),
-
-
-  // Routing Rules
-  listRoutingRules: () => invoke<RoutingRule[]>("list_routing_rules"),
-  getRoutingRule: (id: string) => invoke<RoutingRule>("get_routing_rule", { id }),
-  createRoutingRule: (data: Partial<RoutingRule>) =>
-    invoke<RoutingRule>("create_routing_rule", { payload: data }),
-  updateRoutingRule: (id: string, data: Partial<RoutingRule>) =>
-    invoke<RoutingRule>("update_routing_rule", { id, payload: data }),
-  deleteRoutingRule: (id: string) => invoke<boolean>("delete_routing_rule", { id }),
 
   // Logs
   listLogs: (limit = 50, offset = 0) =>

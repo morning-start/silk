@@ -9,9 +9,8 @@ use crate::crypto::{encrypt, hash_api_key};
 use crate::error::{bad_request, require_db, ServiceError};
 use crate::models::{
     GatewayKey, GatewaySettings, ModelMapping, ModelMappingChannel, Provider, ProviderKeyEntry,
-    RoutingRule,
 };
-use crate::persistence::{GatewayKeyRepo, ModelMappingRepo, ProviderRepo, RoutingRuleRepo};
+use crate::persistence::{GatewayKeyRepo, ModelMappingRepo, ProviderRepo};
 use crate::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,7 +44,6 @@ struct ConfigExportBundle {
     exported_at: String,
     gateway_settings: GatewaySettings,
     providers: Vec<PortableProvider>,
-    routing_rules: Vec<RoutingRule>,
     model_mappings: Vec<ModelMapping>,
     model_mapping_channels: Vec<ModelMappingChannel>,
     gateway_keys: Vec<PortableGatewayKey>,
@@ -99,7 +97,6 @@ pub async fn export_config(payload: ExportConfigPayload) -> Result<FileOperation
             .into_iter()
             .map(PortableProvider::from_provider)
             .collect::<Result<Vec<_>, _>>()?,
-        routing_rules: RoutingRuleRepo::find_all(pool).await?,
         model_mappings: ModelMappingRepo::find_all(pool).await?,
         model_mapping_channels: sqlx::query_as::<_, ModelMappingChannel>(
             r#"SELECT * FROM model_mapping_channels ORDER BY created_at ASC"#,
@@ -184,7 +181,6 @@ pub async fn import_config(
 
         sqlx::query("DELETE FROM model_mapping_channels").execute(&mut *tx).await?;
         sqlx::query("DELETE FROM model_mappings").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM routing_rules").execute(&mut *tx).await?;
         sqlx::query("DELETE FROM providers").execute(&mut *tx).await?;
         sqlx::query("DELETE FROM gateway_keys").execute(&mut *tx).await?;
 
@@ -215,40 +211,6 @@ pub async fn import_config(
             .bind(&provider.metadata_json)
             .bind(provider.created_at)
             .bind(provider.updated_at)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        for rule in &bundle_clone.routing_rules {
-            sqlx::query(
-                r#"
-                INSERT INTO routing_rules (
-                    id, name, match_host, match_path, match_method, match_content_type,
-                    inbound_protocol, outbound_protocol, target_provider_id, target_group_id,
-                    failover_provider_id, protocol_conversion, model_name_override, metadata_json,
-                    priority, enabled, created_at, updated_at
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
-                "#,
-            )
-            .bind(&rule.id)
-            .bind(&rule.name)
-            .bind(&rule.match_host)
-            .bind(&rule.match_path)
-            .bind(&rule.match_method)
-            .bind(&rule.match_content_type)
-            .bind(&rule.inbound_protocol)
-            .bind(&rule.outbound_protocol)
-            .bind(&rule.target_provider_id)
-            .bind(&rule.target_group_id)
-            .bind(&rule.failover_provider_id)
-            .bind(rule.protocol_conversion)
-            .bind(&rule.model_name_override)
-            .bind(&rule.metadata_json)
-            .bind(rule.priority)
-            .bind(rule.enabled)
-            .bind(rule.created_at)
-            .bind(rule.updated_at)
             .execute(&mut *tx)
             .await?;
         }
@@ -344,7 +306,6 @@ pub async fn import_config(
             *current_settings = bundle.gateway_settings.clone();
         }
         gateway.provider_cache.clear().await;
-        gateway.route_manager.reload(pool).await?;
         gateway
             .rate_limit_state
             .update_config(
@@ -422,7 +383,6 @@ pub async fn restore_database(
             "request_logs",
             "model_mapping_channels",
             "model_mappings",
-            "routing_rules",
             "gateway_keys",
             "providers",
         ];
@@ -453,7 +413,6 @@ pub async fn restore_database(
     {
         let gateway = state.gateway.read().await;
         gateway.provider_cache.clear().await;
-        gateway.route_manager.reload(pool).await?;
     }
     state.refresh_lookup().await;
 
@@ -521,7 +480,7 @@ async fn restore_settings_from_backup_db(
     let row = sqlx::query(
         r#"SELECT bind_host, bind_port, allow_remote, log_retention_days,
            launch_at_startup, minimize_to_tray, close_to_tray, auto_start_gateway,
-           default_provider_id, default_route_id,
+           default_provider_id,
            rate_limit_enabled, rate_limit_max_requests_per_minute, rate_limit_max_tokens_per_minute
            FROM gateway_settings LIMIT 1"#,
     )
@@ -545,7 +504,6 @@ async fn restore_settings_from_backup_db(
             close_to_tray: row.get::<bool, _>("close_to_tray"),
             auto_start_gateway: row.get::<bool, _>("auto_start_gateway"),
             default_provider_id: row.get::<Option<String>, _>("default_provider_id"),
-            default_route_id: row.get::<Option<String>, _>("default_route_id"),
             rate_limit_enabled: row.get::<bool, _>("rate_limit_enabled"),
             rate_limit_max_requests_per_minute: row.get::<i64, _>(
                 "rate_limit_max_requests_per_minute",

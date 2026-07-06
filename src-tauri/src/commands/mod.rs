@@ -4,7 +4,6 @@ pub mod gateway_keys;
 pub mod logs;
 pub mod model_mappings;
 pub mod providers;
-pub mod routing_rules;
 pub mod settings;
 pub mod stats;
 

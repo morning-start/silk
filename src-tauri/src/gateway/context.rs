@@ -8,8 +8,7 @@ use tokio::sync::{oneshot, RwLock};
 
 use crate::gateway::header_config::HeaderConfig;
 use crate::gateway::middleware::rate_limit::RateLimitState;
-use crate::models::{GatewaySettings, Provider, RoutingRule};
-use crate::persistence::RoutingRuleRepo;
+use crate::models::{GatewaySettings, Provider};
 use crate::protocol::AdapterRegistry;
 
 // ---------------------------------------------------------------------------
@@ -20,7 +19,6 @@ use crate::protocol::AdapterRegistry;
 pub struct GatewayContext {
     pub pool: SqlitePool,
     pub settings: Arc<RwLock<GatewaySettings>>,
-    pub route_manager: Arc<RouteManager>,
     pub provider_cache: Arc<ProviderCache>,
     pub log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
     pub adapter_registry: Arc<AdapterRegistry>,
@@ -40,7 +38,6 @@ impl GatewayContext {
     pub async fn new(
         pool: SqlitePool,
         settings: Arc<RwLock<GatewaySettings>>,
-        route_manager: Arc<RouteManager>,
         provider_cache: Arc<ProviderCache>,
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
         adapter_registry: Arc<AdapterRegistry>,
@@ -70,7 +67,6 @@ impl GatewayContext {
         Ok(Self {
             pool,
             settings,
-            route_manager,
             provider_cache,
             log_sender,
             adapter_registry,
@@ -80,55 +76,6 @@ impl GatewayContext {
             plugins,
             rate_limit_state,
         })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RouteManager
-// ---------------------------------------------------------------------------
-
-#[derive(Clone)]
-pub struct RouteManager {
-    routes: Arc<RwLock<Vec<RoutingRule>>>,
-}
-
-impl RouteManager {
-    pub async fn load(pool: &SqlitePool) -> Result<Self, sqlx::Error> {
-        let routes = RoutingRuleRepo::find_enabled_ordered(pool).await?;
-        Ok(Self {
-            routes: Arc::new(RwLock::new(routes)),
-        })
-    }
-
-    pub async fn reload(&self, pool: &SqlitePool) -> Result<(), sqlx::Error> {
-        let routes = RoutingRuleRepo::find_enabled_ordered(pool).await?;
-        *self.routes.write().await = routes;
-        Ok(())
-    }
-
-    pub async fn resolve(
-        &self,
-        host: Option<&str>,
-        method: &str,
-        path: &str,
-        content_type: Option<&str>,
-    ) -> Option<RoutingRule> {
-        let routes = self.routes.read().await;
-        routes
-            .iter()
-            .find(|route| route.matches(host, method, path, content_type))
-            .cloned()
-    }
-
-    /// 根据路由规则解析目标 Provider ID
-    ///
-    /// 如果规则指向 group，通过 GroupManager 选择一个 Provider；
-    /// 如果规则直接指向 provider，返回该 provider_id。
-    pub async fn resolve_provider_id(
-        &self,
-        route: &RoutingRule,
-    ) -> Option<String> {
-        Some(route.target_provider_id.clone())
     }
 }
 
@@ -223,7 +170,6 @@ pub struct RequestContextInner {
     pub request_body: bytes::Bytes,
     /// 缓存的解析后的 JSON 请求体
     pub parsed_body: Option<serde_json::Value>,
-    pub route: Option<RoutingRule>,
     pub provider: Option<Provider>,
     pub inbound_protocol: Option<String>,
     pub outbound_protocol: Option<String>,
@@ -346,7 +292,6 @@ impl RequestContext {
                 client_body: bytes::Bytes::new(),
                 request_body: bytes::Bytes::new(),
                 parsed_body: None,
-                route: None,
                 provider: None,
                 inbound_protocol: None,
                 outbound_protocol: None,

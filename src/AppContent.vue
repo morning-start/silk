@@ -103,9 +103,6 @@ onErrorCaptured((err, _instance, info) => {
           <button :class="{ active: route.path === '/model-square' }" @click="handleNav('/model-square')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模型
           </button>
-          <button :class="{ active: route.path === '/routing-rules' }" @click="handleNav('/routing-rules')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M9 12h4a2 2 0 0 0 2-2V7M13 12h2a2 2 0 0 1 2 2v3"/></svg>路由
-          </button>
           <button :class="{ active: route.path === '/logs' }" @click="handleNav('/logs')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>日志
           </button>
