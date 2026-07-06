@@ -13,7 +13,7 @@ use crate::{impl_crud_delete, impl_crud_get, impl_crud_list};
 pub struct GatewayKeyResponse {
     pub id: String,
     pub name: String,
-    pub key_prefix: String,
+    pub plain_key: String,
     pub enabled: bool,
     pub expires_at: Option<String>,
     pub max_concurrent: i64,
@@ -28,7 +28,7 @@ impl From<GatewayKey> for GatewayKeyResponse {
         Self {
             id: k.id,
             name: k.name,
-            key_prefix: k.key_prefix,
+            plain_key: crate::crypto::decrypt(&k.encrypted_key_value).unwrap_or_default(),
             enabled: k.enabled != 0,
             expires_at: k.expires_at.map(|d| d.to_string()),
             max_concurrent: k.max_concurrent,

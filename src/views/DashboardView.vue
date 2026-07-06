@@ -124,7 +124,7 @@ watch(
               <div class="console-grid">
                 <div class="console-metric">
                   <div class="label">平均响应</div>
-                  <div class="value">{{ stats?.today_avg_duration_ms ? stats.today_avg_duration_ms + 'ms' : '-' }}</div>
+                  <div class="value">{{ stats?.today_avg_duration_ms ? Math.round(stats.today_avg_duration_ms) + 'ms' : '-' }}</div>
                 </div>
                 <div class="console-metric">
                   <div class="label">今日请求</div>
@@ -155,7 +155,7 @@ watch(
         </div>
         <div class="stat-card">
           <div class="stat-label">平均响应时间</div>
-          <div class="stat-value success">{{ stats?.today_avg_duration_ms || 0 }}<span class="stat-unit">ms</span></div>
+          <div class="stat-value success">{{ Math.round(stats?.today_avg_duration_ms || 0) }}<span class="stat-unit">ms</span></div>
           <div class="stat-sub">网关整体延迟</div>
         </div>
         <div class="stat-card">

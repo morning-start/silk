@@ -41,6 +41,7 @@ const formValue = ref({
 
 // Gateway Keys
 const keys = ref<GatewayKey[]>([]);
+const keyVisibility = ref<Record<string, boolean>>({});
 const showAddKey = ref(false);
 const newKeyName = ref("");
 const newKeyMaxConcurrent = ref(10);
@@ -50,6 +51,7 @@ const showNewKeyModal = ref(false);
 async function loadKeys() {
   try {
     keys.value = await api.listGatewayKeys();
+    keyVisibility.value = Object.fromEntries(keys.value.map((key) => [key.id, false]));
   } catch {
     // ignore
   }
@@ -115,6 +117,10 @@ function copyKey(text: string) {
   }).catch(() => {
     message.error("复制失败");
   });
+}
+
+function toggleKeyVisibility(id: string) {
+  keyVisibility.value[id] = !keyVisibility.value[id];
 }
 
 async function handleSave() {
@@ -344,7 +350,7 @@ onMounted(() => {
           <NButton size="small" @click="showAddKey = false">取消</NButton>
         </div>
         <div style="font-size:12px;color:var(--text-color-3,#94a3b8);margin-top:4px">
-          Key 值由系统自动生成（<code>sk-gw-xxx</code> 格式），创建后仅展示一次
+          Key 值由系统自动生成（<code>sk-gw-xxx</code> 格式），保存后仍可在本机查看与复制
         </div>
       </div>
 
@@ -359,7 +365,7 @@ onMounted(() => {
       >
         <div v-if="newKeyCreated" style="display:flex;flex-direction:column;gap:12px">
           <div style="font-size:13px">名称: <strong>{{ newKeyCreated.name }}</strong></div>
-          <div style="font-size:13px;margin-bottom:4px">Key 值（请立即复制，关闭后不再显示）:</div>
+          <div style="font-size:13px;margin-bottom:4px">Key 值:</div>
           <div
             style="
               font-family:'JetBrains Mono','Consolas',monospace;
@@ -377,21 +383,31 @@ onMounted(() => {
             {{ newKeyCreated.key }}
           </div>
           <NButton size="small" @click="copyKey(newKeyCreated.key)">复制 Key</NButton>
-          <NButton size="small" type="primary" @click="newKeyCreated = null">我已保存，关闭</NButton>
+          <NButton size="small" type="primary" @click="newKeyCreated = null">关闭</NButton>
         </div>
       </NModal>
 
       <div class="keys-list">
         <div v-for="key in keys" :key="key.id" class="key-row">
-          <div class="key-info">
-            <span class="key-name">{{ key.name }}</span>
-            <NTag size="small" style="font-family: 'JetBrains Mono', 'Consolas', monospace">
-              {{ key.key_prefix }}****
-            </NTag>
-            <NTag :type="key.enabled ? 'success' : 'warning'" size="small">
-              {{ key.enabled ? '启用' : '禁用' }}
-            </NTag>
-            <span class="key-concurrent" v-if="key.max_concurrent">并发: {{ key.max_concurrent }}</span>
+          <div class="key-main">
+            <div class="key-info">
+              <span class="key-name">{{ key.name }}</span>
+              <NTag :type="key.enabled ? 'success' : 'warning'" size="small">
+                {{ key.enabled ? '启用' : '禁用' }}
+              </NTag>
+              <span class="key-concurrent" v-if="key.max_concurrent">并发: {{ key.max_concurrent }}</span>
+            </div>
+            <div class="key-value-box">
+              <code class="key-value-text" :class="{ masked: !keyVisibility[key.id] }">
+                {{ keyVisibility[key.id] ? key.plain_key : "••••••••••••••••••••••••••••••••" }}
+              </code>
+              <div class="key-value-actions">
+                <NButton size="tiny" quaternary @click="toggleKeyVisibility(key.id)">
+                  {{ keyVisibility[key.id] ? "隐藏" : "显示" }}
+                </NButton>
+                <NButton size="tiny" quaternary @click="copyKey(key.plain_key)">复制</NButton>
+              </div>
+            </div>
           </div>
           <NSpace :size="4">
             <NButton size="tiny" quaternary @click="toggleKey(key)">
@@ -473,9 +489,10 @@ onMounted(() => {
 .key-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  border-radius: 8px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
   border: 1px solid var(--border-color, #e2e8f0);
   transition: background 0.2s;
 }
@@ -484,20 +501,71 @@ onMounted(() => {
   background: var(--hover-color, #f8fafc);
 }
 
+.key-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
 .key-info {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .key-name {
   font-weight: 600;
-  font-size: 13px;
-  min-width: 60px;
+  font-size: 14px;
 }
 
 .key-concurrent {
   font-size: 12px;
   color: var(--text-color-3, #94a3b8);
+}
+
+.key-value-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.03), rgba(15, 23, 42, 0.01));
+  border: 1px solid var(--border-color, #e2e8f0);
+}
+
+.key-value-text {
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 12px;
+  color: var(--fg, #0f172a);
+  word-break: break-all;
+  flex: 1;
+}
+
+.key-value-text.masked {
+  letter-spacing: 1px;
+  color: var(--text-color-3, #94a3b8);
+}
+
+.key-value-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .key-row,
+  .key-value-box {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .key-value-actions {
+    justify-content: flex-end;
+  }
 }
 </style>

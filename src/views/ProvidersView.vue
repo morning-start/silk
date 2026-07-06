@@ -40,6 +40,7 @@ const showModal = ref(false);
 const editingId = ref<string | null>(null);
 const fetchingModels = ref(false);
 const testingStates = ref<Record<string, boolean>>({});
+const keyVisibility = ref<boolean[]>([]);
 
 const protocolOptions = [
   { label: "OpenAI Chat", value: "openai_chat" },
@@ -100,6 +101,7 @@ function createDefaultKey(name = "默认"): ProviderKeyForm {
 
 function resetForm() {
   editingId.value = null;
+  keyVisibility.value = [false];
   formValue.value = {
     name: "",
     protocols: [],
@@ -125,6 +127,9 @@ function handleAdd() {
 
 function handleEdit(row: Provider) {
   editingId.value = row.id;
+  keyVisibility.value = (row.keys && row.keys.length > 0)
+    ? row.keys.map(() => false)
+    : [false];
   formValue.value = {
     name: row.name,
     protocols: row.protocols || [],
@@ -150,14 +155,34 @@ function handleEdit(row: Provider) {
 
 function addKey() {
   formValue.value.keys.push(createDefaultKey(""));
+  keyVisibility.value.push(false);
 }
 
 function removeKey(index: number) {
   if (formValue.value.keys.length === 1) {
     formValue.value.keys[0] = createDefaultKey();
+    keyVisibility.value[0] = false;
     return;
   }
   formValue.value.keys.splice(index, 1);
+  keyVisibility.value.splice(index, 1);
+}
+
+function toggleKeyVisibility(index: number) {
+  keyVisibility.value[index] = !keyVisibility.value[index];
+}
+
+async function copyKeyValue(value: string) {
+  if (!value.trim()) {
+    message.warning("当前 Key 为空");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    message.success("Key 已复制到剪贴板");
+  } catch {
+    message.error("复制失败");
+  }
 }
 
 function normalizeUrl() {
@@ -402,7 +427,17 @@ onMounted(() => {
             <div class="key-list">
               <div v-for="(key, index) in formValue.keys" :key="index" class="key-row">
                 <NInput v-model:value="key.name" placeholder="名称" style="width: 120px" />
-                <NInput v-model:value="key.value" type="password" show-password-on="click" placeholder="sk-..." />
+                <NInput
+                  v-model:value="key.value"
+                  :type="keyVisibility[index] ? 'text' : 'password'"
+                  placeholder="sk-..."
+                />
+                <NButton quaternary size="small" @click="toggleKeyVisibility(index)">
+                  {{ keyVisibility[index] ? "隐藏" : "显示" }}
+                </NButton>
+                <NButton quaternary size="small" @click="copyKeyValue(key.value)">
+                  复制
+                </NButton>
                 <NInputNumber
                   v-if="formValue.key_strategy === 'weighted'"
                   v-model:value="key.weight"
@@ -419,6 +454,7 @@ onMounted(() => {
               </div>
               <div class="key-actions">
                 <NButton size="small" secondary @click="addKey">+ 添加密钥</NButton>
+                <span class="key-hint">本地个人中转站可直接查看和复制已保存的渠道 Key。</span>
               </div>
             </div>
           </NFormItem>
@@ -583,6 +619,14 @@ onMounted(() => {
 .key-actions {
   display: flex;
   justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.key-hint {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
 }
 
 .models-block {

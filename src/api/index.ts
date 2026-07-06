@@ -177,7 +177,7 @@ export interface ModelMapping {
 export interface GatewayKey {
   id: string;
   name: string;
-  key_prefix: string;
+  plain_key: string;
   enabled: boolean;
   expires_at: string | null;
   max_concurrent: number;

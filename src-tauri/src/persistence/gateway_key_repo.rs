@@ -1,7 +1,7 @@
 use sqlx::Row;
 use sqlx::SqlitePool;
 
-use crate::crypto::hash_api_key;
+use crate::crypto::{encrypt, hash_api_key};
 use crate::models::{GatewayKey, NewGatewayKey, UpdateGatewayKey};
 use crate::persistence::defaults;
 
@@ -16,7 +16,8 @@ impl GatewayKeyRepo {
         let (id, now) = defaults::new_id_and_now();
         let enabled = defaults::bool_to_i64(new.enabled, true);
         let key_hash = hash_api_key(&new.key_value);
-        let key_prefix = format!("sk-gw-{}", &new.key_value[..8.min(new.key_value.len())]);
+        let encrypted_key_value =
+            encrypt(&new.key_value).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
         let max_concurrent = new
             .max_concurrent
             .unwrap_or(defaults::DEFAULT_KEY_MAX_CONCURRENT);
@@ -24,7 +25,7 @@ impl GatewayKeyRepo {
         let row = sqlx::query(
             r#"
             INSERT INTO gateway_keys (
-                id, name, key_hash, key_prefix, enabled,
+                id, name, key_hash, encrypted_key_value, enabled,
                 expires_at, max_concurrent, created_at, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -34,7 +35,7 @@ impl GatewayKeyRepo {
         .bind(id)
         .bind(new.name.as_str())
         .bind(key_hash)
-        .bind(key_prefix)
+        .bind(encrypted_key_value)
         .bind(enabled)
         .bind(new.expires_at)
         .bind(max_concurrent)
@@ -47,7 +48,7 @@ impl GatewayKeyRepo {
             id: row.get("id"),
             name: row.get("name"),
             key_hash: row.get("key_hash"),
-            key_prefix: row.get("key_prefix"),
+            encrypted_key_value: row.get("encrypted_key_value"),
             enabled: row.get("enabled"),
             expires_at: row.get("expires_at"),
             max_concurrent: row.get("max_concurrent"),

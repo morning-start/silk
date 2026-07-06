@@ -8,8 +8,8 @@ pub struct GatewayKey {
     pub name: String,
     /// Key 的 SHA-256 哈希（用于验证）
     pub key_hash: String,
-    /// Key 前缀（用于显示，如 "sk-gw-xxxx"）
-    pub key_prefix: String,
+    /// 加密存储的明文 Key（本地单机可回显）
+    pub encrypted_key_value: String,
     pub enabled: i64,
     pub expires_at: Option<chrono::NaiveDateTime>,
     pub max_concurrent: i64,
