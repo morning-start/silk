@@ -126,6 +126,6 @@
 
 ## 九、极简一句话介绍（对外通用）
 
-Silk 是一款纯本地桌面AI中转客户端，通过统一本地接口，实现 OpenAIChat、Claude 双入站协议双向互通，全局归一为 OpenAI Response 标准输出，兼容通义千问、原生OpenAI、Claude等全系列大模型，并支持全部图像、视频AI接口透传转发，让用户自由切换所有AI模型，所有数据本地私有化存储。
+Silk 是一款纯本地桌面AI中转客户端，通过统一本地接口，实现 OpenAI Chat Completion、Claude Message、OpenAI Response 三大协议相互转换，归一为统一输出，兼容各类主流大模型，并支持全部图像、视频AI接口透传转发，让用户自由切换所有AI模型，所有数据本地私有化存储。
 
 > （注：部分内容可能由 AI 生成）
