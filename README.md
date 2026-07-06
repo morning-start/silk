@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
 </p>
 
-> **一个本地端点，管理所有 AI 提供商。** 装个桌面应用，加几把 API Key，你的所有 AI 工具就都能用上 OpenAI、Claude、通义千问……协议自动转换，失败自动换 Key 换 Provider，Key 加密存本地。
+> **一个本地端点，三大协议任意互转。** 装个桌面应用，加几把 API Key，你的所有 AI 工具就都能用上 OpenAI Chat Completion、Claude Message、OpenAI Response——协议自动转换，失败自动换 Key 换 Provider，Key 加密存本地。
 
 Silk 是一个运行在你桌面的 AI 多模型网关（Tauri 2 + Rust/Axum）。你在管理多个 AI 提供商时遇到的所有麻烦——协议不兼容、API Key 分散、一个限流整个服务挂掉——它用一个本地 HTTP 端点 `http://127.0.0.1:9876` 替你搞定。
 
@@ -32,7 +32,7 @@ bun run tauri dev
 ### 首次使用（30 秒）
 
 1. 打开 Silk 桌面应用
-2. 在"提供商管理"页面添加 AI 服务商和 API Key（支持 OpenAI、Claude、通义千问等）
+2. 在"提供商管理"页面添加 AI 服务商和 API Key（支持 OpenAI Chat Completion、Claude Message、OpenAI Response 协议互通）
 3. 点击"启动网关"
 4. 把你的 AI 工具 HTTP 端点改成 `http://127.0.0.1:9876`
 
