@@ -5,9 +5,11 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use crate::application::gateway_service;
+use crate::crypto::{encrypt, hash_api_key};
 use crate::error::{bad_request, require_db, ServiceError};
 use crate::models::{
-    GatewayKey, GatewaySettings, ModelMapping, ModelMappingChannel, Provider, RoutingRule,
+    GatewayKey, GatewaySettings, ModelMapping, ModelMappingChannel, Provider, ProviderKeyEntry,
+    RoutingRule,
 };
 use crate::persistence::{GatewayKeyRepo, ModelMappingRepo, ProviderRepo, RoutingRuleRepo};
 use crate::AppState;
@@ -42,11 +44,43 @@ struct ConfigExportBundle {
     schema_version: i64,
     exported_at: String,
     gateway_settings: GatewaySettings,
-    providers: Vec<Provider>,
+    providers: Vec<PortableProvider>,
     routing_rules: Vec<RoutingRule>,
     model_mappings: Vec<ModelMapping>,
     model_mapping_channels: Vec<ModelMappingChannel>,
-    gateway_keys: Vec<GatewayKey>,
+    gateway_keys: Vec<PortableGatewayKey>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PortableProvider {
+    id: String,
+    name: String,
+    protocols: String,
+    models: String,
+    keys: String,
+    key_strategy: String,
+    api_base_url: String,
+    proxy_url: Option<String>,
+    timeout_seconds: i64,
+    max_retries: i64,
+    status: String,
+    health_status: Option<String>,
+    last_health_check_at: Option<chrono::NaiveDateTime>,
+    metadata_json: Option<String>,
+    created_at: chrono::NaiveDateTime,
+    updated_at: chrono::NaiveDateTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PortableGatewayKey {
+    id: String,
+    name: String,
+    key_value: String,
+    enabled: i64,
+    expires_at: Option<chrono::NaiveDateTime>,
+    max_concurrent: i64,
+    created_at: chrono::NaiveDateTime,
+    updated_at: chrono::NaiveDateTime,
 }
 
 pub async fn export_config(payload: ExportConfigPayload) -> Result<FileOperationResponse, ServiceError> {
@@ -60,7 +94,11 @@ pub async fn export_config(payload: ExportConfigPayload) -> Result<FileOperation
         schema_version: 1,
         exported_at: chrono::Utc::now().to_rfc3339(),
         gateway_settings: crate::persistence::GatewaySettingsRepo::load_effective(settings_path),
-        providers: ProviderRepo::find_all(pool).await?,
+        providers: ProviderRepo::find_all(pool)
+            .await?
+            .into_iter()
+            .map(PortableProvider::from_provider)
+            .collect::<Result<Vec<_>, _>>()?,
         routing_rules: RoutingRuleRepo::find_all(pool).await?,
         model_mappings: ModelMappingRepo::find_all(pool).await?,
         model_mapping_channels: sqlx::query_as::<_, ModelMappingChannel>(
@@ -68,7 +106,11 @@ pub async fn export_config(payload: ExportConfigPayload) -> Result<FileOperation
         )
         .fetch_all(pool)
         .await?,
-        gateway_keys: GatewayKeyRepo::find_all(pool).await?,
+        gateway_keys: GatewayKeyRepo::find_all(pool)
+            .await?
+            .into_iter()
+            .map(PortableGatewayKey::from_gateway_key)
+            .collect::<Result<Vec<_>, _>>()?,
     };
 
     let path = resolve_output_path(
@@ -161,7 +203,7 @@ pub async fn import_config(
             .bind(&provider.name)
             .bind(&provider.protocols)
             .bind(&provider.models)
-            .bind(&provider.keys)
+            .bind(provider.encrypted_keys_json()?)
             .bind(&provider.key_strategy)
             .bind(&provider.api_base_url)
             .bind(&provider.proxy_url)
@@ -274,8 +316,11 @@ pub async fn import_config(
             )
             .bind(&key.id)
             .bind(&key.name)
-            .bind(&key.key_hash)
-            .bind(&key.encrypted_key_value)
+            .bind(hash_api_key(&key.key_value))
+            .bind(encrypt(&key.key_value).map_err(|e| ServiceError::Internal {
+                message: format!("导入网关 Key 加密失败: {e}"),
+                detail: None,
+            })?)
             .bind(key.enabled)
             .bind(key.expires_at)
             .bind(key.max_concurrent)
@@ -574,4 +619,180 @@ fn ensure_parent_dir(path: &Path) -> Result<(), ServiceError> {
         })?;
     }
     Ok(())
+}
+
+impl PortableProvider {
+    fn from_provider(provider: Provider) -> Result<Self, ServiceError> {
+        let keys = provider
+            .keys_vec()
+            .into_iter()
+            .map(|mut entry| {
+                if !entry.value.is_empty() {
+                    entry.value = crate::crypto::decrypt(&entry.value).map_err(|e| {
+                        ServiceError::Internal {
+                            message: format!("导出渠道 Key 解密失败: {e}"),
+                            detail: None,
+                        }
+                    })?;
+                }
+                Ok(entry)
+            })
+            .collect::<Result<Vec<_>, ServiceError>>()?;
+
+        Ok(Self {
+            id: provider.id,
+            name: provider.name,
+            protocols: provider.protocols,
+            models: provider.models,
+            keys: serde_json::to_string(&keys).map_err(|e| ServiceError::Internal {
+                message: "导出渠道 Key 序列化失败".to_string(),
+                detail: Some(e.to_string()),
+            })?,
+            key_strategy: provider.key_strategy,
+            api_base_url: provider.api_base_url,
+            proxy_url: provider.proxy_url,
+            timeout_seconds: provider.timeout_seconds,
+            max_retries: provider.max_retries,
+            status: provider.status,
+            health_status: provider.health_status,
+            last_health_check_at: provider.last_health_check_at,
+            metadata_json: provider.metadata_json,
+            created_at: provider.created_at,
+            updated_at: provider.updated_at,
+        })
+    }
+
+    fn encrypted_keys_json(&self) -> Result<String, ServiceError> {
+        let mut keys: Vec<ProviderKeyEntry> =
+            serde_json::from_str(&self.keys).map_err(|e| ServiceError::BadRequest {
+                message: "导入文件中的渠道 Key 格式无效".to_string(),
+                code: Some(e.to_string()),
+            })?;
+
+        for entry in &mut keys {
+            if !entry.value.is_empty() {
+                entry.value = encrypt(&entry.value).map_err(|e| ServiceError::Internal {
+                    message: format!("导入渠道 Key 加密失败: {e}"),
+                    detail: None,
+                })?;
+            }
+        }
+
+        serde_json::to_string(&keys).map_err(|e| ServiceError::Internal {
+            message: "导入渠道 Key 序列化失败".to_string(),
+            detail: Some(e.to_string()),
+        })
+    }
+}
+
+impl PortableGatewayKey {
+    fn from_gateway_key(key: GatewayKey) -> Result<Self, ServiceError> {
+        Ok(Self {
+            id: key.id,
+            name: key.name,
+            key_value: crate::crypto::decrypt(&key.encrypted_key_value).map_err(|e| {
+                ServiceError::Internal {
+                    message: format!("导出网关 Key 解密失败: {e}"),
+                    detail: None,
+                }
+            })?,
+            enabled: key.enabled,
+            expires_at: key.expires_at,
+            max_concurrent: key.max_concurrent,
+            created_at: key.created_at,
+            updated_at: key.updated_at,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PortableGatewayKey, PortableProvider};
+    use crate::crypto::{decrypt, hash_api_key};
+    use crate::models::{GatewayKey, Provider, ProviderKeyEntry};
+
+    #[test]
+    fn portable_provider_reencrypts_plain_keys_on_import() {
+        let portable = PortableProvider {
+            id: "p1".into(),
+            name: "test".into(),
+            protocols: "[]".into(),
+            models: "[]".into(),
+            keys: serde_json::to_string(&vec![ProviderKeyEntry {
+                name: "main".into(),
+                value: "secret".into(),
+                enabled: true,
+                weight: 1,
+            }])
+            .unwrap(),
+            key_strategy: "round_robin".into(),
+            api_base_url: "https://example.com".into(),
+            proxy_url: None,
+            timeout_seconds: 30,
+            max_retries: 2,
+            status: "enabled".into(),
+            health_status: None,
+            last_health_check_at: None,
+            metadata_json: None,
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        };
+
+        let encrypted = portable.encrypted_keys_json().unwrap();
+        let keys: Vec<ProviderKeyEntry> = serde_json::from_str(&encrypted).unwrap();
+        assert_eq!(decrypt(&keys[0].value).unwrap(), "secret");
+    }
+
+    #[test]
+    fn portable_export_decrypts_existing_gateway_key() {
+        let plain = "gateway-secret";
+        let encrypted = crate::crypto::encrypt(plain).unwrap();
+        let key = GatewayKey {
+            id: "k1".into(),
+            name: "main".into(),
+            key_hash: hash_api_key(plain),
+            encrypted_key_value: encrypted,
+            enabled: 1,
+            expires_at: None,
+            max_concurrent: 10,
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        };
+
+        let portable = PortableGatewayKey::from_gateway_key(key).unwrap();
+        assert_eq!(portable.key_value, plain);
+    }
+
+    #[test]
+    fn portable_export_decrypts_provider_keys() {
+        let encrypted_value = crate::crypto::encrypt("provider-secret").unwrap();
+        let provider = Provider {
+            id: "p1".into(),
+            name: "provider".into(),
+            protocols: "[]".into(),
+            models: "[]".into(),
+            keys: serde_json::to_string(&vec![ProviderKeyEntry {
+                name: "main".into(),
+                value: encrypted_value,
+                enabled: true,
+                weight: 1,
+            }])
+            .unwrap(),
+            key_strategy: "round_robin".into(),
+            api_base_url: "https://example.com".into(),
+            proxy_url: None,
+            timeout_seconds: 30,
+            max_retries: 2,
+            status: "enabled".into(),
+            health_status: None,
+            last_health_check_at: None,
+            metadata_json: None,
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        };
+
+        let portable = PortableProvider::from_provider(provider).unwrap();
+        let keys: Vec<ProviderKeyEntry> = serde_json::from_str(&portable.keys).unwrap();
+        assert_eq!(keys[0].value, "provider-secret");
+    }
 }

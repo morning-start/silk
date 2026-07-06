@@ -8,15 +8,15 @@ import {
   NInputNumber,
   NSwitch,
   NButton,
+  NIcon,
   NText,
-  NTag,
   NCard,
-  NSpace,
   NAlert,
   NModal,
   useMessage,
   useDialog,
 } from "naive-ui";
+import { CopyOutline, EyeOffOutline, EyeOutline, TrashOutline } from "@vicons/ionicons5";
 import { useGatewayStore } from "../stores/gateway";
 import { storeToRefs } from "pinia";
 import { api, type GatewayKey } from "../api";
@@ -47,6 +47,11 @@ const newKeyName = ref("");
 const newKeyMaxConcurrent = ref(10);
 const newKeyCreated = ref<{ name: string; key: string } | null>(null);
 const showNewKeyModal = ref(false);
+
+function closeNewKeyModal() {
+  showNewKeyModal.value = false;
+  newKeyCreated.value = null;
+}
 
 async function loadKeys() {
   try {
@@ -123,6 +128,12 @@ function toggleKeyVisibility(id: string) {
   keyVisibility.value[id] = !keyVisibility.value[id];
 }
 
+function maskedKeyPreview(value: string) {
+  const visible = value.slice(0, 10);
+  const maskedLength = Math.max(value.length - 10, 12);
+  return `${visible}${"•".repeat(maskedLength)}`;
+}
+
 async function handleSave() {
   try {
     // 空字符串转 null，避免覆盖已有值
@@ -140,6 +151,12 @@ async function handleSave() {
 
 async function handleExportConfig() {
   try {
+    const accepted = await confirm(
+      "导出的配置文件包含可迁移的明文渠道 Key 与网关 Key，请妥善保管。是否继续？",
+      { title: "导出 Silk 配置", kind: "warning", okLabel: "继续", cancelLabel: "取消" }
+    );
+    if (!accepted) return;
+
     const filePath = await save({
       title: "导出 Silk 配置",
       defaultPath: "silk_config_export.json",
@@ -308,7 +325,7 @@ onMounted(() => {
         <div class="data-action">
           <div>
             <div class="data-action-title">导出配置</div>
-            <div class="data-action-desc">导出当前网关设置、渠道、路由、模型映射与网关 Key。</div>
+            <div class="data-action-desc">导出当前网关设置、渠道、路由、模型映射与网关 Key；文件包含敏感密钥，请妥善保管。</div>
           </div>
           <NButton size="small" @click="handleExportConfig">导出配置</NButton>
         </div>
@@ -361,7 +378,7 @@ onMounted(() => {
         title="Key 已创建"
         style="max-width: 480px"
         :bordered="false"
-        @update:show="(val: boolean) => { if (!val) newKeyCreated = null; }"
+        @update:show="(val: boolean) => { if (!val) closeNewKeyModal(); }"
       >
         <div v-if="newKeyCreated" style="display:flex;flex-direction:column;gap:12px">
           <div style="font-size:13px">名称: <strong>{{ newKeyCreated.name }}</strong></div>
@@ -383,38 +400,41 @@ onMounted(() => {
             {{ newKeyCreated.key }}
           </div>
           <NButton size="small" @click="copyKey(newKeyCreated.key)">复制 Key</NButton>
-          <NButton size="small" type="primary" @click="newKeyCreated = null">关闭</NButton>
+          <NButton size="small" type="primary" @click="closeNewKeyModal">关闭</NButton>
         </div>
       </NModal>
 
       <div class="keys-list">
         <div v-for="key in keys" :key="key.id" class="key-row">
-          <div class="key-main">
-            <div class="key-info">
-              <span class="key-name">{{ key.name }}</span>
-              <NTag :type="key.enabled ? 'success' : 'warning'" size="small">
-                {{ key.enabled ? '启用' : '禁用' }}
-              </NTag>
-              <span class="key-concurrent" v-if="key.max_concurrent">并发: {{ key.max_concurrent }}</span>
-            </div>
-            <div class="key-value-box">
-              <code class="key-value-text" :class="{ masked: !keyVisibility[key.id] }">
-                {{ keyVisibility[key.id] ? key.plain_key : "••••••••••••••••••••••••••••••••" }}
-              </code>
-              <div class="key-value-actions">
-                <NButton size="tiny" quaternary @click="toggleKeyVisibility(key.id)">
-                  {{ keyVisibility[key.id] ? "隐藏" : "显示" }}
-                </NButton>
-                <NButton size="tiny" quaternary @click="copyKey(key.plain_key)">复制</NButton>
-              </div>
-            </div>
+          <div class="key-meta">
+            <span class="key-name">{{ key.name }}</span>
+            <span class="key-concurrent" v-if="key.max_concurrent">并发 {{ key.max_concurrent }}</span>
           </div>
-          <NSpace :size="4">
-            <NButton size="tiny" quaternary @click="toggleKey(key)">
-              {{ key.enabled ? '禁用' : '启用' }}
+          <div class="key-value-inline">
+            <code class="key-value-text" :class="{ masked: !keyVisibility[key.id] }">
+              {{ keyVisibility[key.id] ? key.plain_key : maskedKeyPreview(key.plain_key) }}
+            </code>
+          </div>
+          <div class="key-actions">
+            <NSwitch :value="key.enabled" size="small" @update:value="() => toggleKey(key)" />
+            <NButton circle quaternary @click="toggleKeyVisibility(key.id)">
+              <template #icon>
+                <NIcon>
+                  <component :is="keyVisibility[key.id] ? EyeOffOutline : EyeOutline" />
+                </NIcon>
+              </template>
             </NButton>
-            <NButton size="tiny" quaternary type="error" @click="deleteKey(key.id)">删除</NButton>
-          </NSpace>
+            <NButton circle quaternary @click="copyKey(key.plain_key)">
+              <template #icon>
+                <NIcon><CopyOutline /></NIcon>
+              </template>
+            </NButton>
+            <NButton circle quaternary type="error" @click="deleteKey(key.id)">
+              <template #icon>
+                <NIcon><TrashOutline /></NIcon>
+              </template>
+            </NButton>
+          </div>
         </div>
         <NText v-if="keys.length === 0" depth="3" style="display: block; text-align: center; padding: 24px">
           暂无 Key，点击上方"+ 添加 Key"创建
@@ -489,7 +509,7 @@ onMounted(() => {
 .key-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   padding: 14px 16px;
   border-radius: 12px;
@@ -501,19 +521,13 @@ onMounted(() => {
   background: var(--hover-color, #f8fafc);
 }
 
-.key-main {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
-
-.key-info {
+.key-meta {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
+  min-width: 140px;
 }
 
 .key-name {
@@ -526,23 +540,23 @@ onMounted(() => {
   color: var(--text-color-3, #94a3b8);
 }
 
-.key-value-box {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.03), rgba(15, 23, 42, 0.01));
-  border: 1px solid var(--border-color, #e2e8f0);
+.key-value-inline {
+  flex: 1;
+  min-width: 0;
 }
 
 .key-value-text {
+  display: block;
   font-family: "JetBrains Mono", "Consolas", monospace;
   font-size: 12px;
   color: var(--fg, #0f172a);
-  word-break: break-all;
-  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.03), rgba(15, 23, 42, 0.01));
+  border: 1px solid var(--border-color, #e2e8f0);
 }
 
 .key-value-text.masked {
@@ -550,21 +564,24 @@ onMounted(() => {
   color: var(--text-color-3, #94a3b8);
 }
 
-.key-value-actions {
+.key-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 @media (max-width: 900px) {
-  .key-row,
-  .key-value-box {
+  .key-row {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .key-value-actions {
+  .key-meta {
+    min-width: 0;
+  }
+
+  .key-actions {
     justify-content: flex-end;
   }
 }
