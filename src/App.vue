@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { darkTheme, NConfigProvider, NMessageProvider, NDialogProvider, GlobalThemeOverrides } from "naive-ui";
 import AppContent from "./AppContent.vue";
 
+const THEME_STORAGE_KEY = "silk-theme";
 const isDark = ref(false);
 
 const themeOverrides: GlobalThemeOverrides = {
@@ -34,6 +35,21 @@ const darkOverrides: GlobalThemeOverrides = {
     hoverColor: "#1e293b",
   },
 };
+
+function applyThemeClass(enabled: boolean) {
+  document.body.classList.toggle("dark", enabled);
+}
+
+onMounted(() => {
+  const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+  isDark.value = savedTheme === "dark";
+  applyThemeClass(isDark.value);
+});
+
+watch(isDark, (enabled) => {
+  applyThemeClass(enabled);
+  localStorage.setItem(THEME_STORAGE_KEY, enabled ? "dark" : "light");
+});
 </script>
 
 <template>
