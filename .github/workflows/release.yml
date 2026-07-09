@@ -1,0 +1,79 @@
+name: publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            bundle_name: macos-arm64
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            bundle_name: macos-x64
+          - platform: ubuntu-22.04
+            args: ""
+            bundle_name: linux-x64
+          - platform: windows-latest
+            args: ""
+            bundle_name: windows-x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust stable
+        if: matrix.platform != 'macos-latest'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust stable for macOS universal targets
+        if: matrix.platform == 'macos-latest'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and publish Tauri app
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: Silk v__VERSION__
+          releaseBody: 请在 Assets 中下载对应平台的桌面安装包。
+          releaseDraft: true
+          prerelease: false
+          tauriScript: bun tauri
+          args: ${{ matrix.args }}
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: silk-[version]-${{ matrix.bundle_name }}-[bundle]
