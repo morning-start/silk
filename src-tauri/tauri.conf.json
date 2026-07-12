@@ -5,7 +5,7 @@
   "identifier": "morning-start.silk",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:1510",
+    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },

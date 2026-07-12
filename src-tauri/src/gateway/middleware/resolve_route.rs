@@ -78,24 +78,54 @@ async fn handle_models_listing(
     runtime: &GatewayContext,
     mut ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
-    let models = match ModelMappingRepo::find_enabled(&runtime.pool).await {
+    // ① 模型池模型 → owned_by: "silk"
+    let pool_models = match ModelMappingRepo::find_enabled(&runtime.pool).await {
         Ok(m) => m,
         Err(e) => {
-            tracing::warn!(%e, "查询模型列表失败");
+            tracing::warn!(%e, "查询模型池列表失败");
             Vec::new()
         }
     };
-    let data: Vec<serde_json::Value> = models
-        .iter()
-        .map(|m| {
-            serde_json::json!({
-                "id": m.model_name,
-                "object": "model",
-                "created": m.created_at.and_utc().timestamp(),
-                "owned_by": if m.vendor.is_empty() { "silk" } else { &m.vendor },
-            })
-        })
-        .collect();
+
+    // ② 渠道模型 → owned_by: provider.name
+    let providers = match ProviderRepo::find_enabled(&runtime.pool).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(%e, "查询渠道列表失败");
+            Vec::new()
+        }
+    };
+
+    let mut data: Vec<serde_json::Value> = Vec::with_capacity(
+        pool_models.len() + providers.iter().map(|p| p.models_vec().len()).sum::<usize>(),
+    );
+
+    // 模型池条目
+    for m in &pool_models {
+        data.push(serde_json::json!({
+            "id": m.model_name,
+            "object": "model",
+            "created": m.created_at.and_utc().timestamp(),
+            "owned_by": "silk",
+        }));
+    }
+
+    // 渠道条目（每个 Provider 内去重）
+    for provider in &providers {
+        let models = provider.models_vec();
+        let mut seen = std::collections::HashSet::new();
+        for model_id in models {
+            if seen.insert(model_id.clone()) {
+                data.push(serde_json::json!({
+                    "id": model_id,
+                    "object": "model",
+                    "created": provider.created_at.and_utc().timestamp(),
+                    "owned_by": provider.name,
+                }));
+            }
+        }
+    }
+
     let resp = axum::Json(serde_json::json!({ "object": "list", "data": data }));
     ctx.response = Some(resp.into_response());
     Ok(ctx)
