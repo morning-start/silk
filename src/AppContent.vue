@@ -33,7 +33,7 @@ function toggleTheme() {
 }
 
 const isRunning = computed(() => gatewayStore.status?.running ?? false);
-const bindAddress = computed(() => gatewayStore.status?.address ?? "127.0.0.1:9876");
+const bindAddress = computed(() => gatewayStore.status?.address ?? "127.0.0.1:1877");
 
 async function startGateway() {
   try {

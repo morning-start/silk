@@ -28,8 +28,8 @@ const dialog = useDialog();
 
 const formRef = ref<any>(null);
 const formValue = ref({
-  bind_host: "127.0.0.1",
-  bind_port: 9876,
+  bind_host: "",
+  bind_port: null as number | null,
   allow_remote: false,
   log_retention_days: 30,
   launch_at_startup: false,
@@ -135,9 +135,10 @@ function maskedKeyPreview(value: string) {
 
 async function handleSave() {
   try {
-    // 空字符串转 null，避免覆盖已有值
+    // 空字符串转 null，空端口用默认值 1877
     const payload = {
       ...formValue.value,
+      bind_port: formValue.value.bind_port ?? 1877,
       default_provider_id: formValue.value.default_provider_id || null,
     };
     await gatewayStore.updateSettings(payload);
@@ -282,7 +283,7 @@ onMounted(() => {
             <NInput v-model:value="formValue.bind_host" placeholder="127.0.0.1" />
           </NFormItem>
           <NFormItem label="监听端口" style="flex: 1">
-            <NInputNumber v-model:value="formValue.bind_port" :min="1" :max="65535" style="width: 100%" />
+            <NInputNumber v-model:value="formValue.bind_port" :min="1024" :max="65535" style="width: 100%" placeholder="1877" />
           </NFormItem>
         </div>
         <div class="form-row">

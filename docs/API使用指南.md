@@ -65,7 +65,7 @@ import { invoke } from '@tauri-apps/api/core';
 ```typescript
 const result = await invoke('gateway_start');
 console.log(result);
-// { success: true, message: "网关已启动", bind_address: "127.0.0.1:9876" }
+// { success: true, message: "网关已启动", bind_address: "127.0.0.1:1877" }
 ```
 
 ### 停止网关
@@ -79,7 +79,7 @@ const result = await invoke('gateway_stop');
 
 ```typescript
 const result = await invoke('gateway_restart');
-// { success: true, message: "网关已重启", bind_address: "127.0.0.1:9876" }
+// { success: true, message: "网关已重启", bind_address: "127.0.0.1:1877" }
 ```
 
 ### 查询网关状态
@@ -88,7 +88,7 @@ const result = await invoke('gateway_restart');
 const status = await invoke('gateway_status');
 // {
 //   running: true,
-//   bind_address: "127.0.0.1:9876",
+//   bind_address: "127.0.0.1:1877",
 //   uptime_seconds: 3600,
 //   total_requests: 42,
 //   active_providers: 3
@@ -337,7 +337,7 @@ await invoke('delete_routing_rule', { id: 'rule-uuid' });
 | 字段 | 类型 | 说明 | 默认值 |
 |------|------|------|--------|
 | `bind_host` | String | 监听地址 | `127.0.0.1` |
-| `bind_port` | Number | 监听端口 | `9876` |
+| `bind_port` | Number | 监听端口 | `1877` |
 | `allow_remote` | Boolean | 是否允许远程连接 | `false` |
 | `log_retention_days` | Number | 日志保留天数 | `30` |
 | `default_provider_id` | String | 默认 Provider ID | `null` |
@@ -602,7 +602,7 @@ GET /health
 
 ```bash
 # 示例：直接使用 OpenAI Chat 格式
-curl http://127.0.0.1:9876/v1/chat/completions \
+curl http://127.0.0.1:1877/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-gw-xxxx" \
   -d '{
@@ -611,7 +611,7 @@ curl http://127.0.0.1:9876/v1/chat/completions \
   }'
 
 # 示例：使用 Claude Messages 格式
-curl http://127.0.0.1:9876/v1/messages \
+curl http://127.0.0.1:1877/v1/messages \
   -H "Content-Type: application/json" \
   -H "x-api-key: sk-gw-xxxx" \
   -d '{
@@ -747,7 +747,7 @@ await invoke('create_routing_rule', {
 #### 3. 测试请求
 
 ```bash
-curl http://127.0.0.1:9876/v1/chat/completions \
+curl http://127.0.0.1:1877/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-4",
@@ -782,7 +782,7 @@ await invoke('create_routing_rule', {
 客户端发送 Claude 格式请求，Silk 自动转换为 OpenAI Chat 格式转发到上游。
 
 ```bash
-curl http://127.0.0.1:9876/v1/messages \
+curl http://127.0.0.1:1877/v1/messages \
   -H "Content-Type: application/json" \
   -H "x-api-key: sk-ant-xxxx" \
   -d '{

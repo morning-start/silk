@@ -24,7 +24,7 @@ Vue3 + NaiveUI → Tauri IPC (invoke) → commands/ → application/ services
     → gateway/ (Axum 9-stage pipeline) / protocol/ (adapters) / persistence/ (SQLx + SQLite)
 ```
 
-HTTP 网关 `127.0.0.1:2013` 核心：**9 阶段中间件管道** — extract → authenticate → resolve_route → select_channel → transform_request → dispatch_upstream → transform_response → persist_log → finalize
+HTTP 网关 `127.0.0.1:1877` 核心：**9 阶段中间件管道** — extract → authenticate → resolve_route → select_channel → transform_request → dispatch_upstream → transform_response → persist_log → finalize
 
 **3 级失败回退**：重试耗尽 → 换 Key → 换 Provider → 502
 

@@ -11,7 +11,7 @@
 
 > **一个本地端点，三大协议任意互转。** 装个桌面应用，加几把 API Key，你的所有 AI 工具就都能用上 OpenAI Chat Completion、Claude Message、OpenAI Response——协议自动转换，失败自动换 Key 换 Provider，Key 加密存本地。
 
-Silk 是一个运行在你桌面的 AI 多模型网关（Tauri 2 + Rust/Axum）。你在管理多个 AI 提供商时遇到的所有麻烦——协议不兼容、API Key 分散、一个限流整个服务挂掉——它用一个本地 HTTP 端点 `http://127.0.0.1:9876` 替你搞定。
+Silk 是一个运行在你桌面的 AI 多模型网关（Tauri 2 + Rust/Axum）。你在管理多个 AI 提供商时遇到的所有麻烦——协议不兼容、API Key 分散、一个限流整个服务挂掉——它用一个本地 HTTP 端点 `http://127.0.0.1:1877` 替你搞定。
 
 ## ✨ 功能亮点
 
@@ -37,12 +37,12 @@ bun run tauri dev
 1. 打开 Silk 桌面应用
 2. 在"提供商管理"页面添加 AI 服务商和 API Key（支持 OpenAI Chat Completion、Claude Message、OpenAI Response 协议互通）
 3. 点击"启动网关"
-4. 把你的 AI 工具 HTTP 端点改成 `http://127.0.0.1:9876`
+4. 把你的 AI 工具 HTTP 端点改成 `http://127.0.0.1:1877`
 
 ### 验证网关在工作
 
 ```bash
-curl http://127.0.0.1:9876/v1/chat/completions \
+curl http://127.0.0.1:1877/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "x-api-key: 你在应用里设的网关Key" \
   -d '{"model":"gpt-4","messages":[{"role":"user","content":"你好"}]}'
@@ -56,7 +56,7 @@ curl http://127.0.0.1:9876/v1/chat/completions \
 |------|---------------|------|
 | 同时用 OpenAI + Claude | 两套 API 格式、两套认证、两套 SDK | 一个本地端点，协议自动转换 |
 | API Key 配额用尽 / 被限流 | 手动切 Key，服务中断 | 自动换 Key / 换 Provider，用户无感 |
-| 多个 AI 工具接入 | 每个工具单独配 API Key 和端点 | 统一指向 `127.0.0.1:9876`，一处管理 |
+| 多个 AI 工具接入 | 每个工具单独配 API Key 和端点 | 统一指向 `127.0.0.1:1877`，一处管理 |
 | 数据隐私 / 审计 | 请求直发外部，日志不受控 | Key 加密存本地，日志可查可删，全在你机器上 |
 | 路由策略（测试→生产） | 不支持，或手动改代码 | 模型映射 + 路由规则 + 路径兜底，三层匹配灵活调度 |
 

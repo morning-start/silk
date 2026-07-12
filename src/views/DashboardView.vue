@@ -19,7 +19,7 @@ const error = ref<string | null>(null);
 const stats = ref<DashboardStats | null>(null);
 const recentLogs = ref<RequestLog[]>([]);
 const logsLoading = ref(false);
-const bindAddress = computed(() => gatewayStore.status?.address ?? "127.0.0.1:9876");
+const bindAddress = computed(() => gatewayStore.status?.address ?? "127.0.0.1:1877");
 
 async function loadData() {
   loading.value = true;

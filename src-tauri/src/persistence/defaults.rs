@@ -23,7 +23,7 @@ pub fn to_json_opt<T: serde::Serialize>(val: Option<&T>) -> Option<String> {
 }
 
 /// 网关默认端口
-pub const DEFAULT_BIND_PORT: i64 = 9876;
+pub const DEFAULT_BIND_PORT: i64 = 1877;
 
 /// 默认日志保留天数
 pub const DEFAULT_LOG_RETENTION_DAYS: i64 = 30;
