@@ -151,6 +151,9 @@ fn validate_update_payload(payload: &UpdateSettingsPayload) -> Result<(), Servic
         if !(1..=65535).contains(&port) {
             return bad_request("绑定端口必须在 1-65535 之间");
         }
+        if port < 1024 {
+            return bad_request("绑定端口不能小于 1024（特权端口），建议使用 1024-65535 之间的端口");
+        }
     }
     if let Some(days) = payload.log_retention_days {
         if !(1..=3650).contains(&days) {
@@ -234,6 +237,22 @@ mod tests {
             rate_limit_max_tokens_per_minute: None,
         }));
 
+        // 特权端口也应拒绝
+        assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
+            bind_host: None,
+            bind_port: Some(1023),
+            allow_remote: None,
+            log_retention_days: None,
+            launch_at_startup: None,
+            minimize_to_tray: None,
+            close_to_tray: None,
+            auto_start_gateway: None,
+            default_provider_id: None,
+            rate_limit_enabled: None,
+            rate_limit_max_requests_per_minute: None,
+            rate_limit_max_tokens_per_minute: None,
+        }));
+
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
             bind_host: None,
             bind_port: None,
@@ -254,7 +273,7 @@ mod tests {
     fn validate_accepts_reasonable_settings() {
         validate_update_payload(&UpdateSettingsPayload {
             bind_host: Some("127.0.0.1".to_string()),
-            bind_port: Some(2013),
+            bind_port: Some(1877),
             allow_remote: Some(false),
             log_retention_days: Some(30),
             launch_at_startup: Some(false),
