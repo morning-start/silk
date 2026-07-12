@@ -3,7 +3,7 @@ import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
 
 const host = process.env.TAURI_DEV_HOST;
-const devPort = 1510;
+const devPort = 1420;
 
 export default defineConfig(async () => ({
   plugins: [vue(), tailwindcss()],
