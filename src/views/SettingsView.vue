@@ -21,6 +21,40 @@ import { useGatewayStore } from "../stores/gateway";
 import { storeToRefs } from "pinia";
 import { api, type GatewayKey } from "../api";
 
+/**
+ * 端口冲突校验
+ *
+ * 规则：
+ *  - 1024–49151（用户端口区间，无需管理员权限）
+ *  - 避开 Hyper-V / Docker 常见保留端口
+ *  - 避开主流数据库、中间件、Web 服务器默认端口
+ *  - 避开开发者高频选型端口（3000、5000、8000、8080、9090 等）
+ */
+const CONFLICT_PORTS = new Set([
+  // Hyper-V / Docker / 系统保留
+  135, 136, 137, 138, 139, 445, 548, 3389, 5353, 5985, 5986,
+  // 数据库
+  1433, 1434, 1521, 3306, 5432, 6379, 9042, 27017,
+  // 中间件 / 消息队列
+  5672, 8161, 9200, 5601, 15672,
+  // Web 服务器 / 代理
+  8080, 8443, 9443,
+  // 开发者高频
+  3000, 4000, 5000, 5173, 8000, 8090, 9000, 9090,
+  // 其他常见服务
+  3478, 1714, 1715, 1716, 1717, 1718, 1719, 1720, 1721, 1722, 1723, 1724, 1764,
+]);
+
+function validatePort(port: number): string | null {
+  if (port < 1024 || port > 49151) {
+    return "端口必须在 1024–49151 的用户端口区间内（无需管理员权限）";
+  }
+  if (CONFLICT_PORTS.has(port)) {
+    return `端口 ${port} 与常见服务端口冲突，请选择其他端口`;
+  }
+  return null;
+}
+
 const gatewayStore = useGatewayStore();
 const { status, loading } = storeToRefs(gatewayStore);
 const message = useMessage();
@@ -28,8 +62,8 @@ const dialog = useDialog();
 
 const formRef = ref<any>(null);
 const formValue = ref({
-  bind_host: "",
-  bind_port: null as number | null,
+  bind_host: "127.0.0.1",
+  bind_port: 1877,
   allow_remote: false,
   log_retention_days: 30,
   launch_at_startup: false,
@@ -135,10 +169,15 @@ function maskedKeyPreview(value: string) {
 
 async function handleSave() {
   try {
-    // 空字符串转 null，空端口用默认值 1877
+    const portError = validatePort(formValue.value.bind_port);
+    if (portError) {
+      message.error(portError);
+      return;
+    }
+
+    // 空字符串转 null，避免覆盖已有值
     const payload = {
       ...formValue.value,
-      bind_port: formValue.value.bind_port ?? 1877,
       default_provider_id: formValue.value.default_provider_id || null,
     };
     await gatewayStore.updateSettings(payload);
@@ -283,7 +322,7 @@ onMounted(() => {
             <NInput v-model:value="formValue.bind_host" placeholder="127.0.0.1" />
           </NFormItem>
           <NFormItem label="监听端口" style="flex: 1">
-            <NInputNumber v-model:value="formValue.bind_port" :min="1024" :max="65535" style="width: 100%" placeholder="1877" />
+            <NInputNumber v-model:value="formValue.bind_port" :min="1024" :max="49151" style="width: 100%" placeholder="1877" />
           </NFormItem>
         </div>
         <div class="form-row">

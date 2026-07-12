@@ -148,11 +148,11 @@ fn validate_update_payload(payload: &UpdateSettingsPayload) -> Result<(), Servic
         }
     }
     if let Some(port) = payload.bind_port {
-        if !(1..=65535).contains(&port) {
-            return bad_request("绑定端口必须在 1-65535 之间");
+        if !(1024..=49151).contains(&port) {
+            return bad_request("绑定端口必须在 1024–49151 的用户端口区间内（无需管理员权限）");
         }
-        if port < 1024 {
-            return bad_request("绑定端口不能小于 1024（特权端口），建议使用 1024-65535 之间的端口");
+        if is_conflict_port(port) {
+            return bad_request(&format!("端口 {port} 与常见服务端口冲突，请选择其他端口"));
         }
     }
     if let Some(days) = payload.log_retention_days {
@@ -199,6 +199,25 @@ pub fn sync_autostart(app_handle: &AppHandle, enabled: bool) -> Result<(), Servi
     Ok(())
 }
 
+/// 端口冲突检测：避开 Hyper-V/Docker 保留端口、主流数据库/中间件/Web 服务器默认端口、开发者高频端口
+fn is_conflict_port(port: i64) -> bool {
+    const CONFLICT_PORTS: &[i64] = &[
+        // Hyper-V / Docker / 系统保留
+        135, 136, 137, 138, 139, 445, 548, 3389, 5353, 5985, 5986,
+        // 数据库
+        1433, 1434, 1521, 3306, 5432, 6379, 9042, 27017,
+        // 中间件 / 消息队列
+        5672, 8161, 9200, 5601, 15672,
+        // Web 服务器 / 代理
+        8080, 8443, 9443,
+        // 开发者高频
+        3000, 4000, 5000, 5173, 8000, 8090, 9000, 9090,
+        // 其他常见服务 (Tailscale/WireGuard/TURN)
+        3478, 1714, 1715, 1716, 1717, 1718, 1719, 1720, 1721, 1722, 1723, 1724, 1764,
+    ];
+    CONFLICT_PORTS.contains(&port)
+}
+
 
 
 #[cfg(test)]
@@ -237,10 +256,42 @@ mod tests {
             rate_limit_max_tokens_per_minute: None,
         }));
 
-        // 特权端口也应拒绝
+        // 特权端口（<1024）也应拒绝
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
             bind_host: None,
             bind_port: Some(1023),
+            allow_remote: None,
+            log_retention_days: None,
+            launch_at_startup: None,
+            minimize_to_tray: None,
+            close_to_tray: None,
+            auto_start_gateway: None,
+            default_provider_id: None,
+            rate_limit_enabled: None,
+            rate_limit_max_requests_per_minute: None,
+            rate_limit_max_tokens_per_minute: None,
+        }));
+
+        // 超出用户端口区间（>49151）应拒绝
+        assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
+            bind_host: None,
+            bind_port: Some(49152),
+            allow_remote: None,
+            log_retention_days: None,
+            launch_at_startup: None,
+            minimize_to_tray: None,
+            close_to_tray: None,
+            auto_start_gateway: None,
+            default_provider_id: None,
+            rate_limit_enabled: None,
+            rate_limit_max_requests_per_minute: None,
+            rate_limit_max_tokens_per_minute: None,
+        }));
+
+        // 冲突端口应拒绝
+        assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
+            bind_host: None,
+            bind_port: Some(8080),
             allow_remote: None,
             log_retention_days: None,
             launch_at_startup: None,
