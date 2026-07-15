@@ -170,6 +170,61 @@ export interface FileOperationResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Profile 类型
+// ---------------------------------------------------------------------------
+
+export type AgentType =
+  | 'claude_code'
+  | 'claude_desktop'
+  | 'codex'
+  | 'gemini_cli'
+  | 'opencode'
+  | 'openclaw'
+  | 'hermes';
+
+export interface Profile {
+  id: string;
+  name: string;
+  agent_type: AgentType;
+  config_json: string;
+  is_active: boolean;
+  sort_index?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateProfilePayload {
+  agent_type: AgentType;
+  name: string;
+  config_json: string;
+  sort_index?: number;
+}
+
+export interface UpdateProfilePayload {
+  name?: string;
+  config_json?: string;
+  sort_index?: number;
+}
+
+export interface SwitchResult {
+  success: boolean;
+  warnings: string[];
+  requires_restart: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// 全量模型列表（与 /v1/models 一致）
+// ---------------------------------------------------------------------------
+
+export interface ModelListingItem {
+  id: string;
+  object: string;
+  created: number;
+  owned_by: string;
+  model_mapping_id: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // API Client
 // ---------------------------------------------------------------------------
 
@@ -266,4 +321,18 @@ export const api = {
   // Settings
   updateGatewaySettings: (data: Partial<GatewaySettings>) =>
     invoke<GatewaySettings>("update_gateway_settings", { payload: data }),
+
+  // Profiles
+  listAllModels: () => invoke<ModelListingItem[]>("list_all_models"),
+  listProfiles: (agentType: AgentType) => invoke<Profile[]>("list_profiles", { agentType }),
+  getProfile: (profileId: string) => invoke<Profile>("get_profile", { profileId }),
+  createProfile: (payload: CreateProfilePayload) => invoke<Profile>("create_profile", { payload }),
+  updateProfile: (profileId: string, payload: UpdateProfilePayload) =>
+    invoke<Profile>("update_profile", { profileId, payload }),
+  deleteProfile: (profileId: string) => invoke<boolean>("delete_profile", { profileId }),
+  switchProfile: (agentType: AgentType, profileId: string) =>
+    invoke<SwitchResult>("switch_profile", { agentType, profileId }),
+  getCommonSnippet: (agentType: AgentType) => invoke<string | null>("get_common_snippet", { agentType }),
+  setCommonSnippet: (agentType: AgentType, content: string) =>
+    invoke<void>("set_common_snippet", { agentType, content }),
 };
