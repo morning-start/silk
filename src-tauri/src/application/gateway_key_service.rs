@@ -25,10 +25,17 @@ pub struct GatewayKeyResponse {
 impl From<GatewayKey> for GatewayKeyResponse {
     fn from(k: GatewayKey) -> Self {
         let is_expired = k.is_expired();
+        let plain_key = match crate::crypto::decrypt(&k.encrypted_key_value) {
+            Ok(key) => key,
+            Err(e) => {
+                tracing::warn!(%e, key_id = %k.id, "解密网关 Key 失败");
+                String::new()
+            }
+        };
         Self {
             id: k.id,
             name: k.name,
-            plain_key: crate::crypto::decrypt(&k.encrypted_key_value).unwrap_or_default(),
+            plain_key,
             enabled: k.enabled != 0,
             expires_at: k.expires_at.map(|d| d.to_string()),
             max_concurrent: k.max_concurrent,
