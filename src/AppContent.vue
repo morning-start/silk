@@ -6,6 +6,7 @@ import {
   NLayoutSider,
   NLayoutHeader,
   NLayoutContent,
+  NLayoutFooter,
   NIcon,
   useMessage,
 } from "naive-ui";
@@ -85,38 +86,41 @@ onErrorCaptured((err, _instance, info) => {
       :width="240"
       :native-scrollbar="false"
       class="app-sidebar"
+      bordered
     >
-      <div class="sidebar-brand">
-        <h1><span class="logo-dot"></span> Silk Gateway</h1>
-        <p>本地 AI 网关控制台</p>
-      </div>
+      <div class="sidebar-inner">
+        <div class="sidebar-brand">
+          <h1><span class="logo-dot"></span> Silk Gateway</h1>
+          <p>本地 AI 网关控制台</p>
+        </div>
 
-      <div class="sidebar-menu-wrap">
-        <nav class="sidebar-nav">
-          <button :class="{ active: route.path === '/dashboard' }" @click="handleNav('/dashboard')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>仪表盘
-          </button>
-          <div class="sidebar-section">核心工作流</div>
-          <button :class="{ active: route.path.startsWith('/providers') }" @click="handleNav('/providers')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>渠道
-          </button>
-          <button :class="{ active: route.path === '/model-square' }" @click="handleNav('/model-square')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模型
-          </button>
-          <button :class="{ active: route.path === '/agent-profiles' }" @click="handleNav('/agent-profiles')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>预设
-          </button>
-          <button :class="{ active: route.path === '/logs' }" @click="handleNav('/logs')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>日志
-          </button>
-          <div class="sidebar-section">系统</div>
-          <button :class="{ active: route.path === '/settings' }" @click="handleNav('/settings')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置
-          </button>
-        </nav>
-      </div>
+        <div class="sidebar-menu-wrap">
+          <nav class="sidebar-nav">
+            <button :class="{ active: route.path === '/dashboard' }" @click="handleNav('/dashboard')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>仪表盘
+            </button>
+            <div class="sidebar-section">核心工作流</div>
+            <button :class="{ active: route.path.startsWith('/providers') }" @click="handleNav('/providers')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>渠道
+            </button>
+            <button :class="{ active: route.path === '/model-square' }" @click="handleNav('/model-square')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模型
+            </button>
+            <button :class="{ active: route.path === '/agent-profiles' }" @click="handleNav('/agent-profiles')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>预设
+            </button>
+            <button :class="{ active: route.path === '/logs' }" @click="handleNav('/logs')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>日志
+            </button>
+            <div class="sidebar-section">系统</div>
+            <button :class="{ active: route.path === '/settings' }" @click="handleNav('/settings')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置
+            </button>
+          </nav>
+        </div>
 
-      <div class="sidebar-footer">gateway.silk.io · v1.0.0</div>
+        <div class="sidebar-footer">gateway.silk.io · v1.0.0</div>
+      </div>
     </NLayoutSider>
 
     <!-- Main Content -->
@@ -182,7 +186,9 @@ onErrorCaptured((err, _instance, info) => {
       </NLayoutContent>
 
       <!-- Main Footer -->
-      <footer class="main-footer">Silk Gateway v1.0.0 · 纯本地私有化多模型中转网关 · 零云端上传数据</footer>
+      <NLayoutFooter bordered class="main-footer">
+        Silk Gateway v1.0.0 · 纯本地私有化多模型中转网关 · 零云端上传数据
+      </NLayoutFooter>
     </NLayout>
   </NLayout>
 </template>
@@ -194,16 +200,19 @@ onErrorCaptured((err, _instance, info) => {
 
 /* 主区域 */
 .main-area {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ===== Sidebar ===== */
 .app-sidebar {
   background: var(--sidebar-bg, #0f172a) !important;
-  display: flex !important;
-  flex-direction: column !important;
-  height: 100vh !important;
-  border-right: 1px solid var(--border-soft, #e2e8f0) !important;
+}
+
+.sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
 }
 
 /* Brand — align with design spec */
@@ -243,6 +252,7 @@ onErrorCaptured((err, _instance, info) => {
 .sidebar-menu-wrap {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 /* ===== Sidebar Nav — design spec ===== */
