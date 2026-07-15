@@ -16,18 +16,26 @@ pub struct ModelListingItem {
 
 /// 返回全量模型列表：模型池（top） + 各 Provider 模型（按 owned_by 排序）
 /// 与网关 /v1/models 完全一致，去重。
-pub async fn list_all_models(
-    pool: &sqlx::SqlitePool,
-) -> Result<Vec<ModelListingItem>, ServiceError> {
+pub async fn list_all_models() -> Result<Vec<ModelListingItem>, ServiceError> {
+    let pool = crate::error::require_db()?;
+
     // ① 模型池（silk）
-    let pool_models = ModelMappingRepo::find_enabled(pool)
-        .await
-        .unwrap_or_default();
+    let pool_models = match ModelMappingRepo::find_enabled(pool).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!(%e, "查询模型池列表失败");
+            Vec::new()
+        }
+    };
 
     // ② 渠道模型
-    let providers = ProviderRepo::find_enabled(pool)
-        .await
-        .unwrap_or_default();
+    let providers = match ProviderRepo::find_enabled(pool).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(%e, "查询渠道列表失败");
+            Vec::new()
+        }
+    };
 
     let mut items: Vec<ModelListingItem> = Vec::with_capacity(
         pool_models.len() + providers.iter().map(|p| p.models_vec().len()).sum::<usize>(),

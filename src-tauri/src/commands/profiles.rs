@@ -1,18 +1,14 @@
-use tauri::State;
-
 use crate::application::models_listing::ModelListingItem;
 use crate::application::profile_service as ps;
 use crate::application::profile_service::{
     CreateProfilePayload, ProfileResponse, SwitchResult, UpdateProfilePayload,
 };
 use crate::AppState;
+use tauri::State;
 
 #[tauri::command]
-pub async fn list_all_models(
-    state: State<'_, AppState>,
-) -> Result<Vec<ModelListingItem>, String> {
-    let pool = state.gateway.read().await.pool.clone();
-    crate::application::models_listing::list_all_models(&pool)
+pub async fn list_all_models() -> Result<Vec<ModelListingItem>, String> {
+    crate::application::models_listing::list_all_models()
         .await
         .map_err(|e| e.to_string())
 }
