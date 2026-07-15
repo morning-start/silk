@@ -142,17 +142,6 @@ async fn atomic_write(path: &Path, data: &[u8]) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// 用户家目录辅助
-// ---------------------------------------------------------------------------
-
-fn user_home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-}
-
-// ---------------------------------------------------------------------------
 // Response / Payload 类型
 // ---------------------------------------------------------------------------
 
@@ -382,7 +371,7 @@ pub async fn switch(
     let effective_config = build_effective_config(&config, _snippet.as_ref());
 
     // 6. 写入 live 配置
-    let home = user_home_dir();
+    let home = crate::get_home_dir().to_path_buf();
     if let Err(e) = writer.write_live(&home, &effective_config).await {
         warnings.push(format!("写入 live 配置失败: {}", e));
     }

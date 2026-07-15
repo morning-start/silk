@@ -8,7 +8,6 @@
 #[macro_export]
 macro_rules! impl_crud_list {
     ($response:ty, $repo:path, $find_label:expr) => {
-        #[allow(unused)]
         pub async fn list() -> Result<Vec<$response>, $crate::error::ServiceError> {
             let pool = $crate::error::require_db()?;
             let items = <$repo>::find_all(pool).await?;
@@ -21,7 +20,6 @@ macro_rules! impl_crud_list {
 #[macro_export]
 macro_rules! impl_crud_get {
     ($response:ty, $repo:path, $find_label:expr) => {
-        #[allow(unused)]
         pub async fn get(id: String) -> Result<$response, $crate::error::ServiceError> {
             let pool = $crate::error::require_db()?;
             let item = $crate::error::require_found(
@@ -37,7 +35,6 @@ macro_rules! impl_crud_get {
 #[macro_export]
 macro_rules! impl_crud_delete {
     ($repo:path) => {
-        #[allow(unused)]
         pub async fn delete(id: String) -> Result<bool, $crate::error::ServiceError> {
             let pool = $crate::error::require_db()?;
             <$repo>::delete(pool, &id)

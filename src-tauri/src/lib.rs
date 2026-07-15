@@ -31,6 +31,9 @@ static DB_PATH: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_ne
 /// 网关设置文件路径（全局唯一）
 static SETTINGS_PATH: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
 
+/// 用户家目录（可覆盖，用于测试）
+static HOME_DIR: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
+
 /// 存放所有非敏感、小型、读频繁的字典表数据。
 /// 启动时一次性加载，写时按分区失效刷新。
 #[derive(Debug, Clone, Default)]
@@ -174,6 +177,20 @@ pub fn get_settings_path() -> Option<&'static Path> {
     SETTINGS_PATH.get().map(|p| p.as_path())
 }
 
+/// 获取用户家目录
+pub fn get_home_dir() -> &'static Path {
+    HOME_DIR.get().map(|p| p.as_path()).unwrap_or_else(|| {
+        // 未初始化时从环境变量获取
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."));
+        // 尝试初始化，失败则用已存在的值
+        let _ = HOME_DIR.set(home);
+        HOME_DIR.get().map(|p| p.as_path()).unwrap_or(Path::new("."))
+    })
+}
+
 fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -291,6 +308,13 @@ pub fn run() {
                 // 初始化网关设置文件
                 init_gateway_settings(&data_dir).await
                     .map_err(|e| sqlx::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+
+                // 初始化用户家目录
+                let home = std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| data_dir.clone());
+                let _ = HOME_DIR.set(home);
 
                 // 启动后台日志写入任务
                 let log_writer_handle =
