@@ -421,6 +421,16 @@ pub fn run() {
             commands::gateway_keys::create_gateway_key,
             commands::gateway_keys::update_gateway_key,
             commands::gateway_keys::delete_gateway_key,
+            // Profile 管理
+            commands::profiles::list_profiles,
+            commands::profiles::get_profile,
+            commands::profiles::create_profile,
+            commands::profiles::update_profile,
+            commands::profiles::delete_profile,
+            commands::profiles::switch_profile,
+            commands::profiles::get_common_snippet,
+            commands::profiles::set_common_snippet,
+            commands::profiles::list_all_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
