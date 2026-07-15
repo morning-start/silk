@@ -50,7 +50,7 @@ pub async fn run(
 
     // 0. /v1/models：直接返回模型列表，不路由到上游
     if ctx.path == "/v1/models" {
-        return handle_models_listing(runtime, ctx).await;
+        return handle_models_listing(ctx).await;
     }
 
     // 1. 优先通过请求体中的 model 字段做模型映射路由
@@ -75,10 +75,9 @@ pub async fn run(
 
 /// 处理 /v1/models 请求：返回本地模型池（短路，不走上游）
 async fn handle_models_listing(
-    runtime: &GatewayContext,
     mut ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
-    let items = match crate::application::models_listing::list_all_models(&runtime.pool).await {
+    let items = match crate::application::models_listing::list_all_models().await {
         Ok(items) => items,
         Err(e) => {
             tracing::warn!(%e, "查询全量模型列表失败");
