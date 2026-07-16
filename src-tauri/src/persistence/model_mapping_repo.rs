@@ -82,7 +82,7 @@ impl ModelMappingRepo {
             .await
     }
 
-    /// 根据多个模型名称批量查询（用于日志 cost 计算）
+    /// 根据多个模型名称批量查询
     pub async fn find_by_model_names(
         pool: &SqlitePool,
         model_names: &[String],

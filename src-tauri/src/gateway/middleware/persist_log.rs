@@ -131,7 +131,6 @@ pub fn build_log(ctx: &RequestContext) -> crate::models::NewRequestLog {
         tokens_output: None, // 流结束后由 pipeline 填充
         tokens_sent: estimate_tokens_from_body(&ctx.request_body),
         total_duration_ms: None, // 流结束后由 pipeline 填充
-        cost: None,
         auth_key_name: ctx.auth_key_name.clone(),
         channel_key_name: ctx.channel_key_name.clone(),
     }
