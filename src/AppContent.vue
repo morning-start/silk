@@ -134,14 +134,11 @@ onErrorCaptured((err, _instance, info) => {
           <div class="topbar-actions">
             <span class="status-dot" :class="{ running: isRunning }"></span>
             <span class="status-text">
-              gateway://{{ bindAddress }}
-              <template v-if="isRunning"> · 正常接收流量</template>
-              <template v-else> · 已停止</template>
+              <span class="status-protocol">gateway://</span>{{ bindAddress }}
+              <span class="status-badge" :class="isRunning ? 'status-badge--online' : 'status-badge--offline'">
+                {{ isRunning ? '运行中' : '已停止' }}
+              </span>
             </span>
-            <div class="listen-pill">
-              <span class="status-dot-sm" :class="{ online: isRunning }"></span>
-              <span class="listen-addr">{{ bindAddress }}</span>
-            </div>
             <template v-if="isRunning">
               <button class="icon-btn" @click="restartGateway" title="重启网关">
                 <NIcon size="16"><ReloadOutline /></NIcon>
@@ -374,30 +371,28 @@ onErrorCaptured((err, _instance, info) => {
   color: var(--muted, #64748b);
 }
 
-/* Listen pill — 地址显示 */
-.listen-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--border-soft, #e2e8f0);
-  border-radius: var(--radius, 8px);
-  background: var(--surface, #ffffff);
-  font-size: 11px;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  color: var(--muted, #64748b);
+.status-protocol {
+  opacity: 0.5;
 }
 
-.status-dot-sm {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.status-badge {
   display: inline-block;
-  background: var(--muted, #94a3b8);
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
 }
 
-.status-dot-sm.online {
-  background: var(--success, #10b981);
+.status-badge--online {
+  background: var(--success-soft, rgba(16, 185, 129, 0.1));
+  color: var(--success, #10b981);
+}
+
+.status-badge--offline {
+  background: var(--border-soft, #e2e8f0);
+  color: var(--muted, #64748b);
 }
 
 /* ================================================================
