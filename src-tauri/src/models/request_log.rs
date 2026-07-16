@@ -60,15 +60,13 @@ pub struct NewRequestLog {
     pub tokens_output: Option<i64>,
     /// 发送给上游渠道的请求 token 估算（反应插件优化效果）
     pub tokens_sent: Option<i64>,
-    /// 本次请求费用（美元），非流式响应时计算
-    pub cost: Option<f64>,
     /// 认证使用的 Gateway Key 名称
     pub auth_key_name: Option<String>,
     /// 使用的渠道 Key 名称（Provider 下选中的 Key）
     pub channel_key_name: Option<String>,
 }
 
-/// 请求日志 Token 扩展信息（迁出字段：缓存、大小、Token、费用）
+/// 请求日志 Token 扩展信息（迁出字段：缓存、大小、Token）
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct RequestLogExtraToken {
     pub id: String,
@@ -79,7 +77,6 @@ pub struct RequestLogExtraToken {
     pub tokens_input: Option<i64>,
     pub tokens_output: Option<i64>,
     pub tokens_sent: Option<i64>,
-    pub cost: Option<f64>,
 }
 
 /// 用于写入 Token 扩展日志的输入结构
@@ -92,5 +89,4 @@ pub struct NewRequestLogExtraToken {
     pub tokens_input: Option<i64>,
     pub tokens_output: Option<i64>,
     pub tokens_sent: Option<i64>,
-    pub cost: Option<f64>,
 }

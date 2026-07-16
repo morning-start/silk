@@ -42,7 +42,6 @@ pub struct LogResponse {
     pub tokens_output: Option<i64>,
     /// 发送给上游渠道的请求 token 估算（反应插件优化效果）
     pub tokens_sent: Option<i64>,
-    pub cost: Option<f64>,
     pub auth_key_name: Option<String>,
     /// 使用的渠道 Key 名称
     pub channel_key_name: Option<String>,
@@ -51,7 +50,7 @@ pub struct LogResponse {
 impl LogResponse {
     /// 从 RequestLog 构造 LogResponse
     ///
-    /// - `extras`: 可选的扩展信息（tokens、cost 等），如果为 None 则这些字段填充默认值
+    /// - `extras`: 可选的扩展信息（tokens 等），如果为 None 则这些字段填充默认值
     /// - `cache`: provider_id → provider_name 的映射
     pub fn from_log(
         log: RequestLog,
@@ -72,7 +71,6 @@ impl LogResponse {
             resp.tokens_input = extra.tokens_input;
             resp.tokens_output = extra.tokens_output;
             resp.tokens_sent = extra.tokens_sent;
-            resp.cost = extra.cost;
         }
         resp
     }
@@ -105,7 +103,6 @@ impl From<RequestLog> for LogResponse {
             tokens_input: None,
             tokens_output: None,
             tokens_sent: None,
-            cost: None,
             auth_key_name: l.auth_key_name,
             channel_key_name: l.channel_key_name,
         }

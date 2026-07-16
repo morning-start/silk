@@ -51,7 +51,6 @@ export interface RequestLog {
   tokens_input: number | null;
   tokens_output: number | null;
   tokens_sent: number | null;
-  cost: number | null;
   auth_key_name: string | null;
   channel_key_name: string | null;
 }

@@ -88,33 +88,6 @@ const columns: DataTableColumns<RequestLog> = [
       return h("span", { class: "num" }, formatMs(row.total_duration_ms));
     },
   },
-  {
-    title: "Token",
-    key: "tokens_sent",
-    width: 100,
-    render(row) {
-      const inp = row.tokens_input || 0;
-      const out = row.tokens_output || 0;
-      const sent = row.tokens_sent || 0;
-      if (inp + out === 0 && sent === 0) return "-";
-      // 显示节省：tokens_input - tokens_sent（正数=优化节省）
-      const saved = inp > sent ? inp - sent : null;
-      const parts = [`↑${((inp + out) / 1000).toFixed(1)}k`];
-      if (saved !== null && saved > 0) {
-        parts.push(`-${saved}`);
-      }
-      return h("span", { class: "num" }, parts.join(" "));
-    },
-  },
-  {
-    title: "费用",
-    key: "cost",
-    width: 80,
-    render(row) {
-      if (row.cost == null) return h("span", { class: "num" }, "-");
-      return h("span", { class: "num" }, `$${row.cost.toFixed(6)}`);
-    },
-  },
   { title: "模型", key: "model_id", width: 110,
     render(row) {
       if (row.model_name) return `${row.model_name} (${row.model_id})`;
@@ -373,6 +346,7 @@ onMounted(() => {
         :loading="loading"
         :bordered="false"
         :single-line="false"
+        :scroll-x="1000"
         striped
         size="small"
       />
@@ -486,10 +460,6 @@ onMounted(() => {
               优化 -{{ selectedLog.tokens_input - selectedLog.tokens_sent }}
             </span>
           </span>
-        </div>
-        <div class="detail-row" v-if="selectedLog.cost != null">
-          <span class="detail-label">费用：</span>
-          <span class="detail-value num">${{ selectedLog.cost.toFixed(8) }}</span>
         </div>
         <div class="detail-row">
           <span class="detail-label">流式：</span>

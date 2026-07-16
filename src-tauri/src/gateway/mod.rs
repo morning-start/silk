@@ -2,7 +2,6 @@ pub mod context;
 pub mod error;
 pub mod header_config;
 pub mod log_cleanup;
-pub mod log_cost;
 pub mod middleware;
 pub mod pipeline;
 pub mod plugin;
@@ -136,12 +135,9 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<NewRequestLog>) {
         return;
     }
 
-    let mut logs = std::mem::take(batch);
+    let logs = std::mem::take(batch);
 
-    // 在消费侧计算 cost，不阻塞请求热路径
-    log_cost::compute_batch_costs(&mut logs, pool).await;
-
-    // 分离扩展信息（cache_hit, tokens, cost 等迁出字段）
+    // 分离扩展信息（cache_hit, tokens 等迁出字段）
     let extras: Vec<crate::models::NewRequestLogExtraToken> = logs
         .iter()
         .map(|log| crate::models::NewRequestLogExtraToken {
@@ -152,7 +148,6 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<NewRequestLog>) {
             tokens_input: log.tokens_input,
             tokens_output: log.tokens_output,
             tokens_sent: log.tokens_sent,
-            cost: log.cost,
         })
         .collect();
 

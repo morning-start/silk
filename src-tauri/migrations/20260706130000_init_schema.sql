@@ -107,7 +107,7 @@ CREATE INDEX idx_request_logs_provider_ts ON request_logs(provider_id, timestamp
 CREATE INDEX idx_request_logs_status_ts ON request_logs(status_code, timestamp);
 CREATE INDEX idx_request_logs_request_id ON request_logs(request_id);
 
--- 请求日志扩展表（缓存、体积、token、费用）
+-- 请求日志扩展表（缓存、体积、token）
 CREATE TABLE request_log_extra_token (
     id                  TEXT PRIMARY KEY,
     request_id          TEXT NOT NULL,
@@ -116,8 +116,40 @@ CREATE TABLE request_log_extra_token (
     response_size_bytes INTEGER,
     tokens_input        INTEGER,
     tokens_output       INTEGER,
-    tokens_sent         INTEGER,
-    cost                REAL
+    tokens_sent         INTEGER
 );
 
 CREATE INDEX idx_log_extra_token_request_id ON request_log_extra_token(request_id);
+
+-- Profile 表
+CREATE TABLE profiles (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    agent_type TEXT NOT NULL CHECK(agent_type IN (
+        'claude_code', 'claude_desktop', 'codex',
+        'gemini_cli', 'opencode', 'openclaw', 'hermes'
+    )),
+    config_json TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 0,
+    sort_index INTEGER,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_profiles_agent_type ON profiles(agent_type);
+CREATE INDEX idx_profiles_active ON profiles(agent_type, is_active) WHERE is_active = 1;
+
+-- 通用配置片段表
+CREATE TABLE common_config_snippets (
+    id TEXT PRIMARY KEY,
+    agent_type TEXT NOT NULL CHECK(agent_type IN (
+        'claude_code', 'claude_desktop', 'codex',
+        'gemini_cli', 'opencode', 'openclaw', 'hermes'
+    )),
+    content TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(agent_type)
+);
+
+CREATE INDEX idx_common_snippets_agent ON common_config_snippets(agent_type);

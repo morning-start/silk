@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 
 use crate::models::{NewRequestLogExtraToken, RequestLogExtraToken};
 
-/// 请求日志扩展信息仓库（cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output, cost）
+/// 请求日志扩展信息仓库（cache_hit, request_size_bytes, response_size_bytes, tokens_input, tokens_output）
 pub struct LogExtraTokenRepo;
 
 impl LogExtraTokenRepo {
@@ -25,8 +25,8 @@ impl LogExtraTokenRepo {
             let result = sqlx::query(
                 r#"
                 INSERT INTO request_log_extra_token (id, request_id, cache_hit, request_size_bytes,
-                                                response_size_bytes, tokens_input, tokens_output, tokens_sent, cost)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                                                response_size_bytes, tokens_input, tokens_output, tokens_sent)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 "#,
             )
             .bind(id)
@@ -37,7 +37,6 @@ impl LogExtraTokenRepo {
             .bind(extra.tokens_input)
             .bind(extra.tokens_output)
             .bind(extra.tokens_sent)
-            .bind(extra.cost)
             .execute(&mut *tx)
             .await?;
             count += result.rows_affected();
