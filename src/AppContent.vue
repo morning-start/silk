@@ -202,6 +202,21 @@ onErrorCaptured((err, _instance, info) => {
   height: 100vh;
 }
 
+.main-area :deep(.n-layout-scroll-container) {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.main-area :deep(.n-layout-header) {
+  flex-shrink: 0;
+}
+
+.main-area :deep(.n-layout-content) {
+  flex: 1;
+  min-height: 0;
+}
+
 /* ================================================================
    Sidebar — 深色主题，flex column 布局
    ================================================================ */
