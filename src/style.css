@@ -209,8 +209,7 @@ body.dark .app-topbar {
   backdrop-filter: blur(14px) !important;
 }
 
-body.dark .icon-btn,
-body.dark .listen-pill {
+body.dark .icon-btn {
   background: transparent !important;
   border-color: #242f41 !important;
 }
