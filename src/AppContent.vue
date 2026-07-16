@@ -143,19 +143,19 @@ onErrorCaptured((err, _instance, info) => {
               <span class="listen-addr">{{ bindAddress }}</span>
             </div>
             <template v-if="isRunning">
-              <button class="topbar-btn" @click="restartGateway" title="重启网关">
+              <button class="icon-btn" @click="restartGateway" title="重启网关">
                 <NIcon size="16"><ReloadOutline /></NIcon>
               </button>
-              <button class="topbar-btn topbar-btn-danger" @click="stopGateway" title="停用">
+              <button class="icon-btn icon-btn--danger" @click="stopGateway" title="停用">
                 <NIcon size="16"><StopOutline /></NIcon>
               </button>
             </template>
             <template v-else>
-              <button class="topbar-btn" @click="startGateway" title="启动网关">
+              <button class="icon-btn" @click="startGateway" title="启动网关">
                 <NIcon size="16"><PowerOutline /></NIcon>
               </button>
             </template>
-            <button class="theme-toggle" @click="toggleTheme" :title="isDark ? '切换浅色' : '切换深色'">
+            <button class="icon-btn icon-btn--theme" @click="toggleTheme" :title="isDark ? '切换浅色' : '切换深色'">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:16px;height:16px">
                 <template v-if="isDark">
                   <circle cx="12" cy="12" r="5"/>
@@ -194,17 +194,20 @@ onErrorCaptured((err, _instance, info) => {
 </template>
 
 <style scoped>
+/* ================================================================
+   Layout — 外层容器
+   ================================================================ */
 .app-layout {
   height: 100vh;
 }
 
-/* 主区域 */
 .main-area {
-  flex: 1;
-  min-height: 0;
+  height: 100vh;
 }
 
-/* ===== Sidebar ===== */
+/* ================================================================
+   Sidebar — 深色主题，flex column 布局
+   ================================================================ */
 .app-sidebar {
   background: var(--sidebar-bg, #0f172a) !important;
 }
@@ -215,7 +218,6 @@ onErrorCaptured((err, _instance, info) => {
   height: 100vh;
 }
 
-/* Brand — align with design spec */
 .sidebar-brand {
   padding: 24px 20px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -244,8 +246,8 @@ onErrorCaptured((err, _instance, info) => {
 .sidebar-brand p {
   font-size: 11px;
   color: var(--sidebar-fg, #94a3b8);
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
   margin: 4px 0 0 0;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
   opacity: 0.8;
 }
 
@@ -255,7 +257,6 @@ onErrorCaptured((err, _instance, info) => {
   min-height: 0;
 }
 
-/* ===== Sidebar Nav — design spec ===== */
 .sidebar-nav {
   padding: 12px;
   display: flex;
@@ -299,28 +300,29 @@ onErrorCaptured((err, _instance, info) => {
 
 .sidebar-nav .sidebar-section {
   padding: 16px 12px 8px;
+  margin-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: rgba(255, 255, 255, 0.25);
-  margin-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Sidebar footer — design spec style */
 .sidebar-footer {
   padding: 12px 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   font-size: 11px;
   color: var(--sidebar-fg, #94a3b8);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
   opacity: 0.7;
   flex-shrink: 0;
   background: var(--sidebar-bg, #0f172a);
 }
 
-/* ===== Topbar — design spec ===== */
+/* ================================================================
+   Topbar — 毛玻璃 header
+   ================================================================ */
 .app-topbar {
   background: rgba(255, 255, 255, 0.88) !important;
   backdrop-filter: blur(14px) !important;
@@ -347,7 +349,7 @@ onErrorCaptured((err, _instance, info) => {
   gap: 12px;
 }
 
-/* Status dot + text */
+/* Topbar 状态指示器 */
 .topbar-actions .status-dot {
   width: 8px;
   height: 8px;
@@ -368,11 +370,11 @@ onErrorCaptured((err, _instance, info) => {
 
 .topbar-actions .status-text {
   font-size: 12px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
   color: var(--muted, #64748b);
 }
 
-/* Listen pill — design spec style */
+/* Listen pill — 地址显示 */
 .listen-pill {
   display: flex;
   align-items: center;
@@ -382,7 +384,7 @@ onErrorCaptured((err, _instance, info) => {
   border-radius: var(--radius, 8px);
   background: var(--surface, #ffffff);
   font-size: 11px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
   color: var(--muted, #64748b);
 }
 
@@ -398,12 +400,10 @@ onErrorCaptured((err, _instance, info) => {
   background: var(--success, #10b981);
 }
 
-.listen-addr {
-  font-family: inherit;
-}
-
-/* Topbar action buttons */
-.topbar-btn {
+/* ================================================================
+   Icon Button — 通用的 32×32 图标按钮
+   ================================================================ */
+.icon-btn {
   width: 32px;
   height: 32px;
   display: inline-grid;
@@ -416,53 +416,45 @@ onErrorCaptured((err, _instance, info) => {
   transition: all 150ms ease;
 }
 
-.topbar-btn:hover {
+.icon-btn:hover {
   color: var(--fg, #0f172a);
   border-color: var(--border, #cbd5e1);
   background: var(--surface-alt, #f1f5f9);
 }
 
-.topbar-btn-danger:hover {
+.icon-btn--danger:hover {
   color: var(--danger, #ef4444);
   border-color: var(--danger, #ef4444);
 }
 
-/* Theme toggle — design spec */
-.theme-toggle {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius, 8px);
-  border: 1px solid var(--border-soft, #e2e8f0);
-  background: var(--surface, #ffffff);
-  color: var(--muted, #64748b);
-  cursor: pointer;
-  transition: all 150ms ease;
-}
-
-.theme-toggle:hover {
+/* 主题切换按钮特殊 hover */
+.icon-btn--theme:hover {
   border-color: var(--accent, #0891b2);
   color: var(--accent, #0891b2);
 }
 
-/* ===== Content ===== */
+/* ================================================================
+   Content 区域
+   ================================================================ */
 .app-content {
   background: var(--content-bg, #f8fafc);
 }
 
-/* ===== Main Footer ===== */
+/* ================================================================
+   Main Footer
+   ================================================================ */
 .main-footer {
   padding: 16px 28px;
-  border-top: 1px solid var(--border-soft, #e2e8f0);
-  font-size: 11px;
-  color: var(--muted, #64748b);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
   text-align: center;
+  font-size: 11px;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  color: var(--muted, #64748b);
   background: var(--surface, #ffffff);
 }
 
-/* ===== Error Boundary ===== */
+/* ================================================================
+   Error Boundary
+   ================================================================ */
 .error-boundary {
   display: flex;
   flex-direction: column;

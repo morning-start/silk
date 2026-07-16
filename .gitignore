@@ -34,3 +34,5 @@ docs/superpowers/
 .plans
 test/
 draft
+.agents
+.claude
