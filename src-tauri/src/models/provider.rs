@@ -23,6 +23,8 @@ pub struct Provider {
     pub health_status: Option<String>,
     pub last_health_check_at: Option<chrono::NaiveDateTime>,
     pub metadata_json: Option<String>,
+    /// 自定义请求头（JSON 数组），格式 [{"name":"X-Custom","value":"val","enabled":true}]
+    pub custom_headers: String,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
@@ -46,6 +48,8 @@ pub struct NewProvider {
     pub health_status: Option<String>,
     pub last_health_check_at: Option<chrono::NaiveDateTime>,
     pub metadata_json: Option<String>,
+    /// 自定义请求头
+    pub custom_headers: Option<Vec<ProviderHeaderEntry>>,
 }
 
 /// 用于更新 Provider 的输入结构（所有字段可选）
@@ -64,6 +68,8 @@ pub struct UpdateProvider {
     pub health_status: Option<String>,
     pub last_health_check_at: Option<chrono::NaiveDateTime>,
     pub metadata_json: Option<String>,
+    /// 自定义请求头
+    pub custom_headers: Option<Vec<ProviderHeaderEntry>>,
 }
 
 /// 渠道的 API Key 条目
@@ -90,6 +96,19 @@ fn default_weight() -> i64 {
     1
 }
 
+/// 自定义请求头条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderHeaderEntry {
+    pub name: String,
+    pub value: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
 impl Provider {
     /// 解析 keys JSON 字段为 ProviderKeyEntry 列表
     pub fn keys_vec(&self) -> Vec<ProviderKeyEntry> {
@@ -104,5 +123,10 @@ impl Provider {
     /// 解析 models JSON 字段为 Vec<String>
     pub fn models_vec(&self) -> Vec<String> {
         serde_json::from_str(&self.models).unwrap_or_default()
+    }
+
+    /// 解析 custom_headers JSON 字段为 ProviderHeaderEntry 列表
+    pub fn custom_headers_vec(&self) -> Vec<ProviderHeaderEntry> {
+        serde_json::from_str(&self.custom_headers).unwrap_or_default()
     }
 }

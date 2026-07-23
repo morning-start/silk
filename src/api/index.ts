@@ -4,6 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 // Types
 // ---------------------------------------------------------------------------
 
+export interface ProviderHeaderEntry {
+  name: string;
+  value: string;
+  enabled: boolean;
+}
+
 export interface Provider {
   id: string;
   name: string;
@@ -18,6 +24,7 @@ export interface Provider {
   max_retries: number;
   status: string;
   health_status: string | null;
+  custom_headers: ProviderHeaderEntry[];
   created_at: string;
   updated_at: string;
 }

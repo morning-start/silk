@@ -86,6 +86,15 @@ pub async fn run(
             upstream_request = upstream_request.header(name, value);
         }
     }
+    // 应用 Provider 自定义请求头（覆盖适配器头和转发头）
+    if let Some(ref provider) = ctx.provider {
+        let custom_headers = provider.custom_headers_vec();
+        for entry in &custom_headers {
+            if entry.enabled && !entry.name.is_empty() {
+                upstream_request = upstream_request.header(&entry.name, &entry.value);
+            }
+        }
+    }
 
     let max_retries = provider.max_retries as u32;
     let stream_config = StreamConfig {

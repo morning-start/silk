@@ -14,8 +14,8 @@ impl ProviderRepo {
             r#"
             INSERT INTO providers (id, name, protocols, models, keys, key_strategy, api_base_url,
                                    proxy_url, timeout_seconds, max_retries, status, health_status,
-                                   last_health_check_at, metadata_json, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                                   last_health_check_at, metadata_json, custom_headers, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING *
             "#,
         )
@@ -33,6 +33,7 @@ impl ProviderRepo {
         .bind(new.health_status.as_deref().unwrap_or("unknown"))
         .bind(new.last_health_check_at)
         .bind(new.metadata_json.as_deref())
+        .bind(defaults::to_json_opt(new.custom_headers.as_ref()))
         .bind(now)
         .bind(now)
         .fetch_one(pool)
@@ -87,7 +88,8 @@ impl ProviderRepo {
                 health_status = COALESCE($12, health_status),
                 last_health_check_at = COALESCE($13, last_health_check_at),
                 metadata_json = COALESCE($14, metadata_json),
-                updated_at = $15
+                custom_headers = COALESCE($15, custom_headers),
+                updated_at = $16
             WHERE id = $1
             RETURNING *
             "#,
@@ -106,6 +108,7 @@ impl ProviderRepo {
         .bind(update.health_status.as_deref())
         .bind(update.last_health_check_at)
         .bind(update.metadata_json.as_deref())
+        .bind(defaults::to_json_opt(update.custom_headers.as_ref()))
         .bind(now)
         .fetch_optional(pool)
         .await

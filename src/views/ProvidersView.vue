@@ -18,7 +18,7 @@ import {
 } from "naive-ui";
 import { SearchOutline } from "@vicons/ionicons5";
 import { storeToRefs } from "pinia";
-import { api, type Provider } from "../api";
+import { api, type Provider, type ProviderHeaderEntry } from "../api";
 import AppFormModal from "../components/AppFormModal.vue";
 import AppPageShell from "../components/AppPageShell.vue";
 import { useProvidersStore } from "../stores/providers";
@@ -66,6 +66,7 @@ const formValue = ref({
   status: "enabled",
   key_strategy: "round_robin",
   keys: [] as ProviderKeyForm[],
+  custom_headers: [] as ProviderHeaderEntry[],
 });
 
 const filteredProviders = computed(() => {
@@ -99,6 +100,10 @@ function createDefaultKey(name = "默认"): ProviderKeyForm {
   return { name, value: "", enabled: true, weight: 1 };
 }
 
+function createDefaultHeader(): ProviderHeaderEntry {
+  return { name: "", value: "", enabled: true };
+}
+
 function resetForm() {
   editingId.value = null;
   keyVisibility.value = [false];
@@ -113,6 +118,7 @@ function resetForm() {
     status: "enabled",
     key_strategy: "round_robin",
     keys: [createDefaultKey()],
+    custom_headers: [],
   };
 }
 
@@ -149,6 +155,10 @@ function handleEdit(row: Provider) {
             weight: key.weight,
           }))
         : [createDefaultKey()],
+    custom_headers:
+      row.custom_headers && row.custom_headers.length > 0
+        ? row.custom_headers.map((h) => ({ ...h }))
+        : [],
   };
   showModal.value = true;
 }
@@ -156,6 +166,14 @@ function handleEdit(row: Provider) {
 function addKey() {
   formValue.value.keys.push(createDefaultKey(""));
   keyVisibility.value.push(false);
+}
+
+function addHeader() {
+  formValue.value.custom_headers.push(createDefaultHeader());
+}
+
+function removeHeader(index: number) {
+  formValue.value.custom_headers.splice(index, 1);
 }
 
 function removeKey(index: number) {
@@ -459,6 +477,24 @@ onMounted(() => {
             </div>
           </NFormItem>
 
+          <NFormItem label="自定义请求头">
+            <div class="header-list">
+              <div v-for="(header, index) in formValue.custom_headers" :key="index" class="header-row">
+                <NInput v-model:value="header.name" placeholder="Header 名称" style="flex: 1" />
+                <NInput v-model:value="header.value" placeholder="Header 值" style="flex: 2" />
+                <div class="header-enabled">
+                  <span>启用</span>
+                  <NSwitch v-model:value="header.enabled" size="small" />
+                </div>
+                <NButton quaternary circle type="error" @click="removeHeader(index)">×</NButton>
+              </div>
+              <div class="header-actions">
+                <NButton size="small" secondary @click="addHeader">+ 添加请求头</NButton>
+                <span class="header-hint">自定义请求头会覆盖同名的适配器头和转发的客户端头。</span>
+              </div>
+            </div>
+          </NFormItem>
+
           <NFormItem label="模型列表">
             <div class="models-block">
               <div class="models-actions">
@@ -629,6 +665,40 @@ onMounted(() => {
   color: var(--text-color-3, #94a3b8);
 }
 
+.header-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-enabled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-color-2, #64748b);
+  white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.header-hint {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
+}
+
 .models-block {
   width: 100%;
   display: flex;
@@ -673,12 +743,14 @@ onMounted(() => {
 
 @media (max-width: 900px) {
   .form-row,
-  .key-row {
+  .key-row,
+  .header-row {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .key-enabled {
+  .key-enabled,
+  .header-enabled {
     justify-content: space-between;
   }
 }

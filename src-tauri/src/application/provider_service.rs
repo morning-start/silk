@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::crypto::CryptoError;
 use crate::error::{bad_request, require_db, require_found, validate_non_empty, ServiceError};
 use crate::load_balancer::{LoadBalanceStrategy, LoadBalancer};
-use crate::models::{NewProvider, Provider, ProviderKeyEntry, UpdateProvider};
+use crate::models::{NewProvider, Provider, ProviderHeaderEntry, ProviderKeyEntry, UpdateProvider};
 use crate::persistence::ProviderRepo;
 use crate::AppState;
 
@@ -50,6 +50,8 @@ pub struct ProviderResponse {
     pub max_retries: i64,
     pub status: String,
     pub health_status: Option<String>,
+    /// 自定义请求头
+    pub custom_headers: Vec<ProviderHeaderEntry>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -67,6 +69,7 @@ pub struct CreateProviderPayload {
     pub max_retries: Option<i64>,
     pub status: Option<String>,
     pub metadata_json: Option<String>,
+    pub custom_headers: Option<Vec<crate::models::ProviderHeaderEntry>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -91,6 +94,7 @@ pub struct UpdateProviderPayload {
     pub max_retries: Option<i64>,
     pub status: Option<String>,
     pub metadata_json: Option<String>,
+    pub custom_headers: Option<Vec<crate::models::ProviderHeaderEntry>>,
 }
 
 pub use super::model_fetcher::{fetch_models, FetchModelsPayload, ProviderModelInfo};
@@ -143,6 +147,7 @@ pub async fn create(
         health_status: None,
         last_health_check_at: None,
         metadata_json: payload.metadata_json,
+        custom_headers: payload.custom_headers,
     };
 
     let provider = ProviderRepo::create(pool, &new).await?;
@@ -191,6 +196,7 @@ pub async fn update(
         health_status: None,
         last_health_check_at: None,
         metadata_json: payload.metadata_json,
+        custom_headers: payload.custom_headers,
     };
 
     let provider = require_found(ProviderRepo::update(pool, &id, &update).await?, "Provider")?;
@@ -288,6 +294,7 @@ impl ProviderResponse {
         let (keys, key_count) = Self::parse_keys(&p.keys);
         let protocols = p.protocols_vec();
         let models = p.models_vec();
+        let custom_headers = p.custom_headers_vec();
         Self {
             id: p.id,
             name: p.name,
@@ -302,6 +309,7 @@ impl ProviderResponse {
             max_retries: p.max_retries,
             status: p.status,
             health_status: p.health_status,
+            custom_headers,
             created_at: p.created_at.to_string(),
             updated_at: p.updated_at.to_string(),
         }
@@ -509,6 +517,7 @@ mod validation_tests {
             max_retries: Some(3),
             status: Some("enabled".to_string()),
             metadata_json: None,
+            custom_headers: None,
         }
     }
 
