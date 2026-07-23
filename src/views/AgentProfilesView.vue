@@ -25,7 +25,6 @@ const agentTabs: AgentTab[] = [
   { type: "opencode", label: "OpenCode", description: "按来源分组展示" },
   { type: "codex", label: "Codex", description: "" },
   { type: "gemini_cli", label: "Gemini CLI", description: "" },
-  { type: "openclaw", label: "OpenClaw", description: "" },
   { type: "hermes", label: "Hermes", description: "" },
 ];
 

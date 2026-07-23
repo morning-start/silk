@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::application::config_writer::{self, MergeStrategy, ConfigFormat, LiveSnapshot};
 use crate::error::{require_db, require_found, validate_non_empty, ServiceError};
-use crate::models::NewProfile;
+use crate::models::{agent_type::AgentType, NewProfile};
 use crate::persistence::common_config_snippet_repo::CommonConfigSnippetRepo;
 use crate::persistence::ProfileRepo;
 
@@ -92,39 +92,6 @@ impl AgentConfigWriter for ClaudeCodeWriter {
 
     fn live_path(&self, home: &Path) -> PathBuf {
         home.join(".claude/settings.json")
-    }
-
-    fn merge_strategy(&self) -> MergeStrategy {
-        MergeStrategy::TopLevel
-    }
-}
-
-// --- Claude Desktop ---
-pub struct ClaudeDesktopWriter;
-
-impl ClaudeDesktopWriter {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait]
-impl AgentConfigWriter for ClaudeDesktopWriter {
-    fn agent_type(&self) -> &'static str {
-        "claude_desktop"
-    }
-
-    fn live_path(&self, home: &Path) -> PathBuf {
-        #[cfg(target_os = "macos")]
-        let base = home.join("Library/Application Support/Claude");
-        #[cfg(target_os = "windows")]
-        let base = {
-            let appdata = std::env::var("APPDATA").unwrap_or_else(|_| home.to_string_lossy().to_string());
-            PathBuf::from(appdata).join("Claude")
-        };
-        #[cfg(target_os = "linux")]
-        let base = home.join(".config/Claude");
-        base.join("claude_desktop_config.json")
     }
 
     fn merge_strategy(&self) -> MergeStrategy {
@@ -235,60 +202,6 @@ impl AgentConfigWriter for OpenCodeWriter {
     }
 }
 
-// --- OpenClaw（累加模式）---
-pub struct OpenClawWriter;
-
-impl OpenClawWriter {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait]
-impl AgentConfigWriter for OpenClawWriter {
-    fn agent_type(&self) -> &'static str {
-        "openclaw"
-    }
-
-    fn live_path(&self, home: &Path) -> PathBuf {
-        home.join(".config/openclaw/openclaw.json")
-    }
-
-    fn merge_strategy(&self) -> MergeStrategy {
-        MergeStrategy::IntoProvider
-    }
-
-    async fn write_live(
-        &self,
-        home: &Path,
-        profile_config: &serde_json::Value,
-    ) -> Result<(), String> {
-        let path = self.live_path(home);
-        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoProvider).await
-    }
-
-    async fn remove_live(&self, home: &Path, profile_id: &str) -> Result<(), String> {
-        let path = self.live_path(home);
-        config_writer::remove_provider_from_live_async(&path, profile_id).await
-    }
-
-    async fn is_managed(&self, home: &Path) -> Result<bool, String> {
-        let path = self.live_path(home);
-        if !path.exists() {
-            return Ok(false);
-        }
-        let val = config_writer::read_to_value_async(&path).await?;
-        if let Some(providers) = val.get("providers").and_then(|v| v.as_object()) {
-            for (_id, provider) in providers {
-                if provider.get("_silk_managed").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
-    }
-}
-
 // --- Hermes（累加模式，YAML）---
 pub struct HermesWriter;
 
@@ -350,11 +263,9 @@ impl AgentConfigWriter for HermesWriter {
 fn builtin_writers() -> Vec<Box<dyn AgentConfigWriter>> {
     vec![
         Box::new(ClaudeCodeWriter::new()),
-        Box::new(ClaudeDesktopWriter::new()),
         Box::new(CodexWriter::new()),
         Box::new(GeminiCliWriter::new()),
         Box::new(OpenCodeWriter::new()),
-        Box::new(OpenClawWriter::new()),
         Box::new(HermesWriter::new()),
     ]
 }
@@ -379,11 +290,7 @@ fn validate_profile_payload(agent_type: &str, config_json: &str) -> Result<(), S
     validate_non_empty("agent_type", agent_type)?;
     validate_non_empty("config_json", config_json)?;
 
-    const VALID_AGENTS: &[&str] = &[
-        "claude_code", "claude_desktop", "codex",
-        "gemini_cli", "opencode", "openclaw", "hermes",
-    ];
-    if !VALID_AGENTS.contains(&agent_type) {
+    if !AgentType::is_valid(agent_type) {
         return Err(ServiceError::BadRequest {
             message: format!("不支持的 agent_type: {}", agent_type),
             code: None,
@@ -531,7 +438,21 @@ pub async fn switch(
 
     let _snippet = CommonConfigSnippetRepo::find_by_agent(pool, &agent_type).await?;
 
-    let effective_config = build_effective_config(&config, _snippet.as_ref());
+    let mut effective_config = build_effective_config(&config, _snippet.as_ref());
+
+    // 注入 base_url + api_key
+    if let Ok(settings) = crate::models::GatewaySettings::load(
+        crate::get_settings_path().ok_or_else(|| ServiceError::Internal {
+            message: "无法获取设置路径".to_string(),
+            detail: None,
+        })?,
+    ) {
+        let base_url = format!("http://{}:{}/v1", settings.bind_host, settings.bind_port);
+        if let Some(obj) = effective_config.as_object_mut() {
+            obj.insert("base_url".to_string(), serde_json::json!(base_url));
+            obj.insert("api_key".to_string(), serde_json::json!(crate::application::gateway_key_service::builtin_key_value()));
+        }
+    }
 
     let home = crate::get_home_dir().to_path_buf();
     if let Err(e) = writer.write_live(&home, &effective_config).await {
@@ -542,7 +463,7 @@ pub async fn switch(
     ProfileRepo::activate(pool, &profile_id).await?;
 
     let requires_restart = match agent_type.as_str() {
-        "opencode" | "openclaw" | "hermes" => false,
+        "opencode" | "hermes" => false,
         _ => true,
     };
 

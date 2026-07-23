@@ -5,12 +5,12 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
 use crate::application::gateway_service;
-use crate::crypto::{encrypt, hash_api_key};
+use crate::crypto::encrypt;
 use crate::error::{bad_request, require_db, ServiceError};
 use crate::models::{
-    GatewayKey, GatewaySettings, ModelMapping, ModelMappingChannel, Provider, ProviderKeyEntry,
+    GatewaySettings, ModelMapping, ModelMappingChannel, Provider, ProviderKeyEntry,
 };
-use crate::persistence::{GatewayKeyRepo, ModelMappingRepo, ProviderRepo};
+use crate::persistence::{ModelMappingRepo, ProviderRepo};
 use crate::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,7 +46,6 @@ struct ConfigExportBundle {
     providers: Vec<PortableProvider>,
     model_mappings: Vec<ModelMapping>,
     model_mapping_channels: Vec<ModelMappingChannel>,
-    gateway_keys: Vec<PortableGatewayKey>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,18 +64,6 @@ struct PortableProvider {
     health_status: Option<String>,
     last_health_check_at: Option<chrono::NaiveDateTime>,
     metadata_json: Option<String>,
-    created_at: chrono::NaiveDateTime,
-    updated_at: chrono::NaiveDateTime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PortableGatewayKey {
-    id: String,
-    name: String,
-    key_value: String,
-    enabled: i64,
-    expires_at: Option<chrono::NaiveDateTime>,
-    max_concurrent: i64,
     created_at: chrono::NaiveDateTime,
     updated_at: chrono::NaiveDateTime,
 }
@@ -103,11 +90,6 @@ pub async fn export_config(payload: ExportConfigPayload) -> Result<FileOperation
         )
         .fetch_all(pool)
         .await?,
-        gateway_keys: GatewayKeyRepo::find_all(pool)
-            .await?
-            .into_iter()
-            .map(PortableGatewayKey::from_gateway_key)
-            .collect::<Result<Vec<_>, _>>()?,
     };
 
     let path = resolve_output_path(
@@ -182,7 +164,6 @@ pub async fn import_config(
         sqlx::query("DELETE FROM model_mapping_channels").execute(&mut *tx).await?;
         sqlx::query("DELETE FROM model_mappings").execute(&mut *tx).await?;
         sqlx::query("DELETE FROM providers").execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM gateway_keys").execute(&mut *tx).await?;
 
         for provider in &bundle_clone.providers {
             sqlx::query(
@@ -263,31 +244,6 @@ pub async fn import_config(
             .bind(&channel.selected_models)
             .bind(channel.enabled)
             .bind(channel.created_at)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        for key in &bundle_clone.gateway_keys {
-            sqlx::query(
-                r#"
-                INSERT INTO gateway_keys (
-                    id, name, key_hash, encrypted_key_value, enabled, expires_at, max_concurrent, created_at, updated_at
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                "#,
-            )
-            .bind(&key.id)
-            .bind(&key.name)
-            .bind(hash_api_key(&key.key_value))
-            .bind(encrypt(&key.key_value).map_err(|e| ServiceError::Internal {
-                message: format!("导入网关 Key 加密失败: {e}"),
-                detail: None,
-            })?)
-            .bind(key.enabled)
-            .bind(key.expires_at)
-            .bind(key.max_concurrent)
-            .bind(key.created_at)
-            .bind(key.updated_at)
             .execute(&mut *tx)
             .await?;
         }
@@ -383,7 +339,6 @@ pub async fn restore_database(
             "request_logs",
             "model_mapping_channels",
             "model_mappings",
-            "gateway_keys",
             "providers",
         ];
 
@@ -643,31 +598,11 @@ impl PortableProvider {
     }
 }
 
-impl PortableGatewayKey {
-    fn from_gateway_key(key: GatewayKey) -> Result<Self, ServiceError> {
-        Ok(Self {
-            id: key.id,
-            name: key.name,
-            key_value: crate::crypto::decrypt(&key.encrypted_key_value).map_err(|e| {
-                ServiceError::Internal {
-                    message: format!("导出网关 Key 解密失败: {e}"),
-                    detail: None,
-                }
-            })?,
-            enabled: key.enabled,
-            expires_at: key.expires_at,
-            max_concurrent: key.max_concurrent,
-            created_at: key.created_at,
-            updated_at: key.updated_at,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{PortableGatewayKey, PortableProvider};
-    use crate::crypto::{decrypt, hash_api_key};
-    use crate::models::{GatewayKey, Provider, ProviderKeyEntry};
+    use super::PortableProvider;
+    use crate::crypto::decrypt;
+    use crate::models::{Provider, ProviderKeyEntry};
 
     #[test]
     fn portable_provider_reencrypts_plain_keys_on_import() {
@@ -699,26 +634,6 @@ mod tests {
         let encrypted = portable.encrypted_keys_json().unwrap();
         let keys: Vec<ProviderKeyEntry> = serde_json::from_str(&encrypted).unwrap();
         assert_eq!(decrypt(&keys[0].value).unwrap(), "secret");
-    }
-
-    #[test]
-    fn portable_export_decrypts_existing_gateway_key() {
-        let plain = "gateway-secret";
-        let encrypted = crate::crypto::encrypt(plain).unwrap();
-        let key = GatewayKey {
-            id: "k1".into(),
-            name: "main".into(),
-            key_hash: hash_api_key(plain),
-            encrypted_key_value: encrypted,
-            enabled: 1,
-            expires_at: None,
-            max_concurrent: 10,
-            created_at: chrono::Utc::now().naive_utc(),
-            updated_at: chrono::Utc::now().naive_utc(),
-        };
-
-        let portable = PortableGatewayKey::from_gateway_key(key).unwrap();
-        assert_eq!(portable.key_value, plain);
     }
 
     #[test]

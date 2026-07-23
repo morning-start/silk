@@ -8,18 +8,14 @@ import {
   NInputNumber,
   NSwitch,
   NButton,
-  NIcon,
   NText,
   NCard,
   NAlert,
-  NModal,
   useMessage,
-  useDialog,
 } from "naive-ui";
-import { CopyOutline, EyeOffOutline, EyeOutline, TrashOutline } from "@vicons/ionicons5";
 import { useGatewayStore } from "../stores/gateway";
 import { storeToRefs } from "pinia";
-import { api, type GatewayKey } from "../api";
+import { api } from "../api";
 
 /**
  * 端口冲突校验
@@ -58,7 +54,6 @@ function validatePort(port: number): string | null {
 const gatewayStore = useGatewayStore();
 const { status, loading } = storeToRefs(gatewayStore);
 const message = useMessage();
-const dialog = useDialog();
 
 const formRef = ref<any>(null);
 const formValue = ref({
@@ -71,101 +66,6 @@ const formValue = ref({
   auto_start_gateway: false,
   default_provider_id: "",
 });
-
-// Gateway Keys
-const keys = ref<GatewayKey[]>([]);
-const keyVisibility = ref<Record<string, boolean>>({});
-const showAddKey = ref(false);
-const newKeyName = ref("");
-const newKeyMaxConcurrent = ref(10);
-const newKeyCreated = ref<{ name: string; key: string } | null>(null);
-const showNewKeyModal = ref(false);
-
-function closeNewKeyModal() {
-  showNewKeyModal.value = false;
-  newKeyCreated.value = null;
-}
-
-async function loadKeys() {
-  try {
-    keys.value = await api.listGatewayKeys();
-    keyVisibility.value = Object.fromEntries(keys.value.map((key) => [key.id, false]));
-  } catch {
-    // ignore
-  }
-}
-
-async function toggleKey(key: GatewayKey) {
-  try {
-    await api.updateGatewayKey(key.id, { enabled: !key.enabled });
-    message.success(key.enabled ? "已禁用" : "已启用");
-    await loadKeys();
-  } catch {
-    message.error("操作失败");
-  }
-}
-
-async function deleteKey(id: string) {
-  dialog.warning({
-    title: "确认删除",
-    content: "删除后无法恢复，确定要删除此 Key 吗？",
-    positiveText: "删除",
-    negativeText: "取消",
-    onPositiveClick: async () => {
-      try {
-        await api.deleteGatewayKey(id);
-        keys.value = keys.value.filter((k) => k.id !== id);
-        message.success("已删除");
-      } catch {
-        message.error("删除失败");
-      }
-    },
-  });
-}
-
-async function addKey() {
-  if (!newKeyName.value) {
-    message.warning("请填写名称");
-    return;
-  }
-  try {
-    const result = await api.createGatewayKey({
-      name: newKeyName.value,
-      key_value: "",  // 空值触发后端自动生成
-      max_concurrent: newKeyMaxConcurrent.value,
-    });
-    message.success("添加成功");
-    newKeyCreated.value = {
-      name: result.key.name,
-      key: result.plain_key,
-    };
-    showNewKeyModal.value = true;
-    newKeyName.value = "";
-    newKeyMaxConcurrent.value = 10;
-    showAddKey.value = false;
-    await loadKeys();
-  } catch {
-    message.error("添加失败");
-  }
-}
-
-function copyKey(text: string) {
-  navigator.clipboard.writeText(text).then(() => {
-    message.success("已复制到剪贴板");
-  }).catch(() => {
-    message.error("复制失败");
-  });
-}
-
-function toggleKeyVisibility(id: string) {
-  keyVisibility.value[id] = !keyVisibility.value[id];
-}
-
-function maskedKeyPreview(value: string) {
-  const visible = value.slice(0, 10);
-  const maskedLength = Math.max(value.length - 10, 12);
-  return `${visible}${"•".repeat(maskedLength)}`;
-}
 
 async function handleSave() {
   try {
@@ -242,7 +142,6 @@ async function handleRestoreDatabase() {
     const result = await api.restoreDatabase({ file_path: filePath });
     message.success(`数据库已从 ${result.file_path} 恢复`);
     await gatewayStore.fetchStatus();
-    await loadKeys();
   } catch {
     message.error("恢复数据库失败");
   }
@@ -267,7 +166,6 @@ async function handleImportConfig() {
     const result = await api.importAppConfig({ file_path: filePath });
     message.success(`配置已从 ${result.file_path} 导入`);
     await gatewayStore.fetchStatus();
-    await loadKeys();
   } catch {
     message.error("导入配置失败");
   }
@@ -295,7 +193,6 @@ watch(
 
 onMounted(() => {
   gatewayStore.fetchStatus();
-  loadKeys();
 });
 </script>
 
@@ -388,99 +285,10 @@ onMounted(() => {
           <NButton size="small" type="warning" @click="handleRestoreDatabase">恢复数据库</NButton>
         </div>
       </div>
-    </NCard>
+</NCard>
 
-    <!-- Key 管理 -->
-    <NCard :bordered="false" class="settings-card" size="small" title="Key 管理">
-      <template #header-extra>
-        <NButton size="small" @click="showAddKey = !showAddKey">+ 添加 Key</NButton>
-      </template>
-
-      <div v-if="showAddKey" class="add-key-box">
-        <div class="form-row" style="margin-bottom: 8px">
-          <NInput v-model:value="newKeyName" placeholder="名称" style="flex: 1" />
-          <NInputNumber v-model:value="newKeyMaxConcurrent" :min="1" :max="1000" placeholder="并发数" style="flex: 0 0 100px" />
-          <NButton type="primary" size="small" @click="addKey">生成</NButton>
-          <NButton size="small" @click="showAddKey = false">取消</NButton>
-        </div>
-        <div style="font-size:12px;color:var(--text-color-3,#94a3b8);margin-top:4px">
-          Key 值由系统自动生成（<code>sk-gw-xxx</code> 格式），保存后仍可在本机查看与复制
-        </div>
-      </div>
-
-      <!-- 新 Key 展示 -->
-      <NModal
-        v-model:show="showNewKeyModal"
-        preset="card"
-        title="Key 已创建"
-        style="max-width: 480px"
-        :bordered="false"
-        @update:show="(val: boolean) => { if (!val) closeNewKeyModal(); }"
-      >
-        <div v-if="newKeyCreated" style="display:flex;flex-direction:column;gap:12px">
-          <div style="font-size:13px">名称: <strong>{{ newKeyCreated.name }}</strong></div>
-          <div style="font-size:13px;margin-bottom:4px">Key 值:</div>
-          <div
-            style="
-              font-family:'JetBrains Mono','Consolas',monospace;
-              font-size:14px;
-              background:#1e293b;
-              color:#e2e8f0;
-              padding:12px 16px;
-              border-radius:8px;
-              word-break:break-all;
-              cursor:pointer;
-              user-select:all;
-            "
-            @click="copyKey(newKeyCreated.key)"
-          >
-            {{ newKeyCreated.key }}
-          </div>
-          <NButton size="small" @click="copyKey(newKeyCreated.key)">复制 Key</NButton>
-          <NButton size="small" type="primary" @click="closeNewKeyModal">关闭</NButton>
-        </div>
-      </NModal>
-
-      <div class="keys-list">
-        <div v-for="key in keys" :key="key.id" class="key-row">
-          <div class="key-meta">
-            <span class="key-name">{{ key.name }}</span>
-            <span class="key-concurrent" v-if="key.max_concurrent">并发 {{ key.max_concurrent }}</span>
-          </div>
-          <div class="key-value-inline">
-            <code class="key-value-text" :class="{ masked: !keyVisibility[key.id] }">
-              {{ keyVisibility[key.id] ? key.plain_key : maskedKeyPreview(key.plain_key) }}
-            </code>
-          </div>
-          <div class="key-actions">
-            <NSwitch :value="key.enabled" size="small" @update:value="() => toggleKey(key)" />
-            <NButton circle quaternary @click="toggleKeyVisibility(key.id)">
-              <template #icon>
-                <NIcon>
-                  <component :is="keyVisibility[key.id] ? EyeOffOutline : EyeOutline" />
-                </NIcon>
-              </template>
-            </NButton>
-            <NButton circle quaternary @click="copyKey(key.plain_key)">
-              <template #icon>
-                <NIcon><CopyOutline /></NIcon>
-              </template>
-            </NButton>
-            <NButton circle quaternary type="error" @click="deleteKey(key.id)">
-              <template #icon>
-                <NIcon><TrashOutline /></NIcon>
-              </template>
-            </NButton>
-          </div>
-        </div>
-        <NText v-if="keys.length === 0" depth="3" style="display: block; text-align: center; padding: 24px">
-          暂无 Key，点击上方"+ 添加 Key"创建
-        </NText>
-      </div>
-    </NCard>
   </div>
 </template>
-
 <style scoped>
 .settings-page {
   width: 100%;
@@ -527,99 +335,5 @@ onMounted(() => {
 .data-action-desc {
   font-size: 12px;
   color: var(--text-color-3, #94a3b8);
-}
-
-.add-key-box {
-  background: var(--card-color-alt, #f8fafc);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 16px;
-  border: 1px solid var(--border-color, #e2e8f0);
-}
-
-.keys-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.key-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  transition: background 0.2s;
-}
-
-.key-row:hover {
-  background: var(--hover-color, #f8fafc);
-}
-
-.key-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  flex: 0 0 auto;
-  min-width: 140px;
-}
-
-.key-name {
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.key-concurrent {
-  font-size: 12px;
-  color: var(--text-color-3, #94a3b8);
-}
-
-.key-value-inline {
-  flex: 1;
-  min-width: 0;
-}
-
-.key-value-text {
-  display: block;
-  font-family: "JetBrains Mono", "Consolas", monospace;
-  font-size: 12px;
-  color: var(--fg, #0f172a);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.03), rgba(15, 23, 42, 0.01));
-  border: 1px solid var(--border-color, #e2e8f0);
-}
-
-.key-value-text.masked {
-  letter-spacing: 1px;
-  color: var(--text-color-3, #94a3b8);
-}
-
-.key-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-@media (max-width: 900px) {
-  .key-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .key-meta {
-    min-width: 0;
-  }
-
-  .key-actions {
-    justify-content: flex-end;
-  }
 }
 </style>

@@ -43,8 +43,5 @@ pub const DEFAULT_PROVIDER_TIMEOUT_SECONDS: i64 = 30;
 /// Provider 默认最大重试次数
 pub const DEFAULT_PROVIDER_MAX_RETRIES: i64 = 3;
 
-/// Gateway Key 默认最大并发连接数
-pub const DEFAULT_KEY_MAX_CONCURRENT: i64 = 10;
-
 /// 路由规则默认优先级
 pub const DEFAULT_ROUTING_PRIORITY: i64 = 100;

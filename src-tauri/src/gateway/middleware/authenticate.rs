@@ -2,7 +2,6 @@ use crate::crypto::hash_api_key;
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
-use crate::persistence::GatewayKeyRepo;
 use axum::http::HeaderMap;
 
 /// 从 headers 中提取认证 token
@@ -38,7 +37,7 @@ fn extract_auth_token(headers: &HeaderMap) -> Option<String> {
 /// 认证中间件：对所有 /v1/* 请求校验网关 Key（支持的认证方式见 `extract_auth_token`）
 pub async fn run(
     mut ctx: RequestContext,
-    runtime: &GatewayContext,
+    _runtime: &GatewayContext,
 ) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
 
@@ -58,26 +57,19 @@ pub async fn run(
         }
     };
 
-    // 哈希 token 并在数据库中查找（使用 GatewayContext 中的 pool）
+    // 哈希 token 并与内存缓存的 key 比较
     let key_hash = hash_api_key(&bearer_token);
+    let stored_hash = crate::application::api_key_service::get_api_key_hash();
 
-    match GatewayKeyRepo::find_by_hash(&runtime.pool, &key_hash).await {
-        Ok(Some(key)) => {
-            if !key.is_active() {
-                return Err(StageError::new(
-                    error_ctx,
-                    GatewayError::Unauthorized("Key 错误".to_string()),
-                ));
-            }
-            // 认证通过，注入 key 名称到上下文中（日志可用）
-            ctx.auth_key_name = Some(key.name);
-            Ok(ctx)
-        }
-        Ok(None) => Err(StageError::new(
+    if key_hash == stored_hash {
+        // 认证通过
+        ctx.auth_key_name = Some("builtin".to_string());
+        Ok(ctx)
+    } else {
+        Err(StageError::new(
             error_ctx,
             GatewayError::Unauthorized("Key 错误".to_string()),
-        )),
-        Err(e) => Err(StageError::new(error_ctx, GatewayError::Database(e))),
+        ))
     }
 }
 

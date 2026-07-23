@@ -174,11 +174,9 @@ export interface FileOperationResponse {
 
 export type AgentType =
   | 'claude_code'
-  | 'claude_desktop'
   | 'codex'
   | 'gemini_cli'
   | 'opencode'
-  | 'openclaw'
   | 'hermes';
 
 export interface Profile {
@@ -296,12 +294,8 @@ export const api = {
   deleteModelMapping: (id: string) => invoke<boolean>("delete_model_mapping", { id }),
 
   // Gateway Keys
-  listGatewayKeys: () => invoke<GatewayKey[]>("list_gateway_keys"),
-  createGatewayKey: (data: { name: string; key_value: string; enabled?: boolean; max_concurrent?: number }) =>
-    invoke<{ key: GatewayKey; plain_key: string }>("create_gateway_key", { payload: data }),
-  updateGatewayKey: (id: string, data: { name?: string; enabled?: boolean; max_concurrent?: number }) =>
-    invoke<GatewayKey>("update_gateway_key", { id, payload: data }),
-  deleteGatewayKey: (id: string) => invoke<boolean>("delete_gateway_key", { id }),
+  getBuiltinGatewayKey: () => invoke<GatewayKey>("get_builtin_gateway_key"),
+  resetBuiltinGatewayKey: () => invoke<GatewayKey>("reset_builtin_gateway_key"),
 
   // Logs CSV Export
   exportLogsCsv: (data: { provider_id?: string; limit?: number; file_path?: string }) =>

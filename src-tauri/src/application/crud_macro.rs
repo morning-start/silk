@@ -3,7 +3,7 @@
 /// # 示例
 ///
 /// ```ignore
-/// impl_crud_list_get!(GatewayKeyResponse, GatewayKeyRepo, "网关 Key");
+/// impl_crud_list!(SomeResponse, SomeRepo, "资源名称");
 /// ```
 #[macro_export]
 macro_rules! impl_crud_list {

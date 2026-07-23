@@ -5,6 +5,7 @@ import { formatMs } from "../utils/format";
 import {
   NSpin,
   useMessage,
+  useDialog,
 } from "naive-ui";
 import { api, type DashboardStats, type RequestLog } from "../api";
 import { useGatewayStore } from "../stores/gateway";
@@ -13,6 +14,7 @@ import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
 const router = useRouter();
 const gatewayStore = useGatewayStore();
 const message = useMessage();
+const dialog = useDialog();
 
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -20,18 +22,21 @@ const stats = ref<DashboardStats | null>(null);
 const recentLogs = ref<RequestLog[]>([]);
 const logsLoading = ref(false);
 const bindAddress = computed(() => gatewayStore.status?.address ?? "127.0.0.1:1877");
+const gatewayKey = ref("");
 
 async function loadData() {
   loading.value = true;
   logsLoading.value = true;
   error.value = null;
   try {
-    const [s, logs] = await Promise.all([
+    const [s, logs, key] = await Promise.all([
       api.dashboardStats(),
       api.recentRequests(10),
+      api.getBuiltinGatewayKey(),
     ]);
     stats.value = s;
     recentLogs.value = logs;
+    gatewayKey.value = key.plain_key;
   } catch (e: any) {
     error.value = e.message || "加载仪表盘数据失败";
   } finally {
@@ -44,15 +49,37 @@ function goToLogs() {
   router.push("/logs");
 }
 
-function goToProviders() {
-  router.push("/providers");
-}
-
 function copyGatewayAddress() {
   navigator.clipboard.writeText(`http://${bindAddress.value}`).then(() => {
     message.success("本地地址已复制");
   }).catch(() => {
     message.error("复制失败");
+  });
+}
+
+function copyGatewayKey() {
+  navigator.clipboard.writeText(gatewayKey.value).then(() => {
+    message.success("API Key 已复制");
+  }).catch(() => {
+    message.error("复制失败");
+  });
+}
+
+async function resetGatewayKey() {
+  dialog.warning({
+    title: "刷新 API Key",
+    content: "刷新后，正在使用此 Key 的客户端将立即失效，需要更新为新 Key。确定刷新？",
+    positiveText: "确定刷新",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        const res = await api.resetBuiltinGatewayKey();
+        gatewayKey.value = res.plain_key;
+        message.success("API Key 已刷新，请更新客户端配置");
+      } catch (e: any) {
+        message.error(e?.message || "刷新 API Key 失败");
+      }
+    },
   });
 }
 
@@ -108,8 +135,8 @@ watch(
             </div>
             <div class="row gap-md mt-20">
               <button class="btn btn-primary" @click="copyGatewayAddress">复制本地 API 地址</button>
-              <button class="btn btn-secondary" @click="goToProviders">管理渠道</button>
-              <button class="btn btn-secondary" @click="goToLogs">查看日志</button>
+              <button class="btn btn-secondary" @click="copyGatewayKey">复制 API Key</button>
+              <button class="btn btn-secondary" @click="resetGatewayKey">刷新 API Key</button>
             </div>
           </div>
           <div class="welcome-right">
@@ -169,7 +196,7 @@ watch(
         </div>
       </div>
 
-      <!-- Main Row: Recent Requests + Quick Actions -->
+      <!-- Main Row: Recent Requests -->
       <div class="dashboard-main-row">
         <div class="card">
           <div class="card-header">
@@ -209,30 +236,7 @@ watch(
             </div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-header"><h3>快捷操作</h3></div>
-          <div class="card-body form-stack">
-            <button class="btn btn-secondary w-full" style="justify-content:flex-start; gap:10px" @click="goToProviders">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:16px;height:16px;flex-shrink:0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              管理渠道
-            </button>
-            <button class="btn btn-secondary w-full" style="justify-content:flex-start; gap:10px" @click="copyGatewayAddress">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:16px;height:16px;flex-shrink:0"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-              复制 API 地址
-            </button>
-            <button class="btn btn-secondary w-full" style="justify-content:flex-start; gap:10px" @click="goToLogs">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:16px;height:16px;flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
-              查看日志
-            </button>
-            <hr class="rule">
-            <div style="font-size:12px; color:var(--muted); line-height:1.6">
-              <strong>提示：</strong>
-              <span v-if="gatewayStore.status?.running">网关运行正常。</span>
-              <span v-else>网关未启动，请先启动网关。</span>
-            </div>
-          </div>
-        </div>
-      </div>
+</div>
     </div>
   </NSpin>
 </template>
@@ -405,9 +409,7 @@ watch(
 
 /* ===== Dashboard Main Row — design spec ===== */
 .dashboard-main-row {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
+  width: 100%;
 }
 
 /* ===== Card — design spec ===== */

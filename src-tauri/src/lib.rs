@@ -42,8 +42,6 @@ pub struct LookupCache {
     pub provider_names: HashMap<String, String>,
     /// model mapping id → model_name
     pub model_mapping_names: HashMap<String, String>,
-    /// gateway key id → name
-    pub gateway_key_names: HashMap<String, String>,
 }
 
 /// 运行时网关状态
@@ -95,20 +93,9 @@ pub async fn load_lookup_cache(pool: &SqlitePool) -> LookupCache {
         })
         .collect();
 
-    let gateway_key_names = sqlx::query("SELECT id, name FROM gateway_keys")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|r| {
-            Some((r.get::<String, _>("id"), r.get::<String, _>("name")))
-        })
-        .collect();
-
     LookupCache {
         provider_names,
         model_mapping_names,
-        gateway_key_names,
     }
 }
 
@@ -158,6 +145,9 @@ pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx:
                 .await?;
 
             sqlx::migrate!("./migrations").run(&pool).await?;
+
+            // 确保 API Key 文件存在
+            let _ = crate::application::api_key_service::ensure_api_key(&data_dir);
 
             Ok(pool)
         })
@@ -440,11 +430,8 @@ pub fn run() {
             commands::model_mappings::update_model_mapping,
             commands::model_mappings::delete_model_mapping,
             // 网关 Key 管理
-            commands::gateway_keys::list_gateway_keys,
-            commands::gateway_keys::get_gateway_key,
-            commands::gateway_keys::create_gateway_key,
-            commands::gateway_keys::update_gateway_key,
-            commands::gateway_keys::delete_gateway_key,
+            commands::gateway_keys::get_builtin_gateway_key,
+            commands::gateway_keys::reset_builtin_gateway_key,
             // Profile 管理
             commands::profiles::list_profiles,
             commands::profiles::get_profile,
