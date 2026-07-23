@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::application::config_writer::{self, MergeStrategy, ConfigFormat, LiveSnapshot};
 use crate::error::{require_db, require_found, validate_non_empty, ServiceError};
 use crate::models::NewProfile;
 use crate::persistence::common_config_snippet_repo::CommonConfigSnippetRepo;
@@ -16,66 +17,9 @@ use crate::persistence::ProfileRepo;
 pub trait AgentConfigWriter: Send + Sync {
     fn agent_type(&self) -> &'static str;
 
-    /// 读取当前 live 配置
-    async fn read_live(&self, home: &Path) -> Result<Option<Vec<u8>>, String>;
+    fn live_path(&self, home: &Path) -> PathBuf;
 
-    /// 将 Profile 的 config_json 写入 live 配置
-    async fn write_live(
-        &self,
-        home: &Path,
-        profile_config: &serde_json::Value,
-    ) -> Result<(), String>;
-
-    /// 从 live 配置中移除该 Profile 的影响
-    async fn remove_live(&self, home: &Path, _profile_id: &str) -> Result<(), String> {
-        // 默认实现：重写 live 配置为空
-        self.write_live(home, &serde_json::json!({})).await
-    }
-
-    /// 检查当前 live 配置是否被 Silk 管理
-    async fn is_managed(&self, home: &Path) -> Result<bool, String> {
-        if let Some(data) = self.read_live(home).await? {
-            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
-                return Ok(val.get("_silk_managed").and_then(|v| v.as_bool()).unwrap_or(false));
-            }
-        }
-        Ok(false)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// JsonConfigWriter — Claude Code / Gemini CLI（单一 current 模式，JSON）
-// ---------------------------------------------------------------------------
-
-pub struct JsonConfigWriter {
-    relative_path: String,
-}
-
-impl JsonConfigWriter {
-    pub fn new(relative_path: &str) -> Self {
-        Self {
-            relative_path: relative_path.to_string(),
-        }
-    }
-
-    fn live_path(&self, home: &Path) -> PathBuf {
-        home.join(&self.relative_path)
-    }
-
-    async fn read_json(&self, path: &Path) -> Result<serde_json::Value, String> {
-        if !path.exists() {
-            return Ok(serde_json::json!({}));
-        }
-        let data = tokio::fs::read_to_string(path).await.map_err(|e| e.to_string())?;
-        serde_json::from_str(&data).map_err(|e| e.to_string())
-    }
-}
-
-#[async_trait]
-impl AgentConfigWriter for JsonConfigWriter {
-    fn agent_type(&self) -> &'static str {
-        "claude_code"
-    }
+    fn merge_strategy(&self) -> MergeStrategy;
 
     async fn read_live(&self, home: &Path) -> Result<Option<Vec<u8>>, String> {
         let path = self.live_path(home);
@@ -91,54 +35,581 @@ impl AgentConfigWriter for JsonConfigWriter {
         profile_config: &serde_json::Value,
     ) -> Result<(), String> {
         let path = self.live_path(home);
-        let mut live = self.read_json(&path).await?;
+        let _snapshot = LiveSnapshot::take(&path).map_err(|e| format!("备份失败: {e}"))?;
+        let mut live = config_writer::read_to_value_async(&path).await?;
 
-        // 合并顶层字段
-        if let Some(obj) = profile_config.as_object() {
-            for (key, value) in obj {
-                live[key] = value.clone();
+        config_writer::json_deep_merge(&mut live, profile_config);
+        if self.merge_strategy() != MergeStrategy::IntoProvider {
+            if let Some(obj) = live.as_object_mut() {
+                obj.insert("_silk_managed".to_string(), serde_json::json!(true));
             }
         }
 
-        // 移除内部字段
-        live.as_object_mut().map(|obj| {
-            obj.remove("_silk_managed");
-            obj.remove("_silk_profile_id");
-        });
+        if let Err(e) = config_writer::write_from_value_async(&path, &live).await {
+            let _ = _snapshot.restore();
+            return Err(e);
+        }
+        Ok(())
+    }
 
-        // 添加管理标记
-        live["_silk_managed"] = serde_json::json!(true);
+    async fn remove_live(&self, home: &Path, _profile_id: &str) -> Result<(), String> {
+        let path = self.live_path(home);
+        let _snapshot = LiveSnapshot::take(&path).map_err(|e| format!("备份失败: {e}"))?;
+        let empty = serde_json::json!({});
+        let mut live = config_writer::read_to_value_async(&path).await?;
+        config_writer::json_deep_merge(&mut live, &empty);
+        config_writer::write_from_value_async(&path, &live).await
+    }
 
-        // 原子写入
-        let data = serde_json::to_vec_pretty(&live).map_err(|e| e.to_string())?;
-        atomic_write(&path, &data).await
+    async fn is_managed(&self, home: &Path) -> Result<bool, String> {
+        if let Some(data) = self.read_live(home).await? {
+            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&data) {
+                return Ok(val.get("_silk_managed").and_then(|v| v.as_bool()).unwrap_or(false));
+            }
+        }
+        Ok(false)
     }
 }
 
 // ---------------------------------------------------------------------------
-// 原子写入
+// 各 Agent 专有 Writer
 // ---------------------------------------------------------------------------
 
-async fn atomic_write(path: &Path, data: &[u8]) -> Result<(), String> {
-    let parent = path.parent().ok_or("无法获取父目录")?;
-    tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+// --- Claude Code ---
+pub struct ClaudeCodeWriter;
 
-    let tmp = parent.join(format!(
-        "{}.tmp.{}",
-        path.file_name().unwrap().to_str().unwrap(),
-        std::process::id()
-    ));
+impl ClaudeCodeWriter {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
-    tokio::fs::write(&tmp, data).await.map_err(|e| e.to_string())?;
-
-    // Windows: 先删除目标
-    #[cfg(windows)]
-    if path.exists() {
-        let _ = tokio::fs::remove_file(path).await;
+#[async_trait]
+impl AgentConfigWriter for ClaudeCodeWriter {
+    fn agent_type(&self) -> &'static str {
+        "claude_code"
     }
 
-    tokio::fs::rename(&tmp, path).await.map_err(|e| e.to_string())?;
+    fn live_path(&self, home: &Path) -> PathBuf {
+        home.join(".claude/settings.json")
+    }
+
+    fn merge_strategy(&self) -> MergeStrategy {
+        MergeStrategy::TopLevel
+    }
+}
+
+// --- Claude Desktop ---
+pub struct ClaudeDesktopWriter;
+
+impl ClaudeDesktopWriter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl AgentConfigWriter for ClaudeDesktopWriter {
+    fn agent_type(&self) -> &'static str {
+        "claude_desktop"
+    }
+
+    fn live_path(&self, home: &Path) -> PathBuf {
+        #[cfg(target_os = "macos")]
+        let base = home.join("Library/Application Support/Claude");
+        #[cfg(target_os = "windows")]
+        let base = {
+            let appdata = std::env::var("APPDATA").unwrap_or_else(|_| home.to_string_lossy().to_string());
+            PathBuf::from(appdata).join("Claude")
+        };
+        #[cfg(target_os = "linux")]
+        let base = home.join(".config/Claude");
+        base.join("claude_desktop_config.json")
+    }
+
+    fn merge_strategy(&self) -> MergeStrategy {
+        MergeStrategy::TopLevel
+    }
+}
+
+// --- Codex ---
+pub struct CodexWriter;
+
+impl CodexWriter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl AgentConfigWriter for CodexWriter {
+    fn agent_type(&self) -> &'static str {
+        "codex"
+    }
+
+    fn live_path(&self, home: &Path) -> PathBuf {
+        home.join(".codex/config.toml")
+    }
+
+    fn merge_strategy(&self) -> MergeStrategy {
+        MergeStrategy::TopLevel
+    }
+}
+
+// --- Gemini CLI ---
+pub struct GeminiCliWriter;
+
+impl GeminiCliWriter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl AgentConfigWriter for GeminiCliWriter {
+    fn agent_type(&self) -> &'static str {
+        "gemini_cli"
+    }
+
+    fn live_path(&self, home: &Path) -> PathBuf {
+        home.join(".gemini/settings.json")
+    }
+
+    fn merge_strategy(&self) -> MergeStrategy {
+        MergeStrategy::IntoSubObject("env")
+    }
+}
+
+// --- OpenCode（累加模式）---
+pub struct OpenCodeWriter;
+
+impl OpenCodeWriter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl AgentConfigWriter for OpenCodeWriter {
+    fn agent_type(&self) -> &'static str {
+        "opencode"
+    }
+
+    fn live_path(&self, home: &Path) -> PathBuf {
+        home.join(".config/opencode/opencode.json")
+    }
+
+    fn merge_strategy(&self) -> MergeStrategy {
+        MergeStrategy::IntoProvider
+    }
+
+    async fn write_live(
+        &self,
+        home: &Path,
+        profile_config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let path = self.live_path(home);
+        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoProvider).await
+    }
+
+    async fn remove_live(&self, home: &Path, profile_id: &str) -> Result<(), String> {
+        let path = self.live_path(home);
+        config_writer::remove_provider_from_live_async(&path, profile_id).await
+    }
+
+    async fn is_managed(&self, home: &Path) -> Result<bool, String> {
+        let path = self.live_path(home);
+        if !path.exists() {
+            return Ok(false);
+        }
+        let val = config_writer::read_to_value_async(&path).await?;
+        // 检查是否有任何 provider 被 silk 管理
+        if let Some(providers) = val.get("providers").and_then(|v| v.as_object()) {
+            for (_id, provider) in providers {
+                if provider.get("_silk_managed").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
+// --- OpenClaw（累加模式）---
+pub struct OpenClawWriter;
+
+impl OpenClawWriter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl AgentConfigWriter for OpenClawWriter {
+    fn agent_type(&self) -> &'static str {
+        "openclaw"
+    }
+
+    fn live_path(&self, home: &Path) -> PathBuf {
+        home.join(".config/openclaw/openclaw.json")
+    }
+
+    fn merge_strategy(&self) -> MergeStrategy {
+        MergeStrategy::IntoProvider
+    }
+
+    async fn write_live(
+        &self,
+        home: &Path,
+        profile_config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let path = self.live_path(home);
+        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoProvider).await
+    }
+
+    async fn remove_live(&self, home: &Path, profile_id: &str) -> Result<(), String> {
+        let path = self.live_path(home);
+        config_writer::remove_provider_from_live_async(&path, profile_id).await
+    }
+
+    async fn is_managed(&self, home: &Path) -> Result<bool, String> {
+        let path = self.live_path(home);
+        if !path.exists() {
+            return Ok(false);
+        }
+        let val = config_writer::read_to_value_async(&path).await?;
+        if let Some(providers) = val.get("providers").and_then(|v| v.as_object()) {
+            for (_id, provider) in providers {
+                if provider.get("_silk_managed").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
+// --- Hermes（累加模式，YAML）---
+pub struct HermesWriter;
+
+impl HermesWriter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl AgentConfigWriter for HermesWriter {
+    fn agent_type(&self) -> &'static str {
+        "hermes"
+    }
+
+    fn live_path(&self, home: &Path) -> PathBuf {
+        home.join(".hermes/config.yaml")
+    }
+
+    fn merge_strategy(&self) -> MergeStrategy {
+        MergeStrategy::IntoProvider
+    }
+
+    async fn write_live(
+        &self,
+        home: &Path,
+        profile_config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let path = self.live_path(home);
+        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoProvider).await
+    }
+
+    async fn remove_live(&self, home: &Path, profile_id: &str) -> Result<(), String> {
+        let path = self.live_path(home);
+        config_writer::remove_provider_from_live_async(&path, profile_id).await
+    }
+
+    async fn is_managed(&self, home: &Path) -> Result<bool, String> {
+        let path = self.live_path(home);
+        if !path.exists() {
+            return Ok(false);
+        }
+        let val = config_writer::read_to_value_async(&path).await?;
+        if let Some(providers) = val.get("providers").and_then(|v| v.as_object()) {
+            for (_id, provider) in providers {
+                if provider.get("_silk_managed").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Writer 注册表
+// ---------------------------------------------------------------------------
+
+fn builtin_writers() -> Vec<Box<dyn AgentConfigWriter>> {
+    vec![
+        Box::new(ClaudeCodeWriter::new()),
+        Box::new(ClaudeDesktopWriter::new()),
+        Box::new(CodexWriter::new()),
+        Box::new(GeminiCliWriter::new()),
+        Box::new(OpenCodeWriter::new()),
+        Box::new(OpenClawWriter::new()),
+        Box::new(HermesWriter::new()),
+    ]
+}
+
+fn writer_for(agent_type: &str) -> Option<Box<dyn AgentConfigWriter>> {
+    builtin_writers().into_iter().find(|w| w.agent_type() == agent_type)
+}
+
+// ---------------------------------------------------------------------------
+// 校验
+// ---------------------------------------------------------------------------
+
+fn config_format_for(agent_type: &str) -> ConfigFormat {
+    match agent_type {
+        "codex" => ConfigFormat::Toml,
+        "hermes" => ConfigFormat::Yaml,
+        _ => ConfigFormat::Json,
+    }
+}
+
+fn validate_profile_payload(agent_type: &str, config_json: &str) -> Result<(), ServiceError> {
+    validate_non_empty("agent_type", agent_type)?;
+    validate_non_empty("config_json", config_json)?;
+
+    const VALID_AGENTS: &[&str] = &[
+        "claude_code", "claude_desktop", "codex",
+        "gemini_cli", "opencode", "openclaw", "hermes",
+    ];
+    if !VALID_AGENTS.contains(&agent_type) {
+        return Err(ServiceError::BadRequest {
+            message: format!("不支持的 agent_type: {}", agent_type),
+            code: None,
+        });
+    }
+
+    let fmt = config_format_for(agent_type);
+    config_writer::validate_config_text(config_json, fmt).map_err(|e| {
+        ServiceError::BadRequest {
+            message: format!("config_json 格式错误: {e}"),
+            code: None,
+        }
+    })?;
+
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// CRUD
+// ---------------------------------------------------------------------------
+
+pub async fn list(agent_type: String) -> Result<Vec<ProfileResponse>, ServiceError> {
+    let pool = require_db()?;
+    let profiles = ProfileRepo::find_by_agent_type(pool, &agent_type).await?;
+    Ok(profiles.into_iter().map(ProfileResponse::from).collect())
+}
+
+pub async fn get(profile_id: String) -> Result<ProfileResponse, ServiceError> {
+    let pool = require_db()?;
+    let profile = require_found(
+        ProfileRepo::find_by_id(pool, &profile_id).await?,
+        "Profile",
+    )?;
+    Ok(ProfileResponse::from(profile))
+}
+
+pub async fn create(payload: CreateProfilePayload) -> Result<ProfileResponse, ServiceError> {
+    validate_profile_payload(&payload.agent_type, &payload.config_json)?;
+
+    let pool = require_db()?;
+    let new = NewProfile {
+        name: payload.name.trim().to_string(),
+        agent_type: payload.agent_type,
+        config_json: payload.config_json,
+        is_active: Some(false),
+        sort_index: payload.sort_index,
+    };
+    let profile = ProfileRepo::create(pool, &new).await?;
+    Ok(ProfileResponse::from(profile))
+}
+
+pub async fn update(
+    profile_id: String,
+    payload: UpdateProfilePayload,
+) -> Result<ProfileResponse, ServiceError> {
+    let pool = require_db()?;
+
+    let _existing = require_found(
+        ProfileRepo::find_by_id(pool, &profile_id).await?,
+        "Profile",
+    )?;
+
+    if let Some(ref config_json) = payload.config_json {
+        let agent_type = _existing.agent_type.as_str();
+        let fmt = config_format_for(agent_type);
+        config_writer::validate_config_text(config_json, fmt).map_err(|e| {
+            ServiceError::BadRequest {
+                message: format!("config_json 格式错误: {e}"),
+                code: None,
+            }
+        })?;
+    }
+
+    let update = crate::models::UpdateProfile {
+        name: payload.name.map(|n| n.trim().to_string()),
+        config_json: payload.config_json,
+        is_active: None,
+        sort_index: payload.sort_index,
+    };
+
+    let profile = require_found(
+        ProfileRepo::update(pool, &profile_id, &update).await?,
+        "Profile",
+    )?;
+    Ok(ProfileResponse::from(profile))
+}
+
+pub async fn delete(profile_id: String) -> Result<bool, ServiceError> {
+    let pool = require_db()?;
+    ProfileRepo::delete(pool, &profile_id).await.map_err(ServiceError::from)
+}
+
+// ---------------------------------------------------------------------------
+// 切换（核心）
+// ---------------------------------------------------------------------------
+
+pub async fn switch(
+    agent_type: String,
+    profile_id: String,
+) -> Result<SwitchResult, ServiceError> {
+    let pool = require_db()?;
+
+    let profile = require_found(
+        ProfileRepo::find_by_id(pool, &profile_id).await?,
+        "Profile",
+    )?;
+
+    if profile.agent_type != agent_type {
+        return Err(ServiceError::BadRequest {
+            message: format!("Profile 的 agent_type ({}) 与请求 ({}) 不匹配", profile.agent_type, agent_type),
+            code: None,
+        });
+    }
+
+    let mut warnings = Vec::new();
+
+    let writer = match writer_for(&agent_type) {
+        Some(w) => w,
+        None => {
+            return switch_db_only(pool, &agent_type, &profile_id).await;
+        }
+    };
+
+    let fmt = config_format_for(&agent_type);
+    let config: serde_json::Value = match fmt {
+        ConfigFormat::Json => serde_json::from_str(&profile.config_json).map_err(|e| {
+            ServiceError::BadRequest {
+                message: format!("config_json 解析失败: {e}"),
+                code: None,
+            }
+        })?,
+        ConfigFormat::Toml => toml::from_str(&profile.config_json).map_err(|e| {
+            ServiceError::BadRequest {
+                message: format!("config_json 解析失败: {e}"),
+                code: None,
+            }
+        })?,
+        ConfigFormat::Yaml => serde_yaml::from_str(&profile.config_json).map_err(|e| {
+            ServiceError::BadRequest {
+                message: format!("config_json 解析失败: {e}"),
+                code: None,
+            }
+        })?,
+    };
+
+    let _snippet = CommonConfigSnippetRepo::find_by_agent(pool, &agent_type).await?;
+
+    let effective_config = build_effective_config(&config, _snippet.as_ref());
+
+    let home = crate::get_home_dir().to_path_buf();
+    if let Err(e) = writer.write_live(&home, &effective_config).await {
+        warnings.push(format!("写入 live 配置失败: {e}"));
+    }
+
+    ProfileRepo::deactivate_all(pool, &agent_type).await?;
+    ProfileRepo::activate(pool, &profile_id).await?;
+
+    let requires_restart = match agent_type.as_str() {
+        "opencode" | "openclaw" | "hermes" => false,
+        _ => true,
+    };
+
+    if requires_restart {
+        warnings.push("请重启终端/应用以使配置生效".to_string());
+    }
+
+    Ok(SwitchResult {
+        success: true,
+        warnings,
+        requires_restart,
+    })
+}
+
+async fn switch_db_only(
+    pool: &sqlx::SqlitePool,
+    agent_type: &str,
+    profile_id: &str,
+) -> Result<SwitchResult, ServiceError> {
+    ProfileRepo::deactivate_all(pool, agent_type).await?;
+    ProfileRepo::activate(pool, profile_id).await?;
+
+    Ok(SwitchResult {
+        success: true,
+        warnings: vec!["该 Agent 类型尚未支持配置自动写入，请手动配置".to_string()],
+        requires_restart: true,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// 通用配置片段
+// ---------------------------------------------------------------------------
+
+pub async fn get_common_snippet(
+    agent_type: String,
+) -> Result<Option<String>, ServiceError> {
+    let pool = require_db()?;
+    let snippet = CommonConfigSnippetRepo::find_by_agent(pool, &agent_type).await?;
+    Ok(snippet.map(|s| s.content))
+}
+
+pub async fn set_common_snippet(
+    agent_type: String,
+    content: String,
+) -> Result<(), ServiceError> {
+    let pool = require_db()?;
+    CommonConfigSnippetRepo::upsert(pool, &agent_type, &content).await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 辅助
+// ---------------------------------------------------------------------------
+
+fn build_effective_config(
+    config: &serde_json::Value,
+    snippet: Option<&crate::persistence::CommonConfigSnippet>,
+) -> serde_json::Value {
+    let mut effective = config.clone();
+
+    if let Some(snippet) = snippet {
+        if let Ok(snippet_val) = serde_json::from_str::<serde_json::Value>(&snippet.content) {
+            config_writer::json_deep_merge(&mut effective, &snippet_val);
+        }
+    }
+
+    effective
 }
 
 // ---------------------------------------------------------------------------
@@ -192,285 +663,4 @@ pub struct SwitchResult {
     pub success: bool,
     pub warnings: Vec<String>,
     pub requires_restart: bool,
-}
-
-// ---------------------------------------------------------------------------
-// Writer 注册表
-// ---------------------------------------------------------------------------
-
-fn builtin_writers() -> Vec<Box<dyn AgentConfigWriter>> {
-    vec![
-        Box::new(JsonConfigWriter::new(".claude/settings.json")),
-        // Phase 2: 添加 TomlConfigWriter, AdditiveJsonConfigWriter, YamlConfigWriter
-    ]
-}
-
-fn writer_for(agent_type: &str) -> Option<Box<dyn AgentConfigWriter>> {
-    builtin_writers().into_iter().find(|w| w.agent_type() == agent_type)
-}
-
-// ---------------------------------------------------------------------------
-// 校验
-// ---------------------------------------------------------------------------
-
-fn validate_profile_payload(agent_type: &str, config_json: &str) -> Result<(), ServiceError> {
-    validate_non_empty("agent_type", agent_type)?;
-    validate_non_empty("config_json", config_json)?;
-
-    // 校验 config_json 为合法 JSON
-    serde_json::from_str::<serde_json::Value>(config_json).map_err(|e| {
-        ServiceError::BadRequest {
-            message: format!("config_json 不是合法 JSON: {}", e),
-            code: None,
-        }
-    })?;
-
-    // 校验 agent_type
-    const VALID_AGENTS: &[&str] = &[
-        "claude_code", "claude_desktop", "codex",
-        "gemini_cli", "opencode", "openclaw", "hermes",
-    ];
-    if !VALID_AGENTS.contains(&agent_type) {
-        return Err(ServiceError::BadRequest {
-            message: format!("不支持的 agent_type: {}", agent_type),
-            code: None,
-        });
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// CRUD
-// ---------------------------------------------------------------------------
-
-/// 按 agent_type 列出 Profile
-pub async fn list(agent_type: String) -> Result<Vec<ProfileResponse>, ServiceError> {
-    let pool = require_db()?;
-    let profiles = ProfileRepo::find_by_agent_type(pool, &agent_type).await?;
-    Ok(profiles.into_iter().map(ProfileResponse::from).collect())
-}
-
-/// 获取单个 Profile
-pub async fn get(profile_id: String) -> Result<ProfileResponse, ServiceError> {
-    let pool = require_db()?;
-    let profile = require_found(
-        ProfileRepo::find_by_id(pool, &profile_id).await?,
-        "Profile",
-    )?;
-    Ok(ProfileResponse::from(profile))
-}
-
-/// 创建 Profile
-pub async fn create(payload: CreateProfilePayload) -> Result<ProfileResponse, ServiceError> {
-    validate_profile_payload(&payload.agent_type, &payload.config_json)?;
-
-    let pool = require_db()?;
-    let new = NewProfile {
-        name: payload.name.trim().to_string(),
-        agent_type: payload.agent_type,
-        config_json: payload.config_json,
-        is_active: Some(false),
-        sort_index: payload.sort_index,
-    };
-    let profile = ProfileRepo::create(pool, &new).await?;
-    Ok(ProfileResponse::from(profile))
-}
-
-/// 更新 Profile
-pub async fn update(
-    profile_id: String,
-    payload: UpdateProfilePayload,
-) -> Result<ProfileResponse, ServiceError> {
-    let pool = require_db()?;
-
-    // 校验存在性
-    let _existing = require_found(
-        ProfileRepo::find_by_id(pool, &profile_id).await?,
-        "Profile",
-    )?;
-
-    // 如果提供了 config_json，校验合法性
-    if let Some(ref config_json) = payload.config_json {
-        serde_json::from_str::<serde_json::Value>(config_json).map_err(|e| {
-            ServiceError::BadRequest {
-                message: format!("config_json 不是合法 JSON: {}", e),
-                code: None,
-            }
-        })?;
-    }
-
-    let update = crate::models::UpdateProfile {
-        name: payload.name.map(|n| n.trim().to_string()),
-        config_json: payload.config_json,
-        is_active: None, // is_active 只能通过 switch 修改
-        sort_index: payload.sort_index,
-    };
-
-    let profile = require_found(
-        ProfileRepo::update(pool, &profile_id, &update).await?,
-        "Profile",
-    )?;
-    Ok(ProfileResponse::from(profile))
-}
-
-/// 删除 Profile
-pub async fn delete(profile_id: String) -> Result<bool, ServiceError> {
-    let pool = require_db()?;
-    ProfileRepo::delete(pool, &profile_id).await.map_err(ServiceError::from)
-}
-
-// ---------------------------------------------------------------------------
-// 切换（核心）
-// ---------------------------------------------------------------------------
-
-/// 切换 Profile：激活指定 Profile，写入 live 配置
-pub async fn switch(
-    agent_type: String,
-    profile_id: String,
-) -> Result<SwitchResult, ServiceError> {
-    let pool = require_db()?;
-
-    // 1. 查找 Profile
-    let profile = require_found(
-        ProfileRepo::find_by_id(pool, &profile_id).await?,
-        "Profile",
-    )?;
-
-    // 2. 校验 agent_type 匹配
-    if profile.agent_type != agent_type {
-        return Err(ServiceError::BadRequest {
-            message: format!("Profile 的 agent_type ({}) 与请求 ({}) 不匹配", profile.agent_type, agent_type),
-            code: None,
-        });
-    }
-
-    let mut warnings = Vec::new();
-
-    // 3. 获取 Writer
-    let writer = match writer_for(&agent_type) {
-        Some(w) => w,
-        None => {
-            // 对于 Phase 1 不支持的 agent_type，仅更新 DB 状态，不写文件
-            return switch_db_only(pool, &agent_type, &profile_id).await;
-        }
-    };
-
-    // 4. 解析配置
-    let config: serde_json::Value = serde_json::from_str(&profile.config_json).map_err(|e| {
-        ServiceError::BadRequest {
-            message: format!("config_json 解析失败: {}", e),
-            code: None,
-        }
-    })?;
-
-    // 5. 读取通用配置片段（如果有）
-    let _snippet = CommonConfigSnippetRepo::find_by_agent(pool, &agent_type).await?;
-
-    // 构建有效配置
-    let effective_config = build_effective_config(&config, _snippet.as_ref());
-
-    // 6. 写入 live 配置
-    let home = crate::get_home_dir().to_path_buf();
-    if let Err(e) = writer.write_live(&home, &effective_config).await {
-        warnings.push(format!("写入 live 配置失败: {}", e));
-    }
-
-    // 7. 更新 DB 状态
-    ProfileRepo::deactivate_all(pool, &agent_type).await?;
-    ProfileRepo::activate(pool, &profile_id).await?;
-
-    // 8. 判断是否需要重启
-    let requires_restart = match agent_type.as_str() {
-        "opencode" | "openclaw" => false,
-        _ => true,
-    };
-
-    if requires_restart {
-        warnings.push("请重启终端/应用以使配置生效".to_string());
-    }
-
-    Ok(SwitchResult {
-        success: true,
-        warnings,
-        requires_restart,
-    })
-}
-
-/// 仅更新 DB 状态（无 Writer 的 Agent 类型）
-async fn switch_db_only(
-    pool: &sqlx::SqlitePool,
-    agent_type: &str,
-    profile_id: &str,
-) -> Result<SwitchResult, ServiceError> {
-    ProfileRepo::deactivate_all(pool, agent_type).await?;
-    ProfileRepo::activate(pool, profile_id).await?;
-
-    Ok(SwitchResult {
-        success: true,
-        warnings: vec!["该 Agent 类型尚未支持配置自动写入，请手动配置".to_string()],
-        requires_restart: true,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// 通用配置片段
-// ---------------------------------------------------------------------------
-
-pub async fn get_common_snippet(
-    agent_type: String,
-) -> Result<Option<String>, ServiceError> {
-    let pool = require_db()?;
-    let snippet = CommonConfigSnippetRepo::find_by_agent(pool, &agent_type).await?;
-    Ok(snippet.map(|s| s.content))
-}
-
-pub async fn set_common_snippet(
-    agent_type: String,
-    content: String,
-) -> Result<(), ServiceError> {
-    let pool = require_db()?;
-    CommonConfigSnippetRepo::upsert(pool, &agent_type, &content).await?;
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// 辅助
-// ---------------------------------------------------------------------------
-
-/// 构建有效配置（合并通用配置片段）
-fn build_effective_config(
-    config: &serde_json::Value,
-    snippet: Option<&crate::persistence::CommonConfigSnippet>,
-) -> serde_json::Value {
-    let mut effective = config.clone();
-
-    if let Some(snippet) = snippet {
-        if let Ok(snippet_val) = serde_json::from_str::<serde_json::Value>(&snippet.content) {
-            // 深度合并
-            json_deep_merge(&mut effective, &snippet_val);
-        }
-    }
-
-    // 添加管理标记
-    if let Some(obj) = effective.as_object_mut() {
-        obj.insert("_silk_managed".to_string(), serde_json::json!(true));
-    }
-
-    effective
-}
-
-/// JSON 深度合并：将 source 合并到 target
-fn json_deep_merge(target: &mut serde_json::Value, source: &serde_json::Value) {
-    if let (Some(t), Some(s)) = (target.as_object_mut(), source.as_object()) {
-        for (key, value) in s {
-            if let Some(existing) = t.get(key) {
-                if existing.is_object() && value.is_object() {
-                    json_deep_merge(&mut t[key], value);
-                    continue;
-                }
-            }
-            t.insert(key.clone(), value.clone());
-        }
-    }
 }

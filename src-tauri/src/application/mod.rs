@@ -1,4 +1,5 @@
 pub mod config_transfer_service;
+pub mod config_writer;
 pub mod crud_macro;
 pub mod gateway_key_service;
 pub mod gateway_service;
