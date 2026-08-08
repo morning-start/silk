@@ -1,11 +1,24 @@
-use linguafranca::anthropic::request::AnthropicRequest;
-use linguafranca::chat_completions_openai::request::ChatCompletionsOpenAiRequest;
-use linguafranca::open_responses::request::OpenResponsesRequest;
-use linguafranca::traits::{FromOpenResponses, IntoOpenResponses};
+use bytes::Bytes;
+use once_cell::sync::Lazy;
+use std::sync::Arc;
 
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
+use crate::protocol::converter::{ConversionError, ConverterRegistry, ProtocolConverter};
+use crate::protocol::converters::*;
+
+/// 全局协议转换器注册表
+static CONVERTER_REGISTRY: Lazy<Arc<ConverterRegistry>> = Lazy::new(|| {
+    let mut registry = ConverterRegistry::new();
+
+    // 注册所有转换器
+    registry.register(Arc::new(openai_chat::OpenAIChatConverter::new()));
+    registry.register(Arc::new(claude_messages::ClaudeMessagesConverter::new()));
+    registry.register(Arc::new(openai_response::OpenAIResponseConverter::new()));
+
+    Arc::new(registry)
+});
 
 /// 请求转换中间件
 ///
@@ -57,17 +70,31 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         }
     }
 
-    // 跨协议时转换请求体格式：inbound → hub → outbound
-    let request_bytes = if inbound != outbound {
+    // 使用新的协议转换层进行跨协议转换
+    let request_bytes: Bytes = if inbound != outbound {
         tracing::debug!(
             "跨协议格式转换: inbound={}, outbound={}",
             inbound,
             outbound
         );
-        convert_request_body(&ctx.request_body, &inbound, &outbound)
-            .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e)))?
+
+        let converter = CONVERTER_REGISTRY
+            .find_converter(&inbound, &outbound)
+            .ok_or_else(|| {
+                StageError::new(
+                    ctx.clone(),
+                    GatewayError::Transform(format!(
+                        "不支持的协议转换: {inbound} -> {outbound}"
+                    )),
+                )
+            })?;
+
+        converter
+            .convert_request(&ctx.request_body, &inbound, &outbound)
+            .await
+            .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e.to_string())))?
     } else {
-        ctx.request_body.to_vec()
+        Bytes::from(ctx.request_body.to_vec())
     };
 
     // 获取 outbound 适配器（生成正确的 URL、认证头、Content-Type）
@@ -110,61 +137,12 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
     let new_body = serde_json::to_vec(&upstream_req.body)
         .map_err(|e| StageError::new(ctx.clone(), GatewayError::Serialization(e.to_string())))?;
 
-    ctx.request_body = bytes::Bytes::from(new_body);
+    ctx.request_body = Bytes::from(new_body);
     ctx.upstream_headers = Some(upstream_req.headers);
     ctx.upstream_url = Some(upstream_req.url);
     ctx.upstream_method = Some(upstream_req.method);
 
     Ok(ctx)
-}
-
-/// 将请求体从入站格式转换为出站格式（inbound → hub → outbound）
-fn convert_request_body(
-    body: &[u8],
-    from: &str,
-    to: &str,
-) -> Result<Vec<u8>, String> {
-    let hub: OpenResponsesRequest = match from {
-        "openai_chat" => {
-            let req: ChatCompletionsOpenAiRequest = serde_json::from_slice(body)
-                .map_err(|e| format!("解析 Chat 请求失败: {e}"))?;
-            req.into_open_responses(None)
-                .map_err(|e| format!("Chat → OpenResponses 转换失败: {e}"))?
-                .value
-        }
-        "claude_messages" => {
-            let req: AnthropicRequest = serde_json::from_slice(body)
-                .map_err(|e| format!("解析 Claude 请求失败: {e}"))?;
-            req.into_open_responses(None)
-                .map_err(|e| format!("Claude → OpenResponses 转换失败: {e}"))?
-                .value
-        }
-        "openai_response" => serde_json::from_slice(body)
-            .map_err(|e| format!("解析 OpenResponses 请求失败: {e}"))?,
-        other => return Err(format!("不支持的入站协议: {other}")),
-    };
-
-    let outbound: serde_json::Value = match to {
-        "openai_chat" => {
-            let req = ChatCompletionsOpenAiRequest::from_open_responses(hub, None)
-                .map_err(|e| format!("OpenResponses → Chat 转换失败: {e}"))?
-                .value;
-            serde_json::to_value(req)
-                .map_err(|e| format!("序列化 Chat 请求失败: {e}"))?
-        }
-        "claude_messages" => {
-            let req = AnthropicRequest::from_open_responses(hub, None)
-                .map_err(|e| format!("OpenResponses → Claude 转换失败: {e}"))?
-                .value;
-            serde_json::to_value(req)
-                .map_err(|e| format!("序列化 Claude 请求失败: {e}"))?
-        }
-        "openai_response" => serde_json::to_value(hub)
-            .map_err(|e| format!("序列化 OpenResponses 请求失败: {e}"))?,
-        other => return Err(format!("不支持的出站协议: {other}")),
-    };
-
-    serde_json::to_vec(&outbound).map_err(|e| format!("序列化失败: {e}"))
 }
 
 #[cfg(test)]
@@ -236,7 +214,10 @@ mod tests {
             serde_json::from_slice(&ctx.request_body).expect("transformed json");
 
         // 网关强制注入 stream:true + stream_options
-        assert_eq!(transformed.get("stream").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            transformed.get("stream").and_then(|v| v.as_bool()),
+            Some(true)
+        );
         assert!(transformed.get("stream_options").is_some());
     }
 
@@ -255,6 +236,9 @@ mod tests {
         let transformed: serde_json::Value =
             serde_json::from_slice(&ctx.request_body).expect("transformed json");
 
-        assert_eq!(transformed.get("stream").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            transformed.get("stream").and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 }

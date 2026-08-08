@@ -1,3 +1,5 @@
+pub mod user_friendly;
+
 use serde::Serialize;
 use sqlx::SqlitePool;
 
