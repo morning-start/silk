@@ -2,9 +2,13 @@
 import { onMounted, ref, watch } from "vue";
 import { darkTheme, NConfigProvider, NMessageProvider, NDialogProvider, GlobalThemeOverrides } from "naive-ui";
 import AppContent from "./AppContent.vue";
+import SplashScreen from "./components/SplashScreen.vue";
+import OnboardingWizard from "./components/OnboardingWizard.vue";
 
 const THEME_STORAGE_KEY = "silk-theme";
 const isDark = ref(false);
+const showSplash = ref(true);
+const showOnboarding = ref(false);
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -44,6 +48,15 @@ onMounted(() => {
   const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
   isDark.value = savedTheme === "dark";
   applyThemeClass(isDark.value);
+
+  // 检查是否已完成引导
+  const onboardingCompleted = localStorage.getItem("onboarding_completed");
+  if (!onboardingCompleted) {
+    // 延迟显示引导页，等待启动画面完成
+    setTimeout(() => {
+      showOnboarding.value = true;
+    }, 1500);
+  }
 });
 
 watch(isDark, (enabled) => {
@@ -53,6 +66,9 @@ watch(isDark, (enabled) => {
 </script>
 
 <template>
+  <SplashScreen :visible="showSplash" @complete="showSplash = false" />
+  <OnboardingWizard :show="showOnboarding" @complete="showOnboarding = false" />
+
   <NConfigProvider
     :theme="isDark ? darkTheme : null"
     :theme-overrides="isDark ? darkOverrides : themeOverrides"
