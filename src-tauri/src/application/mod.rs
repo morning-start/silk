@@ -1,4 +1,5 @@
 pub mod api_key_service;
+pub mod auto_detect;
 pub mod config_transfer_service;
 pub mod config_writer;
 pub mod crud_macro;
@@ -8,7 +9,9 @@ pub mod log_service;
 pub mod model_fetcher;
 pub mod model_mapping_service;
 pub mod models_listing;
+pub mod preset_providers;
 pub mod profile_service;
 pub mod provider_service;
+pub mod quick_setup;
 pub mod settings_service;
 pub mod stats_service;

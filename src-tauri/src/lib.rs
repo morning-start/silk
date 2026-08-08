@@ -442,6 +442,13 @@ pub fn run() {
             commands::profiles::get_common_snippet,
             commands::profiles::set_common_snippet,
             commands::profiles::list_all_models,
+            // 自动检测
+            application::auto_detect::detect_installed_ai_apps,
+            // 快速配置
+            application::quick_setup::save_onboarding_config,
+            // 预置配置
+            application::preset_providers::get_preset_providers,
+            application::preset_providers::get_preset_provider_by_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
