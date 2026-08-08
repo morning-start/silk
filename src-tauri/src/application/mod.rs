@@ -9,6 +9,7 @@ pub mod log_service;
 pub mod model_fetcher;
 pub mod model_mapping_service;
 pub mod models_listing;
+pub mod preset_providers;
 pub mod profile_service;
 pub mod provider_service;
 pub mod quick_setup;

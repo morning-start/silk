@@ -1,0 +1,147 @@
+{
+  "version": "1.0.0",
+  "providers": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "description": "访问GPT-4、GPT-3.5等模型",
+      "protocols": ["openai_chat"],
+      "models": [
+        {
+          "id": "gpt-4",
+          "name": "GPT-4",
+          "description": "最强大的模型，适合复杂任务"
+        },
+        {
+          "id": "gpt-4-turbo",
+          "name": "GPT-4 Turbo",
+          "description": "GPT-4的快速版本，性价比高"
+        },
+        {
+          "id": "gpt-3.5-turbo",
+          "name": "GPT-3.5 Turbo",
+          "description": "快速且经济实惠，适合日常任务"
+        }
+      ],
+      "api_base_url": "https://api.openai.com",
+      "api_key_url": "https://platform.openai.com/api-keys",
+      "api_key_placeholder": "sk-...",
+      "color": "#10a37f"
+    },
+    {
+      "id": "claude",
+      "name": "Claude",
+      "description": "访问Claude 3 Opus、Sonnet等模型",
+      "protocols": ["claude_messages"],
+      "models": [
+        {
+          "id": "claude-3-opus-20240229",
+          "name": "Claude 3 Opus",
+          "description": "最强大的模型，适合复杂推理"
+        },
+        {
+          "id": "claude-3-sonnet-20240229",
+          "name": "Claude 3 Sonnet",
+          "description": "平衡性能和速度"
+        },
+        {
+          "id": "claude-3-haiku-20240307",
+          "name": "Claude 3 Haiku",
+          "description": "最快速的模型，适合简单任务"
+        }
+      ],
+      "api_base_url": "https://api.anthropic.com",
+      "api_key_url": "https://console.anthropic.com/api-keys",
+      "api_key_placeholder": "sk-ant-...",
+      "color": "#d97706"
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "description": "访问Gemini Pro等模型",
+      "protocols": ["openai_chat"],
+      "models": [
+        {
+          "id": "gemini-pro",
+          "name": "Gemini Pro",
+          "description": "Google的先进模型"
+        },
+        {
+          "id": "gemini-pro-vision",
+          "name": "Gemini Pro Vision",
+          "description": "支持图像理解的模型"
+        }
+      ],
+      "api_base_url": "https://generativelanguage.googleapis.com",
+      "api_key_url": "https://makersuite.google.com/app/apikey",
+      "api_key_placeholder": "AIza...",
+      "color": "#4285f4"
+    },
+    {
+      "id": "wenxin",
+      "name": "文心一言",
+      "description": "百度的AI大模型",
+      "protocols": ["openai_chat"],
+      "models": [
+        {
+          "id": "ernie-bot-4",
+          "name": "ERNIE Bot 4.0",
+          "description": "最强大的版本"
+        },
+        {
+          "id": "ernie-bot",
+          "name": "ERNIE Bot",
+          "description": "标准版本"
+        }
+      ],
+      "api_base_url": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop",
+      "api_key_url": "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
+      "api_key_placeholder": "请输入API Key",
+      "color": "#2932e1"
+    },
+    {
+      "id": "tongyi",
+      "name": "通义千问",
+      "description": "阿里巴巴的AI大模型",
+      "protocols": ["openai_chat"],
+      "models": [
+        {
+          "id": "qwen-max",
+          "name": "通义千问 Max",
+          "description": "最强大的版本"
+        },
+        {
+          "id": "qwen-turbo",
+          "name": "通义千问 Turbo",
+          "description": "快速版本"
+        }
+      ],
+      "api_base_url": "https://dashscope.aliyuncs.com/api/v1",
+      "api_key_url": "https://dashscope.console.aliyun.com/apiKey",
+      "api_key_placeholder": "sk-...",
+      "color": "#ff6a00"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "description": "DeepSeek AI大模型",
+      "protocols": ["openai_chat"],
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "name": "DeepSeek Chat",
+          "description": "对话模型"
+        },
+        {
+          "id": "deepseek-coder",
+          "name": "DeepSeek Coder",
+          "description": "代码模型"
+        }
+      ],
+      "api_base_url": "https://api.deepseek.com",
+      "api_key_url": "https://platform.deepseek.com/api_keys",
+      "api_key_placeholder": "sk-...",
+      "color": "#0066ff"
+    }
+  ]
+}
