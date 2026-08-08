@@ -3,7 +3,6 @@
 //! 检测本地已安装的AI客户端，用于引导用户快速配置。
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// 已安装的AI应用信息
 #[derive(Debug, Clone, Serialize, Deserialize)]

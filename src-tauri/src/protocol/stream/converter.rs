@@ -4,7 +4,6 @@
 //! 所有流式转换器必须是无状态的，仅处理SSE事件流。
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;

@@ -3,7 +3,6 @@
 //! 支持OpenAI Responses协议的SSE流式转换。
 
 use async_trait::async_trait;
-use linguafranca::open_responses::stream::OpenResponsesStreamEvent;
 
 use super::converter::{SseEvent, StreamConversionError, StreamConverter};
 

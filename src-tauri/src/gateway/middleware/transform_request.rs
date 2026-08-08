@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
-use crate::protocol::converter::{ConversionError, ConverterRegistry, ProtocolConverter};
+use crate::protocol::converter::ConverterRegistry;
 use crate::protocol::converters::*;
 
 /// 全局协议转换器注册表
