@@ -206,7 +206,7 @@ pub fn json_deep_remove(target: &mut serde_json::Value, source: &serde_json::Val
             if let Some(existing) = t.get(key) {
                 if existing.is_object() && value.is_object() {
                     json_deep_remove(&mut t[key], value);
-                    if t[key].as_object().map_or(false, |o| o.is_empty()) {
+                    if t[key].as_object().is_some_and(|o| o.is_empty()) {
                         t.remove(key);
                     }
                     continue;

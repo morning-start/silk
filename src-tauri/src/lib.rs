@@ -78,8 +78,8 @@ pub async fn load_lookup_cache(pool: &SqlitePool) -> LookupCache {
         .await
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|r| {
-            Some((r.get::<String, _>("id"), r.get::<String, _>("name")))
+        .map(|r| {
+            (r.get::<String, _>("id"), r.get::<String, _>("name"))
         })
         .collect();
 
@@ -88,8 +88,8 @@ pub async fn load_lookup_cache(pool: &SqlitePool) -> LookupCache {
         .await
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|r| {
-            Some((r.get::<String, _>("id"), r.get::<String, _>("model_name")))
+        .map(|r| {
+            (r.get::<String, _>("id"), r.get::<String, _>("model_name"))
         })
         .collect();
 
@@ -230,11 +230,11 @@ fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } => show_main_window(&tray.app_handle()),
+            } => show_main_window(tray.app_handle()),
             TrayIconEvent::DoubleClick {
                 button: MouseButton::Left,
                 ..
-            } => show_main_window(&tray.app_handle()),
+            } => show_main_window(tray.app_handle()),
             _ => {}
         });
 
@@ -297,7 +297,7 @@ pub fn run() {
 
                 // 初始化网关设置文件
                 init_gateway_settings(&data_dir).await
-                    .map_err(|e| sqlx::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+                    .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
 
                 // 初始化用户家目录
                 let home = std::env::var("HOME")
@@ -348,7 +348,7 @@ pub fn run() {
                 };
                 if should_auto_start {
                     start_existing_gateway(state.inner()).await.map_err(|err| {
-                        sqlx::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, err))
+                        sqlx::Error::Io(std::io::Error::other(err))
                     })?;
                 }
                 Ok::<(), sqlx::Error>(())
@@ -356,7 +356,7 @@ pub fn run() {
                 panic!("数据库初始化失败: {err}");
             }
 
-            if let Err(err) = setup_tray(&app.handle()) {
+            if let Err(err) = setup_tray(app.handle()) {
                 panic!("托盘初始化失败: {err}");
             }
 

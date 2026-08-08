@@ -53,7 +53,7 @@ impl ModelMappingRepo {
 
         // 事务内插入关联渠道
         if let Some(ref channels) = new.channels {
-            Self::replace_channels_internal(&mut *tx, &id, channels).await?;
+            Self::replace_channels_internal(&mut tx, &id, channels).await?;
         }
 
         tx.commit().await?;
@@ -169,7 +169,7 @@ impl ModelMappingRepo {
 
         // 在事务内替换关联渠道
         if let Some(ref channels) = update.channels {
-            Self::replace_channels_internal(&mut *tx, id, channels).await?;
+            Self::replace_channels_internal(&mut tx, id, channels).await?;
         }
 
         tx.commit().await?;

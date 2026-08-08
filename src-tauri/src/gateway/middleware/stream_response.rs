@@ -382,7 +382,6 @@ impl SseConverter {
                 "claude_messages" => Some(OutboundToHubConverter::AnthropicToOpenResponses(
                     AnthropicMessagesToOpenResponsesStream::new(),
                 )),
-                // openai_response: 已是 hub 格式，无需转换
                 _ => None,
             },
             hub_to_inbound: match inbound {
@@ -392,14 +391,12 @@ impl SseConverter {
                 "claude_messages" => Some(HubToInboundConverter::OpenResponsesToAnthropic(
                     OpenResponsesToAnthropicMessagesStream::new(),
                 )),
-                // openai_response: hub 已是最终格式，无需转换
                 _ => None,
             },
         }
     }
 
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
-        // 无需协议转换时直接透传原始事件（inbound == outbound）
         if self.outbound_to_hub.is_none() && self.hub_to_inbound.is_none() {
             return Ok(Bytes::from(event.serialize()));
         }
@@ -409,90 +406,119 @@ impl SseConverter {
             None => return Ok(Bytes::from(event.serialize())),
         };
         let json: serde_json::Value =
-            serde_json::from_str(data).map_err(|e| format!("解析 SSE data JSON 失败: {e}"))?;
+            serde_json::from_str(data).map_err(|e| format!("JSON 解析失败: {e}"))?;
 
-        // Step 1: 解析出站事件 → hub 事件
-        let hub_events = if self.outbound_to_hub.is_some() {
-            self.outbound_to_hub_events(&json)?
-        } else {
-            // 出站已是 hub 格式（openai_response），直接反序列化
-            let ev: OpenResponsesStreamEvent = serde_json::from_value(json)
-                .map_err(|e| format!("解析 OpenResponses SSE event 失败: {e}"))?;
-            vec![ev]
-        };
+        let json_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("?").to_string();
 
-        // Step 2: hub 事件 → 入站格式
-        if self.hub_to_inbound.is_some() {
-            let mut output = Vec::new();
-            for hub_event in &hub_events {
-                let bytes = self.hub_to_inbound_events(hub_event)?;
-                output.extend(bytes);
-            }
-            Ok(Bytes::from(output))
-        } else {
-            // 入站已是 hub 格式（openai_response），直接序列化为 SSE
-            serialize_open_responses_events(&hub_events)
-        }
+        let outbound_some = self.outbound_to_hub.is_some();
+        let inbound_some = self.hub_to_inbound.is_some();
+        let hub_events = self.stage_upstream_to_hub(json)?;
+
+        tracing::debug!("hub_events={} {}, {}->hub→{}", hub_events.len(), json_type,
+            if outbound_some { "outbound" } else { "hub" },
+            if inbound_some { "inbound" } else { "hub" });
+
+        self.stage_hub_to_downstream(&hub_events)
     }
 
-    fn outbound_to_hub_events(
+    /// Stage 1: 上游响应 → hub (OpenResponsesStreamEvent)
+    fn stage_upstream_to_hub(
         &mut self,
-        json: &serde_json::Value,
+        json: serde_json::Value,
     ) -> Result<Vec<OpenResponsesStreamEvent>, String> {
-        match self.outbound_to_hub.as_mut().unwrap() {
-            OutboundToHubConverter::ChatCompletionsToOpenResponses(c) => {
-                let chunk: ChatCompletionsStreamChunk = serde_json::from_value(json.clone())
-                    .map_err(|e| format!("解析 OpenAI Chat SSE chunk 失败: {e}"))?;
-                c.transform(chunk)
-                    .map_err(|e| format!("OpenAI Chat → OpenResponses 转换失败: {e}"))
+        match self.outbound_to_hub.as_mut() {
+            Some(OutboundToHubConverter::ChatCompletionsToOpenResponses(c)) => {
+                let chunk: ChatCompletionsStreamChunk = serde_json::from_value(json)
+                    .map_err(|e| format!("Chat chunk 解析失败: {e}"))?;
+                c.transform(chunk).map_err(|e| format!("Chat→Hub 转换失败: {e}"))
             }
-            OutboundToHubConverter::AnthropicToOpenResponses(c) => {
-                let event: AnthropicStreamEvent = serde_json::from_value(json.clone())
-                    .map_err(|e| format!("解析 Anthropic SSE event 失败: {e}"))?;
-                c.transform(event)
-                    .map_err(|e| format!("Anthropic → OpenResponses 转换失败: {e}"))
+            Some(OutboundToHubConverter::AnthropicToOpenResponses(c)) => {
+                let event: AnthropicStreamEvent = serde_json::from_value(json)
+                    .map_err(|e| format!("Anthropic event 解析失败: {e}"))?;
+                c.transform(event).map_err(|e| format!("Anthropic→Hub 转换失败: {e}"))
+            }
+            None => Self::parse_hub_response(json),
+        }
+    }
+
+/// 上游响应是 hub 格式（openai_response），尝试直接解析
+fn parse_hub_response(json: serde_json::Value) -> Result<Vec<OpenResponsesStreamEvent>, String> {
+    let json_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+
+    // 尝试 1: 直接解析为完整的 OpenResponsesStreamEvent
+    if let Ok(ev) = serde_json::from_value::<OpenResponsesStreamEvent>(json.clone()) {
+        return Ok(vec![ev]);
+    }
+
+    // 尝试 2: 补全缺失的必需字段后重试
+    if json_type.starts_with("response.") {
+        if let Some(patched) = patch_hub_event(json.clone()) {
+            if let Ok(ev) = serde_json::from_value::<OpenResponsesStreamEvent>(patched) {
+                return Ok(vec![ev]);
             }
         }
     }
 
-    fn hub_to_inbound_events(
+    // 尝试 3: 退一步，检查是否为 OpenAI Chat 格式
+    tracing::warn!(
+        "上游配置为 openai_response 但返回非 OpenResponses 格式 (type={json_type})，尝试 Chat 兜底"
+    );
+    if let Ok(chunk) = serde_json::from_value::<ChatCompletionsStreamChunk>(json.clone()) {
+        let events = ChatCompletionsToOpenResponsesStream::new()
+            .transform(chunk)
+            .map_err(|e| format!("Chat 兜底转换失败: {e}"))?;
+        return Ok(events);
+    }
+
+    Err(format!(
+        "上游 (openai_response) 返回无法识别的 SSE 数据: type={json_type}"
+    ))
+}
+
+    /// Stage 2: hub 事件 → 下游格式
+    fn stage_hub_to_downstream(
         &mut self,
-        hub_event: &OpenResponsesStreamEvent,
-    ) -> Result<Vec<u8>, String> {
-        match self.hub_to_inbound.as_mut().unwrap() {
-            HubToInboundConverter::OpenResponsesToChatCompletions(c) => {
-                let out: Vec<ChatCompletionsStreamChunk> = c
-                    .transform(hub_event.clone())
-                    .map_err(|e| format!("OpenResponses → OpenAI Chat 转换失败: {e}"))?;
+        hub_events: &[OpenResponsesStreamEvent],
+    ) -> Result<Bytes, String> {
+        match self.hub_to_inbound.as_mut() {
+            Some(HubToInboundConverter::OpenResponsesToChatCompletions(c)) => {
                 let mut bytes = Vec::new();
-                for chunk in out {
-                    let s = serde_json::to_string(&chunk)
-                        .map_err(|e| format!("序列化 OpenAI Chat chunk 失败: {e}"))?;
-                    bytes.extend_from_slice(b"data: ");
-                    bytes.extend_from_slice(s.as_bytes());
-                    bytes.extend_from_slice(b"\n\n");
-                }
-                Ok(bytes)
-            }
-            HubToInboundConverter::OpenResponsesToAnthropic(c) => {
-                let out: Vec<AnthropicStreamEvent> = c
-                    .transform(hub_event.clone())
-                    .map_err(|e| format!("OpenResponses → Anthropic 转换失败: {e}"))?;
-                let mut bytes = Vec::new();
-                for event in out {
-                    let json_str = serde_json::to_string(&event)
-                        .map_err(|e| format!("序列化 Anthropic event 失败: {e}"))?;
-                    if let Some(et) = extract_anthropic_event_type(&event) {
-                        bytes.extend_from_slice(b"event: ");
-                        bytes.extend_from_slice(et.as_bytes());
-                        bytes.extend_from_slice(b"\n");
+                for hub in hub_events {
+                    let out: Vec<ChatCompletionsStreamChunk> = c
+                        .transform(hub.clone())
+                        .map_err(|e| format!("Hub→Chat 转换失败: {e}"))?;
+                    for chunk in out {
+                        let s = serde_json::to_string(&chunk)
+                            .map_err(|e| format!("Chat chunk 序列化失败: {e}"))?;
+                        bytes.extend_from_slice(b"data: ");
+                        bytes.extend_from_slice(s.as_bytes());
+                        bytes.extend_from_slice(b"\n\n");
                     }
-                    bytes.extend_from_slice(b"data: ");
-                    bytes.extend_from_slice(json_str.as_bytes());
-                    bytes.extend_from_slice(b"\n\n");
                 }
-                Ok(bytes)
+                Ok(Bytes::from(bytes))
             }
+            Some(HubToInboundConverter::OpenResponsesToAnthropic(c)) => {
+                let mut bytes = Vec::new();
+                for hub in hub_events {
+                    let out: Vec<AnthropicStreamEvent> = c
+                        .transform(hub.clone())
+                        .map_err(|e| format!("Hub→Anthropic 转换失败: {e}"))?;
+                    for event in out {
+                        let json_str = serde_json::to_string(&event)
+                            .map_err(|e| format!("Anthropic event 序列化失败: {e}"))?;
+                        if let Some(et) = extract_anthropic_event_type(&event) {
+                            bytes.extend_from_slice(b"event: ");
+                            bytes.extend_from_slice(et.as_bytes());
+                            bytes.extend_from_slice(b"\n");
+                        }
+                        bytes.extend_from_slice(b"data: ");
+                        bytes.extend_from_slice(json_str.as_bytes());
+                        bytes.extend_from_slice(b"\n\n");
+                    }
+                }
+                Ok(Bytes::from(bytes))
+            }
+            None => serialize_open_responses_events(hub_events),
         }
     }
 }
@@ -525,6 +551,37 @@ pub fn serialize_open_responses_events(events: &[OpenResponsesStreamEvent]) -> R
         bytes.extend_from_slice(b"\n\n");
     }
     Ok(Bytes::from(bytes))
+}
+
+/// 补全缺失的必需字段后重新生成 OpenResponses 事件 JSON
+///
+/// 部分上游（openai_response）返回的事件可能缺少 id/status/output 等必需字段。
+/// 注入默认值后重新序列化为 JSON，仅在原始 JSON 包含合理字段时生效。
+fn patch_hub_event(mut json: serde_json::Value) -> Option<serde_json::Value> {
+    let obj = json.as_object_mut()?;
+
+    fn ensure(obj: &mut serde_json::Map<String, serde_json::Value>, key: &str, value: serde_json::Value) {
+        if obj.get(key).is_none_or(|v| v.is_null()) {
+            tracing::trace!("patch hub: {key}");
+            obj.insert(key.to_string(), value);
+        }
+    }
+
+    ensure(obj, "sequence_number", serde_json::Value::Number(0.into()));
+    if obj.contains_key("id") {
+        ensure(obj, "id", serde_json::Value::String(String::new()));
+    }
+
+    if let Some(response) = obj.get_mut("response").and_then(|r| r.as_object_mut()) {
+        ensure(response, "id", serde_json::Value::String(String::new()));
+        ensure(response, "object", serde_json::Value::String("response".into()));
+        ensure(response, "created_at", serde_json::Value::Number(0.into()));
+        ensure(response, "status", serde_json::Value::String("in_progress".into()));
+        ensure(response, "model", serde_json::Value::String(String::new()));
+        ensure(response, "output", serde_json::Value::Array(Vec::new()));
+    }
+
+    Some(json)
 }
 
 #[cfg(test)]

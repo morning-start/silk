@@ -78,6 +78,12 @@ pub trait AgentConfigWriter: Send + Sync {
 // --- Claude Code ---
 pub struct ClaudeCodeWriter;
 
+impl Default for ClaudeCodeWriter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl ClaudeCodeWriter {
     pub fn new() -> Self {
         Self
@@ -101,6 +107,12 @@ impl AgentConfigWriter for ClaudeCodeWriter {
 
 // --- Codex ---
 pub struct CodexWriter;
+
+impl Default for CodexWriter {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl CodexWriter {
     pub fn new() -> Self {
@@ -126,6 +138,12 @@ impl AgentConfigWriter for CodexWriter {
 // --- Gemini CLI ---
 pub struct GeminiCliWriter;
 
+impl Default for GeminiCliWriter {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl GeminiCliWriter {
     pub fn new() -> Self {
         Self
@@ -149,6 +167,12 @@ impl AgentConfigWriter for GeminiCliWriter {
 
 // --- OpenCode（累加模式）---
 pub struct OpenCodeWriter;
+
+impl Default for OpenCodeWriter {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl OpenCodeWriter {
     pub fn new() -> Self {
@@ -204,6 +228,12 @@ impl AgentConfigWriter for OpenCodeWriter {
 
 // --- Hermes（累加模式，YAML）---
 pub struct HermesWriter;
+
+impl Default for HermesWriter {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl HermesWriter {
     pub fn new() -> Self {
@@ -462,10 +492,7 @@ pub async fn switch(
     ProfileRepo::deactivate_all(pool, &agent_type).await?;
     ProfileRepo::activate(pool, &profile_id).await?;
 
-    let requires_restart = match agent_type.as_str() {
-        "opencode" | "hermes" => false,
-        _ => true,
-    };
+    let requires_restart = !matches!(agent_type.as_str(), "opencode" | "hermes");
 
     if requires_restart {
         warnings.push("请重启终端/应用以使配置生效".to_string());

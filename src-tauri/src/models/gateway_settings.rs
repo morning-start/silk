@@ -142,7 +142,7 @@ impl GatewaySettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateGatewaySettings {
     pub bind_host: Option<String>,
     pub bind_port: Option<i64>,
@@ -156,23 +156,4 @@ pub struct UpdateGatewaySettings {
     pub rate_limit_enabled: Option<bool>,
     pub rate_limit_max_requests_per_minute: Option<i64>,
     pub rate_limit_max_tokens_per_minute: Option<i64>,
-}
-
-impl Default for UpdateGatewaySettings {
-    fn default() -> Self {
-        Self {
-            bind_host: None,
-            bind_port: None,
-            allow_remote: None,
-            log_retention_days: None,
-            launch_at_startup: None,
-            minimize_to_tray: None,
-            close_to_tray: None,
-            auto_start_gateway: None,
-            default_provider_id: None,
-            rate_limit_enabled: None,
-            rate_limit_max_requests_per_minute: None,
-            rate_limit_max_tokens_per_minute: None,
-        }
-    }
 }

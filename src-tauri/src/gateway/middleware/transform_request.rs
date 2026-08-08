@@ -40,6 +40,23 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         }
     }
 
+    // 注入默认 max_tokens（Claude 协议必需字段）
+    // Anthropic API 要求请求中必须包含 max_tokens，当客户端未传入时设置默认值 1024
+    if target_protocol == "claude_messages" {
+        if let Some(body) = ctx.get_parsed_body() {
+            if body.get("max_tokens").is_none() {
+                let mut json = body.clone();
+                json["max_tokens"] = serde_json::Value::Number(1024.into());
+                ctx.update_body(json).map_err(|e| {
+                    StageError::new(
+                        ctx.clone(),
+                        GatewayError::BadRequest(format!("注入 max_tokens 字段失败: {e}")),
+                    )
+                })?;
+            }
+        }
+    }
+
     // 跨协议时转换请求体格式：inbound → hub → outbound
     let request_bytes = if inbound != outbound {
         tracing::debug!(
