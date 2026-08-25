@@ -7,6 +7,13 @@
       "sourceType": "github",
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "93f53fd1c0352d3d7ec17b8f73d7351bf76f4821e55d123c9d2abc2c53ba48e4"
+    },
+    "prism-wasm-integration": {
+      "source": "morning-start/prism",
+      "ref": "master",
+      "sourceType": "github",
+      "skillPath": "skills/prism-wasm-skill/SKILL.md",
+      "computedHash": "09154f4bef96be00f45420d266e3354ce4e96be72e84349be67c9ecc262f5fd2"
     }
   }
 }
