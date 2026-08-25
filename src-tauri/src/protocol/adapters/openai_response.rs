@@ -1,7 +1,5 @@
 use async_trait::async_trait;
 
-use linguafranca::open_responses::request::OpenResponsesRequest;
-
 use crate::models::Provider;
 use crate::protocol::adapter::{
     build_bearer_headers, build_upstream, ProtocolError, ProviderAdapter, UpstreamRequest,
@@ -22,7 +20,7 @@ impl ProviderAdapter for OpenAIResponseAdapter {
         provider: &Provider,
         selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError> {
-        build_upstream::<OpenResponsesRequest>(
+        build_upstream(
             req_body,
             provider,
             selected_api_key,

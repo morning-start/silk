@@ -1,24 +1,9 @@
 use bytes::Bytes;
-use once_cell::sync::Lazy;
-use std::sync::Arc;
 
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
-use crate::protocol::converter::ConverterRegistry;
-use crate::protocol::converters::*;
-
-/// 全局协议转换器注册表
-static CONVERTER_REGISTRY: Lazy<Arc<ConverterRegistry>> = Lazy::new(|| {
-    let mut registry = ConverterRegistry::new();
-
-    // 注册所有转换器
-    registry.register(Arc::new(openai_chat::OpenAIChatConverter::new()));
-    registry.register(Arc::new(claude_messages::ClaudeMessagesConverter::new()));
-    registry.register(Arc::new(openai_response::OpenAIResponseConverter::new()));
-
-    Arc::new(registry)
-});
+use crate::protocol::prism_wasm;
 
 /// 请求转换中间件
 ///
@@ -70,7 +55,7 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         }
     }
 
-    // 使用新的协议转换层进行跨协议转换
+    // 使用 prism.wasm 进行跨协议转换
     let request_bytes: Bytes = if inbound != outbound {
         tracing::debug!(
             "跨协议格式转换: inbound={}, outbound={}",
@@ -78,21 +63,10 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
             outbound
         );
 
-        let converter = CONVERTER_REGISTRY
-            .find_converter(&inbound, &outbound)
-            .ok_or_else(|| {
-                StageError::new(
-                    ctx.clone(),
-                    GatewayError::Transform(format!(
-                        "不支持的协议转换: {inbound} -> {outbound}"
-                    )),
-                )
-            })?;
-
-        converter
-            .convert_request(&ctx.request_body, &inbound, &outbound)
-            .await
-            .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e.to_string())))?
+        let body_str = String::from_utf8_lossy(&ctx.request_body).to_string();
+        let converted = prism_wasm::convert_request(&inbound, &body_str, &outbound)
+            .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e)))?;
+        Bytes::from(converted)
     } else {
         Bytes::from(ctx.request_body.to_vec())
     };

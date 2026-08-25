@@ -1,9 +1,5 @@
 use async_trait::async_trait;
 
-use linguafranca::chat_completions_openai::request::ChatCompletionsOpenAiRequest;
-use linguafranca::chat_completions_openai::response::ChatCompletionsOpenAiResponse;
-use linguafranca::traits::IntoOpenResponses;
-
 use crate::models::Provider;
 use crate::protocol::adapter::{
     build_bearer_headers, build_upstream, ProtocolError, ProviderAdapter, UpstreamRequest,
@@ -24,7 +20,7 @@ impl ProviderAdapter for OpenAIChatAdapter {
         provider: &Provider,
         selected_api_key: &str,
     ) -> Result<UpstreamRequest, ProtocolError> {
-        build_upstream::<ChatCompletionsOpenAiRequest>(
+        build_upstream(
             req_body,
             provider,
             selected_api_key,
@@ -37,16 +33,8 @@ impl ProviderAdapter for OpenAIChatAdapter {
         &self,
         resp: &UpstreamResponse,
     ) -> Result<serde_json::Value, ProtocolError> {
-        let chat_resp: ChatCompletionsOpenAiResponse = serde_json::from_value(resp.body.clone())
-            .map_err(|e| ProtocolError::SerializationError(e.to_string()))?;
-
-        let openai_resp = chat_resp
-            .into_open_responses(None)
-            .map_err(|e| ProtocolError::Transform(e.to_string()))?
-            .value;
-
-        serde_json::to_value(openai_resp)
-            .map_err(|e| ProtocolError::SerializationError(e.to_string()))
+        // 协议转换已由 prism.wasm 完成，此处透传上游响应
+        Ok(resp.body.clone())
     }
 }
 

@@ -5,18 +5,9 @@ use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures::Stream;
-use linguafranca::anthropic::convert::stream::{
-    AnthropicMessagesToOpenResponsesStream, OpenResponsesToAnthropicMessagesStream,
-};
-use linguafranca::anthropic::stream::AnthropicStreamEvent;
-use linguafranca::chat_completions_openai::convert::stream::{
-    ChatCompletionsToOpenResponsesStream, OpenResponsesToChatCompletionsStream,
-};
-use linguafranca::chat_completions_openai::stream::ChatCompletionsStreamChunk;
-use linguafranca::open_responses::stream::OpenResponsesStreamEvent;
-use linguafranca::stream::StreamTransform;
 
 use crate::gateway::error::GatewayError;
+use crate::protocol::prism_wasm;
 
 /// 流式响应类型
 pub enum StreamResponse {
@@ -343,245 +334,103 @@ impl Default for StreamState {
 // SSE 协议转换器（从 dispatch_upstream 拆分）
 // ---------------------------------------------------------------------------
 
-/// 流式 SSE 事件协议转换器
+/// 流式 SSE 事件协议转换器（基于 prism.wasm 整段转换 + 增量差分）
 ///
-/// 转换架构（hub = OpenResponsesStreamEvent）：
-///   openai_chat    ──ChatToHub──→  hub  ──HubToChat──→  openai_chat
-///   claude_messages ──ClaudeToHub→  hub  ──HubToClaude→ claude_messages
-///   openai_response                  hub                openai_response
+/// prism 的 `wasm_convert_stream` 是整段转换（SSE 文本 → SSE 文本），
+/// 本转换器通过累积事件文本 + 全量重转换 + 输出差分，实现逐事件增量转发：
+/// - 每个事件序列化后追加到 `buffer`
+/// - 每次调用对完整 buffer 调用 `prism_wasm::convert_stream`
+/// - 只返回本次新增的输出（delta），保证流式低延迟
+/// - 过滤无 `data:` 的空事件（prism 对 content_block_start 等会输出空占位）
 ///
-/// - 出站为 openai_response：数据已是 hub，跳过 outbound→hub
-/// - 入站为 openai_response：hub 已是最终格式，跳过 hub→inbound
+/// 已实测两个方向（openai-chat ↔ anthropic）转换输出单调（追加只增不改），
+/// 差分可靠；若出现非单调（异常），整段重发避免丢内容。
 pub struct SseConverter {
-    /// outbound → hub 转换器（None 表示出站已是 hub 格式）
-    pub outbound_to_hub: Option<OutboundToHubConverter>,
-    /// hub → inbound 转换器（None 表示入站已是 hub 格式）
-    pub hub_to_inbound: Option<HubToInboundConverter>,
-}
-
-pub enum OutboundToHubConverter {
-    ChatCompletionsToOpenResponses(ChatCompletionsToOpenResponsesStream),
-    AnthropicToOpenResponses(AnthropicMessagesToOpenResponsesStream),
-}
-
-pub enum HubToInboundConverter {
-    OpenResponsesToChatCompletions(OpenResponsesToChatCompletionsStream),
-    OpenResponsesToAnthropic(OpenResponsesToAnthropicMessagesStream),
+    /// 是否需要转换（inbound != outbound 且协议可映射）
+    enabled: bool,
+    /// 源协议（上游，silk 协议名）
+    source: String,
+    /// 目标协议（下游，silk 协议名）
+    target: String,
+    /// 累积的上游 SSE 文本缓冲
+    buffer: String,
+    /// 上次完整转换输出（用于增量差分）
+    last_output: String,
 }
 
 impl SseConverter {
     pub fn new(inbound: &str, outbound: &str) -> Self {
-        if inbound == outbound || inbound.is_empty() || outbound.is_empty() {
-            return Self { outbound_to_hub: None, hub_to_inbound: None };
-        }
+        let enabled = inbound != outbound
+            && !inbound.is_empty()
+            && !outbound.is_empty()
+            && prism_wasm::map_provider(inbound).is_some()
+            && prism_wasm::map_provider(outbound).is_some();
         Self {
-            outbound_to_hub: match outbound {
-                "openai_chat" => Some(OutboundToHubConverter::ChatCompletionsToOpenResponses(
-                    ChatCompletionsToOpenResponsesStream::new(),
-                )),
-                "claude_messages" => Some(OutboundToHubConverter::AnthropicToOpenResponses(
-                    AnthropicMessagesToOpenResponsesStream::new(),
-                )),
-                _ => None,
-            },
-            hub_to_inbound: match inbound {
-                "openai_chat" => Some(HubToInboundConverter::OpenResponsesToChatCompletions(
-                    OpenResponsesToChatCompletionsStream::new(),
-                )),
-                "claude_messages" => Some(HubToInboundConverter::OpenResponsesToAnthropic(
-                    OpenResponsesToAnthropicMessagesStream::new(),
-                )),
-                _ => None,
-            },
+            enabled,
+            source: outbound.to_string(),
+            target: inbound.to_string(),
+            buffer: String::new(),
+            last_output: String::new(),
         }
     }
 
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
-        if self.outbound_to_hub.is_none() && self.hub_to_inbound.is_none() {
+        if !self.enabled {
             return Ok(Bytes::from(event.serialize()));
         }
-
-        let data = match &event.data {
-            Some(d) => d,
-            None => return Ok(Bytes::from(event.serialize())),
+        // 追加当前事件到缓冲
+        self.buffer.push_str(&event.serialize());
+        // 整段转换（prism 是整段 SSE 文本 → SSE 文本）
+        let full = prism_wasm::convert_stream(&self.source, &self.buffer, &self.target)?;
+        // 过滤空事件并剥离末尾 [DONE]（由 dispatch 统一发送流结束标记）
+        let filtered = filter_empty_events(&full);
+        // 增量差分：只返回新增部分（prism 转换输出单调，追加只增不改）
+        let delta = if filtered.starts_with(&self.last_output) {
+            filtered[self.last_output.len()..].to_string()
+        } else {
+            // 非单调（异常）：整段重发，避免丢内容
+            filtered.clone()
         };
-        let json: serde_json::Value =
-            serde_json::from_str(data).map_err(|e| format!("JSON 解析失败: {e}"))?;
-
-        let json_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-
-        let outbound_some = self.outbound_to_hub.is_some();
-        let inbound_some = self.hub_to_inbound.is_some();
-        let hub_events = self.stage_upstream_to_hub(json)?;
-
-        tracing::debug!("hub_events={} {}, {}->hub→{}", hub_events.len(), json_type,
-            if outbound_some { "outbound" } else { "hub" },
-            if inbound_some { "inbound" } else { "hub" });
-
-        self.stage_hub_to_downstream(&hub_events)
+        self.last_output = filtered;
+        Ok(Bytes::from(delta))
     }
 
-    /// Stage 1: 上游响应 → hub (OpenResponsesStreamEvent)
-    fn stage_upstream_to_hub(
-        &mut self,
-        json: serde_json::Value,
-    ) -> Result<Vec<OpenResponsesStreamEvent>, String> {
-        match self.outbound_to_hub.as_mut() {
-            Some(OutboundToHubConverter::ChatCompletionsToOpenResponses(c)) => {
-                let chunk: ChatCompletionsStreamChunk = serde_json::from_value(json)
-                    .map_err(|e| format!("Chat chunk 解析失败: {e}"))?;
-                c.transform(chunk).map_err(|e| format!("Chat→Hub 转换失败: {e}"))
-            }
-            Some(OutboundToHubConverter::AnthropicToOpenResponses(c)) => {
-                let event: AnthropicStreamEvent = serde_json::from_value(json)
-                    .map_err(|e| format!("Anthropic event 解析失败: {e}"))?;
-                c.transform(event).map_err(|e| format!("Anthropic→Hub 转换失败: {e}"))
-            }
-            None => Self::parse_hub_response(json),
+    /// 流结束冲刷：追加 `[DONE]` 使 prism 输出收尾事件（如 anthropic message_stop）。
+    ///
+    /// 上游 openai-chat 的 `[DONE]` 由 dispatch 拦截并发送流结束标记，不会
+    /// 经过 convert()；但 prism 需要看到 `[DONE]` 才会输出 message_stop 等
+    /// 收尾事件，故在流结束时显式调用本方法冲刷最终增量。
+    pub fn finish(&mut self) -> Result<Bytes, String> {
+        if !self.enabled {
+            return Ok(Bytes::new());
         }
-    }
-
-/// 上游响应是 hub 格式（openai_response），尝试直接解析
-fn parse_hub_response(json: serde_json::Value) -> Result<Vec<OpenResponsesStreamEvent>, String> {
-    let json_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-
-    // 尝试 1: 直接解析为完整的 OpenResponsesStreamEvent
-    if let Ok(ev) = serde_json::from_value::<OpenResponsesStreamEvent>(json.clone()) {
-        return Ok(vec![ev]);
-    }
-
-    // 尝试 2: 补全缺失的必需字段后重试
-    if json_type.starts_with("response.") {
-        if let Some(patched) = patch_hub_event(json.clone()) {
-            if let Ok(ev) = serde_json::from_value::<OpenResponsesStreamEvent>(patched) {
-                return Ok(vec![ev]);
-            }
-        }
-    }
-
-    // 尝试 3: 退一步，检查是否为 OpenAI Chat 格式
-    tracing::warn!(
-        "上游配置为 openai_response 但返回非 OpenResponses 格式 (type={json_type})，尝试 Chat 兜底"
-    );
-    if let Ok(chunk) = serde_json::from_value::<ChatCompletionsStreamChunk>(json.clone()) {
-        let events = ChatCompletionsToOpenResponsesStream::new()
-            .transform(chunk)
-            .map_err(|e| format!("Chat 兜底转换失败: {e}"))?;
-        return Ok(events);
-    }
-
-    Err(format!(
-        "上游 (openai_response) 返回无法识别的 SSE 数据: type={json_type}"
-    ))
-}
-
-    /// Stage 2: hub 事件 → 下游格式
-    fn stage_hub_to_downstream(
-        &mut self,
-        hub_events: &[OpenResponsesStreamEvent],
-    ) -> Result<Bytes, String> {
-        match self.hub_to_inbound.as_mut() {
-            Some(HubToInboundConverter::OpenResponsesToChatCompletions(c)) => {
-                let mut bytes = Vec::new();
-                for hub in hub_events {
-                    let out: Vec<ChatCompletionsStreamChunk> = c
-                        .transform(hub.clone())
-                        .map_err(|e| format!("Hub→Chat 转换失败: {e}"))?;
-                    for chunk in out {
-                        let s = serde_json::to_string(&chunk)
-                            .map_err(|e| format!("Chat chunk 序列化失败: {e}"))?;
-                        bytes.extend_from_slice(b"data: ");
-                        bytes.extend_from_slice(s.as_bytes());
-                        bytes.extend_from_slice(b"\n\n");
-                    }
-                }
-                Ok(Bytes::from(bytes))
-            }
-            Some(HubToInboundConverter::OpenResponsesToAnthropic(c)) => {
-                let mut bytes = Vec::new();
-                for hub in hub_events {
-                    let out: Vec<AnthropicStreamEvent> = c
-                        .transform(hub.clone())
-                        .map_err(|e| format!("Hub→Anthropic 转换失败: {e}"))?;
-                    for event in out {
-                        let json_str = serde_json::to_string(&event)
-                            .map_err(|e| format!("Anthropic event 序列化失败: {e}"))?;
-                        if let Some(et) = extract_anthropic_event_type(&event) {
-                            bytes.extend_from_slice(b"event: ");
-                            bytes.extend_from_slice(et.as_bytes());
-                            bytes.extend_from_slice(b"\n");
-                        }
-                        bytes.extend_from_slice(b"data: ");
-                        bytes.extend_from_slice(json_str.as_bytes());
-                        bytes.extend_from_slice(b"\n\n");
-                    }
-                }
-                Ok(Bytes::from(bytes))
-            }
-            None => serialize_open_responses_events(hub_events),
-        }
+        self.buffer.push_str("data: [DONE]\n\n");
+        let full = prism_wasm::convert_stream(&self.source, &self.buffer, &self.target)?;
+        let filtered = filter_empty_events(&full);
+        let delta = if filtered.starts_with(&self.last_output) {
+            filtered[self.last_output.len()..].to_string()
+        } else {
+            filtered.clone()
+        };
+        self.last_output = filtered;
+        Ok(Bytes::from(delta))
     }
 }
 
-/// 提取 AnthropicStreamEvent 的 type 字段值（用于 SSE event: 行）
-pub fn extract_anthropic_event_type(event: &AnthropicStreamEvent) -> Option<String> {
-    let json = serde_json::to_value(event).ok()?;
-    json.get("type").and_then(|v| v.as_str()).map(|s| s.to_string())
-}
-
-/// 将 OpenResponsesStreamEvent 列表序列化为 SSE 文本
-pub fn serialize_open_responses_events(events: &[OpenResponsesStreamEvent]) -> Result<Bytes, String> {
-    let mut bytes = Vec::new();
-    for event in events {
-        let json_val = serde_json::to_value(event)
-            .map_err(|e| format!("序列化 OpenResponses event 失败: {e}"))?;
-        let et = json_val
-            .get("type")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let json_str = serde_json::to_string(&json_val)
-            .map_err(|e| format!("JSON to string 失败: {e}"))?;
-        if let Some(et) = et {
-            bytes.extend_from_slice(b"event: ");
-            bytes.extend_from_slice(et.as_bytes());
-            bytes.extend_from_slice(b"\n");
-        }
-        bytes.extend_from_slice(b"data: ");
-        bytes.extend_from_slice(json_str.as_bytes());
-        bytes.extend_from_slice(b"\n\n");
-    }
-    Ok(Bytes::from(bytes))
-}
-
-/// 补全缺失的必需字段后重新生成 OpenResponses 事件 JSON
+/// 过滤无 `data:` 行的空 SSE 事件，并剥离末尾 `data: [DONE]`。
 ///
-/// 部分上游（openai_response）返回的事件可能缺少 id/status/output 等必需字段。
-/// 注入默认值后重新序列化为 JSON，仅在原始 JSON 包含合理字段时生效。
-fn patch_hub_event(mut json: serde_json::Value) -> Option<serde_json::Value> {
-    let obj = json.as_object_mut()?;
-
-    fn ensure(obj: &mut serde_json::Map<String, serde_json::Value>, key: &str, value: serde_json::Value) {
-        if obj.get(key).is_none_or(|v| v.is_null()) {
-            tracing::trace!("patch hub: {key}");
-            obj.insert(key.to_string(), value);
-        }
+/// prism 对 content_block_start 等事件会输出空占位（`\n\n`），需过滤；
+/// `[DONE]` 由 dispatch 统一发送流结束标记，避免重复。
+fn filter_empty_events(sse: &str) -> String {
+    let blocks: Vec<&str> = sse
+        .split("\n\n")
+        .filter(|b| b.contains("data:") && !b.trim_end().ends_with("data: [DONE]"))
+        .collect();
+    if blocks.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n\n", blocks.join("\n\n"))
     }
-
-    ensure(obj, "sequence_number", serde_json::Value::Number(0.into()));
-    if obj.contains_key("id") {
-        ensure(obj, "id", serde_json::Value::String(String::new()));
-    }
-
-    if let Some(response) = obj.get_mut("response").and_then(|r| r.as_object_mut()) {
-        ensure(response, "id", serde_json::Value::String(String::new()));
-        ensure(response, "object", serde_json::Value::String("response".into()));
-        ensure(response, "created_at", serde_json::Value::Number(0.into()));
-        ensure(response, "status", serde_json::Value::String("in_progress".into()));
-        ensure(response, "model", serde_json::Value::String(String::new()));
-        ensure(response, "output", serde_json::Value::Array(Vec::new()));
-    }
-
-    Some(json)
 }
 
 #[cfg(test)]
@@ -676,5 +525,118 @@ mod tests {
     fn test_stream_end_marker() {
         let end = stream_end_marker();
         assert_eq!(end, Bytes::from("data: [DONE]\n\n"));
+    }
+
+    #[test]
+    fn test_sse_converter_openai_chat_to_anthropic_incremental() {
+        // openai-chat 上游 → anthropic 下游：逐事件增量差分，最终含 message_stop
+        let mut converter = SseConverter::new("claude_messages", "openai_chat");
+        let mut all = String::new();
+
+        let ev1 = SseEvent {
+            event: None,
+            data: Some(r#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        let out1 = converter.convert(&ev1).expect("convert 1");
+        let s1 = String::from_utf8(out1.to_vec()).unwrap();
+        assert!(s1.contains("content_block_delta"), "s1: {s1}");
+        assert!(s1.contains("Hello"), "s1: {s1}");
+        all.push_str(&s1);
+
+        let ev2 = SseEvent {
+            event: None,
+            data: Some(r#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        let out2 = converter.convert(&ev2).expect("convert 2");
+        let s2 = String::from_utf8(out2.to_vec()).unwrap();
+        all.push_str(&s2);
+
+        // finish 冲刷：prism 看到 [DONE] 后输出 message_stop
+        let out3 = converter.finish().expect("finish");
+        let s3 = String::from_utf8(out3.to_vec()).unwrap();
+        all.push_str(&s3);
+
+        assert!(all.contains("content_block_delta"), "all: {all}");
+        assert!(all.contains("Hello"), "all: {all}");
+        assert!(all.contains("message_stop"), "all: {all}");
+        // 不应包含重复的 [DONE]（由 dispatch 统一发送）
+        assert!(!all.contains("[DONE]"), "all: {all}");
+    }
+
+    #[test]
+    fn test_sse_converter_anthropic_to_openai_chat() {
+        // anthropic 上游 → openai-chat 下游：message_start 上下文 + 增量差分
+        let mut converter = SseConverter::new("openai_chat", "claude_messages");
+        let mut all = String::new();
+
+        let ev1 = SseEvent {
+            event: Some("message_start".to_string()),
+            data: Some(r#"{"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"claude-3","content":[],"usage":{"input_tokens":5,"output_tokens":1}}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        let out1 = converter.convert(&ev1).expect("convert 1");
+        all.push_str(&String::from_utf8(out1.to_vec()).unwrap());
+
+        // content_block_start 是 delta 的前置上下文（prism 需要它）
+        let ev_start = SseEvent {
+            event: Some("content_block_start".to_string()),
+            data: Some(r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        let _ = converter.convert(&ev_start).expect("convert start");
+
+        let ev2 = SseEvent {
+            event: Some("content_block_delta".to_string()),
+            data: Some(r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        let out2 = converter.convert(&ev2).expect("convert 2");
+        let s2 = String::from_utf8(out2.to_vec()).unwrap();
+        all.push_str(&s2);
+        assert!(s2.contains("Hello"), "s2: {s2}");
+
+        let ev3 = SseEvent {
+            event: Some("message_stop".to_string()),
+            data: Some(r#"{"type":"message_stop"}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        let out3 = converter.convert(&ev3).expect("convert 3");
+        all.push_str(&String::from_utf8(out3.to_vec()).unwrap());
+
+        assert!(all.contains("Hello"), "all: {all}");
+        // [DONE] 由 dispatch 统一发送，转换器输出不应包含
+        assert!(!all.contains("[DONE]"), "all: {all}");
+    }
+
+    #[test]
+    fn test_sse_converter_same_protocol_passthrough() {
+        let mut converter = SseConverter::new("openai_chat", "openai_chat");
+        let ev = SseEvent {
+            event: None,
+            data: Some(r#"{"choices":[{"delta":{"content":"x"}}]}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        let out = converter.convert(&ev).expect("passthrough");
+        let s = String::from_utf8(out.to_vec()).unwrap();
+        assert!(s.contains("data: "), "s: {s}");
+        // finish 在未启用时返回空
+        let fin = converter.finish().expect("finish");
+        assert!(fin.is_empty());
     }
 }

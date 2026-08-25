@@ -329,6 +329,12 @@ async fn handle_sse_response(
                                 }
 
                                 if event.is_end() {
+                                    // 冲刷转换器收尾事件（如 anthropic message_stop）
+                                    if let Ok(bytes) = converter.finish() {
+                                        if !bytes.is_empty() {
+                                            let _ = tx.send(Ok(bytes)).await;
+                                        }
+                                    }
                                     let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
                                     let _ = complete_tx.send(());
                                     return;
