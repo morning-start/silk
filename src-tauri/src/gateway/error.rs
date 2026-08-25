@@ -1,7 +1,6 @@
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Serialize;
-use serde_json::json;
 use thiserror::Error;
 
 #[derive(Debug, Serialize)]
@@ -47,20 +46,6 @@ pub enum GatewayError {
         status: u16,
         body: serde_json::Value,
     },
-}
-
-impl From<crate::protocol::ProtocolError> for GatewayError {
-    fn from(err: crate::protocol::ProtocolError) -> Self {
-        match &err {
-            crate::protocol::ProtocolError::UpstreamError { status, message } => {
-                GatewayError::UpstreamError {
-                    status: *status,
-                    body: json!({"error": {"message": message}}),
-                }
-            }
-            _ => GatewayError::Transform(err.to_string()),
-        }
-    }
 }
 
 impl GatewayError {

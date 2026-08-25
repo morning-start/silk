@@ -6,7 +6,7 @@ use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::middleware::{
     authenticate, dispatch_upstream, extract, finalize, persist_log, rate_limit, resolve_route,
-    select_channel, transform_request, transform_response,
+    select_channel, transform_request,
 };
 
 pub struct StageError {
@@ -148,8 +148,8 @@ impl GatewayPipeline {
                 // dispatch_upstream 内部包含 Level 1（重试）
                 match dispatch_upstream::run(&self.runtime, ctx).await {
                     Ok(new_ctx) => {
-                        // 成功！继续到响应转换
-                        let mut ctx = transform_response::run(new_ctx).await?;
+                        // 成功！SSE 响应已在 dispatch_upstream 内构建
+                        let mut ctx = new_ctx;
                         // 执行插件 after_upstream 钩子
                         for plugin in &self.runtime.plugins {
                             ctx = plugin.after_upstream(ctx, &self.runtime).await?;

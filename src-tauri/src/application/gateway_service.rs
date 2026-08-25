@@ -8,7 +8,6 @@ use tokio::sync::RwLock;
 use crate::error::ServiceError;
 use crate::gateway::context::{GatewayContext, ProviderCache};
 use crate::gateway::spawn_gateway_server;
-use crate::protocol::AdapterRegistry;
 use crate::AppState;
 
 #[derive(Debug, Serialize)]
@@ -179,7 +178,6 @@ pub async fn load_gateway_context(
         .ok_or_else(|| sqlx::Error::Protocol("网关设置路径未初始化".to_string()))?;
     let settings = crate::persistence::GatewaySettingsRepo::load_effective(settings_path);
     let provider_cache = Arc::new(ProviderCache::new(Duration::from_secs(300)));
-    let adapter_registry = Arc::new(AdapterRegistry::new());
 
     let plugins = crate::gateway::plugins::default_token_saving_plugins();
 
@@ -188,7 +186,6 @@ pub async fn load_gateway_context(
         Arc::new(RwLock::new(settings)),
         provider_cache,
         log_sender,
-        adapter_registry,
         plugins,
     )
     .await

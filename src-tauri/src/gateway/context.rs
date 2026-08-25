@@ -9,7 +9,6 @@ use tokio::sync::{oneshot, RwLock};
 use crate::gateway::header_config::HeaderConfig;
 use crate::gateway::middleware::rate_limit::RateLimitState;
 use crate::models::{GatewaySettings, Provider};
-use crate::protocol::AdapterRegistry;
 
 // ---------------------------------------------------------------------------
 // GatewayContext
@@ -21,7 +20,6 @@ pub struct GatewayContext {
     pub settings: Arc<RwLock<GatewaySettings>>,
     pub provider_cache: Arc<ProviderCache>,
     pub log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
-    pub adapter_registry: Arc<AdapterRegistry>,
     /// 共享的 HTTP 客户端（非流式，带超时）
     pub http_client: reqwest::Client,
     /// 共享的 HTTP 客户端（流式，无超时）
@@ -40,7 +38,6 @@ impl GatewayContext {
         settings: Arc<RwLock<GatewaySettings>>,
         provider_cache: Arc<ProviderCache>,
         log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
-        adapter_registry: Arc<AdapterRegistry>,
         plugins: Vec<Arc<dyn crate::gateway::plugin::GatewayPlugin>>,
     ) -> Result<Self, String> {
         // 创建共享的 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
@@ -69,7 +66,6 @@ impl GatewayContext {
             settings,
             provider_cache,
             log_sender,
-            adapter_registry,
             http_client,
             http_client_streaming,
             header_config: HeaderConfig::default(),
@@ -183,8 +179,6 @@ pub struct RequestContextInner {
     pub response_bytes_sent: u64,
     /// 最后收到的 SSE 事件 ID（用于断线重连）
     pub last_event_id: Option<String>,
-    /// 适配器注册表（用于协议转换），在 resolve_route 阶段由 pipeline 注入
-    pub adapter_registry: Option<Arc<crate::protocol::AdapterRegistry>>,
     /// 远程模型名覆盖（来自 model_mapping_channels 的 selected_models）
     pub remote_model_override: Option<String>,
     /// 认证通过的 Gateway Key 名称（用于日志记录）
@@ -303,8 +297,6 @@ impl RequestContext {
                 upstream_body: None,
                 response_bytes_sent: 0,
                 last_event_id: None,
-                // adapter_registry 由 resolve_route 阶段注入，初始为 None
-                adapter_registry: None,
                 remote_model_override: None,
                 auth_key_name: None,
                 selected_api_key: None,

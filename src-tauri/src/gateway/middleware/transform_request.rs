@@ -3,7 +3,7 @@ use bytes::Bytes;
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
-use crate::protocol::prism_wasm;
+use crate::protocol::{adapters, prism_wasm};
 
 /// 请求转换中间件
 ///
@@ -71,23 +71,7 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         Bytes::from(ctx.request_body.to_vec())
     };
 
-    // 获取 outbound 适配器（生成正确的 URL、认证头、Content-Type）
-    let adapter = ctx
-        .adapter_registry
-        .as_ref()
-        .and_then(|reg| reg.get(target_protocol))
-        .or_else(|| {
-            ctx.adapter_registry
-                .as_ref()
-                .and_then(|reg| reg.get("openai_chat"))
-        })
-        .ok_or_else(|| {
-            StageError::new(
-                ctx.clone(),
-                GatewayError::Transform(format!("不支持的协议: {target_protocol}")),
-            )
-        })?;
-
+    // 构建上游请求（URL + Headers + Body）
     let provider = ctx.provider.as_ref().ok_or_else(|| {
         StageError::new(
             ctx.clone(),
@@ -102,11 +86,13 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         )
     })?;
 
-    // 调用 outbound 适配器转换（验证并生成请求头/URL/序列化 body）
-    let upstream_req = adapter
-        .transform_request(&request_bytes, provider, selected_api_key)
-        .await
-        .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e.to_string())))?;
+    let upstream_req = adapters::build_upstream_request(
+        &request_bytes,
+        provider,
+        selected_api_key,
+        target_protocol,
+    )
+    .map_err(|e| StageError::new(ctx.clone(), e))?;
 
     let new_body = serde_json::to_vec(&upstream_req.body)
         .map_err(|e| StageError::new(ctx.clone(), GatewayError::Serialization(e.to_string())))?;
@@ -121,14 +107,12 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::time::Instant;
 
     use axum::http::{HeaderMap, Method};
 
     use crate::gateway::context::RequestContext;
     use crate::models::Provider;
-    use crate::protocol::AdapterRegistry;
 
     use super::*;
 
@@ -169,7 +153,6 @@ mod tests {
         ctx.selected_api_key = Some("sk-test".to_string());
         ctx.inbound_protocol = Some("openai_chat".to_string());
         ctx.outbound_protocol = Some("openai_chat".to_string());
-        ctx.adapter_registry = Some(Arc::new(AdapterRegistry::new()));
         ctx
     }
 

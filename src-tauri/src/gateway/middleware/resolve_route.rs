@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
 use crate::load_balancer::{LoadBalanceStrategy, LoadBalancedItem, LoadBalancer};
 use crate::models::{ModelMappingChannel, Provider};
 use crate::persistence::{ModelMappingRepo, ProviderRepo};
-use crate::protocol::AdapterRegistry;
 
 use axum::response::IntoResponse;
 
@@ -143,7 +140,7 @@ async fn try_model_mapping_route(
     let provider = load_provider_with_cache(runtime, &selected_id, error_ctx).await?;
     let inbound = detect_inbound_protocol(&ctx.path, json).to_string();
     let outbound = resolve_protocol_adapter(&provider);
-    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
+    fill_routing_context(&mut ctx, provider, inbound, outbound);
 
     Ok(Some(ctx))
 }
@@ -163,7 +160,7 @@ async fn try_settings_default(
             let body_json = ctx.get_parsed_body().cloned().unwrap_or(serde_json::Value::Null);
             let inbound = detect_inbound_protocol(&ctx.path, &body_json).to_string();
             ctx.channels_available = all_enabled_provider_ids(runtime).await;
-            fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
+            fill_routing_context(&mut ctx, provider, inbound, outbound);
             return Ok(ctx);
         }
     }
@@ -216,7 +213,7 @@ async fn try_path_based_default(
     );
 
     // 上下文填充
-    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
+    fill_routing_context(&mut ctx, provider, inbound, outbound);
 
     Ok(ctx)
 }
@@ -296,7 +293,7 @@ pub async fn try_next_channel(
     let inbound_body = ctx.get_parsed_body().cloned().unwrap_or_default();
     let inbound = detect_inbound_protocol(&ctx.path, &inbound_body).to_string();
     let outbound = resolve_protocol_adapter(&provider);
-    fill_routing_context(&mut ctx, provider, inbound, outbound, runtime.adapter_registry.clone());
+    fill_routing_context(&mut ctx, provider, inbound, outbound);
     // 重置 Key 相关的失败记录（新渠道从头开始试 Key）
     ctx.failed_keys.clear();
     ctx.selected_api_key = None;
@@ -306,7 +303,7 @@ pub async fn try_next_channel(
 
 // ===== 阶段3：上下文填充：统一写入路由决策结果 =====
 
-/// 将路由决策结果写入请求上下文（provider + 协议 + 适配器注册表）
+/// 将路由决策结果写入请求上下文（provider + 协议）
 ///
 /// 所有 try_* 函数在确定 provider 和协议后，统一通过此函数填充上下文，
 /// 避免在各个路由分支中重复散落相同的字段赋值。
@@ -315,12 +312,10 @@ fn fill_routing_context(
     provider: Provider,
     inbound: String,
     outbound: String,
-    adapter_registry: Arc<AdapterRegistry>,
 ) {
     ctx.provider = Some(provider);
     ctx.inbound_protocol = Some(inbound);
     ctx.outbound_protocol = Some(outbound);
-    ctx.adapter_registry = Some(adapter_registry);
 }
 
 // ===== 工具函数：协议推断 =====

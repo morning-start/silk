@@ -2,14 +2,12 @@ pub mod authenticate;
 pub mod dispatch_upstream;
 pub mod extract;
 pub mod finalize;
-
 pub mod persist_log;
 pub mod rate_limit;
 pub mod resolve_route;
 pub mod select_channel;
 pub mod stream_response;
 pub mod transform_request;
-pub mod transform_response;
 
 // 内部工具函数（不对外暴露）
 pub(crate) mod internals {
