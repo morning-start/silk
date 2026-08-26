@@ -14,8 +14,8 @@ impl ProviderRepo {
             r#"
             INSERT INTO providers (id, name, protocols, models, keys, key_strategy, api_base_url,
                                    proxy_url, timeout_seconds, max_retries, status, health_status,
-                                   last_health_check_at, metadata_json, custom_headers, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                                   last_health_check_at, metadata_json, custom_headers, models_passthrough, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             RETURNING *
             "#,
         )
@@ -34,6 +34,7 @@ impl ProviderRepo {
         .bind(new.last_health_check_at)
         .bind(new.metadata_json.as_deref())
         .bind(defaults::to_json_opt(new.custom_headers.as_ref()))
+        .bind(new.models_passthrough.unwrap_or(false) as i64)
         .bind(now)
         .bind(now)
         .fetch_one(pool)
@@ -64,6 +65,15 @@ impl ProviderRepo {
         .await
     }
 
+    /// 查询所有启用且 models_passthrough 为 true 的 Provider
+    pub async fn find_passthrough_enabled(pool: &SqlitePool) -> Result<Vec<Provider>, sqlx::Error> {
+        sqlx::query_as::<_, Provider>(
+            r#"SELECT * FROM providers WHERE status = 'enabled' AND models_passthrough = 1 ORDER BY created_at DESC"#,
+        )
+        .fetch_all(pool)
+        .await
+    }
+
     /// 更新 Provider
     pub async fn update(
         pool: &SqlitePool,
@@ -89,7 +99,8 @@ impl ProviderRepo {
                 last_health_check_at = COALESCE($13, last_health_check_at),
                 metadata_json = COALESCE($14, metadata_json),
                 custom_headers = COALESCE($15, custom_headers),
-                updated_at = $16
+                models_passthrough = COALESCE($16, models_passthrough),
+                updated_at = $17
             WHERE id = $1
             RETURNING *
             "#,
@@ -109,6 +120,7 @@ impl ProviderRepo {
         .bind(update.last_health_check_at)
         .bind(update.metadata_json.as_deref())
         .bind(defaults::to_json_opt(update.custom_headers.as_ref()))
+        .bind(update.models_passthrough.map(|v| v as i64))
         .bind(now)
         .fetch_optional(pool)
         .await

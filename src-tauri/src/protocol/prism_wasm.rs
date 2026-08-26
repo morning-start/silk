@@ -60,20 +60,50 @@ impl PrismWasm {
         })
     }
 
-    /// 将 Rust 字符串按 UTF-16 ABI 写入线性内存 `ptr` 处
-    fn write_string(&mut self, ptr: u32, s: &str) {
-        let data = self.memory.data_mut(&mut self.store);
+    /// 将 Rust 字符串按 UTF-16 ABI 写入线性内存 `ptr` 处。
+    ///
+    /// 如果 `ptr` 处的暂存区（SCRATCH_STRIDE 字节）放不下，则动态扩展线性内存
+    /// 并将字符串写到当前线性内存末尾，确保远离 MoonBit GC 堆（GC 堆从 ~0x1000
+    /// 向上增长，不会追到线性内存末尾）。
+    fn write_string(&mut self, ptr: u32, s: &str) -> u32 {
         let units: Vec<u16> = s.encode_utf16().collect();
         let len = units.len() as u32;
-        // 长度头：ptr - 4
-        let header = (ptr as usize) - 4;
+        let needed = 4 + len * 2; // 长度头 + UTF-16LE 载荷
+
+        // 判断是否需要使用大字符串策略
+        let write_ptr = if needed <= SCRATCH_STRIDE {
+            ptr
+        } else {
+            // 大字符串：扩展线性内存，写到末尾。
+            // 取当前内存大小，扩展 needed 字节，写入新区域末尾。
+            let current_pages = self.memory.size(&self.store);
+            let current_bytes = (current_pages as usize) * 65536;
+            let grow_pages = ((needed as usize + 65535) / 65536) as u64;
+            if grow_pages > 0 {
+                self.memory
+                    .grow(&mut self.store, grow_pages)
+                    .map_err(|e| format!("扩展线性内存失败: {e}"))
+                    .unwrap();
+            }
+            // 写到新扩展区域的起始处（+4 留出长度头空间，避免头部落入旧内存）
+            (current_bytes + 4) as u32
+        };
+
+        let data = self.memory.data_mut(&mut self.store);
+
+        // 长度头：ptr - 4（u32 LE，UTF-16 码元数）
+        let header = (write_ptr as usize) - 4;
         data[header..header + 4].copy_from_slice(&len.to_le_bytes());
+
         // UTF-16LE 载荷
-        for (i, u) in units.iter().enumerate() {
-            let off = (ptr as usize) + i * 2;
+        let base = write_ptr as usize;
+        for (i, &u) in units.iter().enumerate() {
+            let off = base + i * 2;
             data[off] = (u & 0xff) as u8;
             data[off + 1] = (u >> 8) as u8;
         }
+
+        write_ptr
     }
 
     /// 从线性内存 `ptr` 处读取 UTF-16 ABI 字符串
@@ -112,19 +142,13 @@ impl PrismWasm {
             .get_typed_func(&mut self.store, name)
             .map_err(|e| format!("获取导出函数 {name} 失败: {e}"))?;
 
-        self.write_string(SCRATCH_START, a);
-        self.write_string(SCRATCH_START + SCRATCH_STRIDE, b);
-        self.write_string(SCRATCH_START + 2 * SCRATCH_STRIDE, c);
+        // write_string 返回实际写入地址（大字符串会写到线性内存末尾）
+        let pa = self.write_string(SCRATCH_START, a);
+        let pb = self.write_string(SCRATCH_START + SCRATCH_STRIDE, b);
+        let pc = self.write_string(SCRATCH_START + 2 * SCRATCH_STRIDE, c);
 
         let ret = f
-            .call(
-                &mut self.store,
-                (
-                    SCRATCH_START as i32,
-                    (SCRATCH_START + SCRATCH_STRIDE) as i32,
-                    (SCRATCH_START + 2 * SCRATCH_STRIDE) as i32,
-                ),
-            )
+            .call(&mut self.store, (pa as i32, pb as i32, pc as i32))
             .map_err(|e| format!("调用 {name} 失败: {e}"))?;
         self.read_string(ret)
     }

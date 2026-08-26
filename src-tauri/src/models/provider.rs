@@ -25,6 +25,8 @@ pub struct Provider {
     pub metadata_json: Option<String>,
     /// 自定义请求头（JSON 数组），格式 [{"name":"X-Custom","value":"val","enabled":true}]
     pub custom_headers: String,
+    /// 是否在 /v1/models 中穿透显示该渠道的模型
+    pub models_passthrough: i64,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
@@ -50,6 +52,8 @@ pub struct NewProvider {
     pub metadata_json: Option<String>,
     /// 自定义请求头
     pub custom_headers: Option<Vec<ProviderHeaderEntry>>,
+    /// 是否在 /v1/models 中穿透显示该渠道的模型
+    pub models_passthrough: Option<bool>,
 }
 
 /// 用于更新 Provider 的输入结构（所有字段可选）
@@ -70,6 +74,8 @@ pub struct UpdateProvider {
     pub metadata_json: Option<String>,
     /// 自定义请求头
     pub custom_headers: Option<Vec<ProviderHeaderEntry>>,
+    /// 是否在 /v1/models 中穿透显示该渠道的模型
+    pub models_passthrough: Option<bool>,
 }
 
 /// 渠道的 API Key 条目
@@ -128,5 +134,10 @@ impl Provider {
     /// 解析 custom_headers JSON 字段为 ProviderHeaderEntry 列表
     pub fn custom_headers_vec(&self) -> Vec<ProviderHeaderEntry> {
         serde_json::from_str(&self.custom_headers).unwrap_or_default()
+    }
+
+    /// 是否在 /v1/models 中穿透显示
+    pub fn models_passthrough_enabled(&self) -> bool {
+        self.models_passthrough != 0
     }
 }

@@ -1,0 +1,1 @@
+ALTER TABLE providers ADD COLUMN models_passthrough INTEGER NOT NULL DEFAULT 0;

@@ -28,8 +28,8 @@ pub async fn list_all_models() -> Result<Vec<ModelListingItem>, ServiceError> {
         }
     };
 
-    // ② 渠道模型
-    let providers = match ProviderRepo::find_enabled(pool).await {
+    // ② 渠道模型（仅穿透渠道）
+    let providers = match ProviderRepo::find_passthrough_enabled(pool).await {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(%e, "查询渠道列表失败");

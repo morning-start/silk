@@ -25,6 +25,7 @@ export interface Provider {
   status: string;
   health_status: string | null;
   custom_headers: ProviderHeaderEntry[];
+  models_passthrough: boolean;
   created_at: string;
   updated_at: string;
 }

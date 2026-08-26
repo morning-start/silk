@@ -12,6 +12,5 @@ pub mod models_listing;
 pub mod preset_providers;
 pub mod profile_service;
 pub mod provider_service;
-pub mod quick_setup;
 pub mod settings_service;
 pub mod stats_service;

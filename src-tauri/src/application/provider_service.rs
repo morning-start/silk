@@ -52,6 +52,8 @@ pub struct ProviderResponse {
     pub health_status: Option<String>,
     /// 自定义请求头
     pub custom_headers: Vec<ProviderHeaderEntry>,
+    /// 是否在 /v1/models 中穿透显示该渠道的模型
+    pub models_passthrough: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -70,6 +72,8 @@ pub struct CreateProviderPayload {
     pub status: Option<String>,
     pub metadata_json: Option<String>,
     pub custom_headers: Option<Vec<crate::models::ProviderHeaderEntry>>,
+    /// 是否在 /v1/models 中穿透显示该渠道的模型
+    pub models_passthrough: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -95,6 +99,8 @@ pub struct UpdateProviderPayload {
     pub status: Option<String>,
     pub metadata_json: Option<String>,
     pub custom_headers: Option<Vec<crate::models::ProviderHeaderEntry>>,
+    /// 是否在 /v1/models 中穿透显示该渠道的模型
+    pub models_passthrough: Option<bool>,
 }
 
 pub use super::model_fetcher::{fetch_models, FetchModelsPayload, ProviderModelInfo};
@@ -148,6 +154,7 @@ pub async fn create(
         last_health_check_at: None,
         metadata_json: payload.metadata_json,
         custom_headers: payload.custom_headers,
+        models_passthrough: payload.models_passthrough,
     };
 
     let provider = ProviderRepo::create(pool, &new).await?;
@@ -197,6 +204,7 @@ pub async fn update(
         last_health_check_at: None,
         metadata_json: payload.metadata_json,
         custom_headers: payload.custom_headers,
+        models_passthrough: payload.models_passthrough,
     };
 
     let provider = require_found(ProviderRepo::update(pool, &id, &update).await?, "Provider")?;
@@ -295,6 +303,7 @@ impl ProviderResponse {
         let protocols = p.protocols_vec();
         let models = p.models_vec();
         let custom_headers = p.custom_headers_vec();
+        let models_passthrough = p.models_passthrough_enabled();
         Self {
             id: p.id,
             name: p.name,
@@ -310,6 +319,7 @@ impl ProviderResponse {
             status: p.status,
             health_status: p.health_status,
             custom_headers,
+            models_passthrough,
             created_at: p.created_at.to_string(),
             updated_at: p.updated_at.to_string(),
         }

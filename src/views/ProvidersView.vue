@@ -64,6 +64,7 @@ const formValue = ref({
   timeout_seconds: 30,
   max_retries: 3,
   status: "enabled",
+  models_passthrough: false,
   key_strategy: "round_robin",
   keys: [] as ProviderKeyForm[],
   custom_headers: [] as ProviderHeaderEntry[],
@@ -116,6 +117,7 @@ function resetForm() {
     timeout_seconds: 30,
     max_retries: 3,
     status: "enabled",
+    models_passthrough: false,
     key_strategy: "round_robin",
     keys: [createDefaultKey()],
     custom_headers: [],
@@ -145,6 +147,7 @@ function handleEdit(row: Provider) {
     timeout_seconds: row.timeout_seconds,
     max_retries: row.max_retries,
     status: row.status,
+    models_passthrough: row.models_passthrough ?? false,
     key_strategy: row.key_strategy || "round_robin",
     keys:
       row.keys && row.keys.length > 0
@@ -375,6 +378,9 @@ onMounted(() => {
             <NTag size="small" type="info">{{ keySummary(item) }}</NTag>
             <NTag size="small" type="success" v-if="item.models?.length">{{ item.models.length }} 模型</NTag>
             <NTag size="small" type="default">超时 {{ item.timeout_seconds }}s</NTag>
+            <NTag size="small" :type="item.models_passthrough ? 'warning' : 'default'">
+              {{ item.models_passthrough ? '穿透' : '不穿透' }}
+            </NTag>
           </div>
 
           <div class="pc-protocols" v-if="item.protocols?.length">
@@ -415,6 +421,10 @@ onMounted(() => {
                 :value="formValue.status === 'enabled'"
                 @update:value="(value: boolean) => { formValue.status = value ? 'enabled' : 'disabled'; }"
               />
+            </NFormItem>
+            <NFormItem label="模型穿透" style="flex: 0 0 160px">
+              <NSwitch v-model:value="formValue.models_passthrough" />
+              <span class="form-hint">显示在 /v1/models</span>
             </NFormItem>
           </div>
 
@@ -739,6 +749,13 @@ onMounted(() => {
 .models-empty {
   font-size: 13px;
   color: var(--text-color-3, #94a3b8);
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
+  margin-left: 8px;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {
