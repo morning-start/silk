@@ -286,32 +286,19 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir().expect("无法解析应用数据目录");
 
-            // 初始化文件日志：data_dir/logs/silk.log（按天轮转，保留 7 天）
+            // 加载设置（用于日志配置）
+            let settings_path = data_dir.join("gateway.json");
+            let settings = crate::models::GatewaySettings::load(&settings_path)
+                .unwrap_or_default();
+
+            // 初始化分层级日志系统
             {
                 let log_dir = data_dir.join("logs");
-                let file_appender = tracing_appender::rolling::daily(&log_dir, "silk.log");
-                let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+                let _ = std::fs::create_dir_all(&log_dir);
+                let log_config = crate::gateway::logging::LoggingConfig::from_settings(&settings, log_dir);
+                let _guard = crate::gateway::logging::init_logging(log_config);
                 // _guard 必须存活到进程结束，泄漏到全局
                 Box::leak(Box::new(_guard));
-
-                use tracing_subscriber::prelude::*;
-                let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-
-                let file_layer = tracing_subscriber::fmt::layer()
-                    .with_writer(non_blocking)
-                    .with_ansi(false)
-                    .with_target(true);
-
-                let stdout_layer = tracing_subscriber::fmt::layer()
-                    .with_writer(std::io::stdout)
-                    .with_target(true);
-
-                tracing_subscriber::registry()
-                    .with(env_filter)
-                    .with(file_layer)
-                    .with(stdout_layer)
-                    .init();
             }
 
             tracing::info!(data_dir = %data_dir.display(), "应用数据目录");

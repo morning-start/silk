@@ -45,3 +45,13 @@ pub const DEFAULT_PROVIDER_MAX_RETRIES: i64 = 3;
 
 /// 路由规则默认优先级
 pub const DEFAULT_ROUTING_PRIORITY: i64 = 100;
+
+/// 默认全局日志级别
+pub fn default_log_level() -> String {
+    "info".to_string()
+}
+
+/// 默认文件日志级别（比控制台更详细）
+pub fn default_file_log_level() -> String {
+    "debug".to_string()
+}

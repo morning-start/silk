@@ -4,6 +4,7 @@ use axum::response::Response;
 
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
+use crate::gateway::logging;
 use crate::gateway::middleware::{
     authenticate, dispatch_upstream, extract, finalize, persist_log, rate_limit, resolve_route,
     select_channel, transform_request,
@@ -34,14 +35,36 @@ impl GatewayPipeline {
         let (parts, body) = req.into_parts();
         let base_ctx = extract::initialize(parts);
 
+        // 创建请求追踪 span，所有后续日志自动携带 request_id
+        let span = logging::request_span(
+            &base_ctx.request_id,
+            base_ctx.method.as_str(),
+            &base_ctx.path,
+        );
+        let _guard = span.enter();
+
+        tracing::info!("请求开始处理");
+
         match self.run_main(base_ctx, body).await {
-            Ok(ctx) => self.finalize_with_log(ctx).await,
+            Ok(ctx) => {
+                tracing::info!(
+                    status = ?ctx.final_status,
+                    elapsed_ms = ctx.elapsed_ms(),
+                    "请求处理完成"
+                );
+                self.finalize_with_log(ctx).await
+            }
             Err(mut stage_error) => {
                 let status = stage_error.error.status_code();
                 stage_error.context.mark_error(
                     stage_error.error.to_string(),
                     stage_error.error.error_code().to_string(),
                     status,
+                );
+                tracing::error!(
+                    error = %stage_error.error,
+                    status = ?status,
+                    "请求处理失败"
                 );
                 let _ = persist_log::run(&self.runtime.log_sender, &mut stage_error.context).await;
                 finalize::failure(stage_error.error)

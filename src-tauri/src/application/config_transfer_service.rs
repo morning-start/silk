@@ -467,6 +467,9 @@ async fn restore_settings_from_backup_db(
                 "rate_limit_max_tokens_per_minute",
             ),
             trace_enabled: row.get::<Option<bool>, _>("trace_enabled").unwrap_or(false),
+            log_level: row.get::<Option<String>, _>("log_level").unwrap_or_else(|| "info".to_string()),
+            file_level: row.get::<Option<String>, _>("file_level").unwrap_or_else(|| "debug".to_string()),
+            log_modules: std::collections::HashMap::new(),
         };
 
         settings

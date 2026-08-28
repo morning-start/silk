@@ -56,6 +56,18 @@ impl GatewaySettingsRepo {
         if let Some(v) = update.rate_limit_max_tokens_per_minute {
             settings.rate_limit_max_tokens_per_minute = v;
         }
+        if let Some(v) = update.trace_enabled {
+            settings.trace_enabled = v;
+        }
+        if let Some(v) = &update.log_level {
+            settings.log_level = v.clone();
+        }
+        if let Some(v) = &update.file_level {
+            settings.file_level = v.clone();
+        }
+        if let Some(v) = &update.log_modules {
+            settings.log_modules = v.clone();
+        }
 
         settings.save(path)?;
         Ok(settings)

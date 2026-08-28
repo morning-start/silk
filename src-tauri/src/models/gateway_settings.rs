@@ -28,6 +28,13 @@ pub struct RateLimitConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogConfig {
     pub retention_days: i64,
+    /// 全局日志级别（trace/debug/info/warn/error）
+    pub level: String,
+    /// 文件日志级别（默认 debug，比控制台更详细）
+    pub file_level: String,
+    /// 模块级日志覆盖（模块路径 → 级别）
+    #[serde(default)]
+    pub module_levels: std::collections::HashMap<String, String>,
 }
 
 /// 桌面行为配置
@@ -60,6 +67,15 @@ pub struct GatewaySettings {
     /// 是否启用 prism 日志追踪（调试用）
     #[serde(default)]
     pub trace_enabled: bool,
+    /// 全局日志级别（trace/debug/info/warn/error）
+    #[serde(default = "defaults::default_log_level")]
+    pub log_level: String,
+    /// 文件日志级别（默认 debug）
+    #[serde(default = "defaults::default_file_log_level")]
+    pub file_level: String,
+    /// 模块级日志覆盖（模块路径 → 级别）
+    #[serde(default)]
+    pub log_modules: std::collections::HashMap<String, String>,
 }
 
 impl Default for GatewaySettings {
@@ -78,6 +94,9 @@ impl Default for GatewaySettings {
             rate_limit_max_requests_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_REQUESTS,
             rate_limit_max_tokens_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_TOKENS,
             trace_enabled: false,
+            log_level: defaults::default_log_level(),
+            file_level: defaults::default_file_log_level(),
+            log_modules: std::collections::HashMap::new(),
         }
     }
 }
@@ -132,6 +151,9 @@ impl GatewaySettings {
     pub fn log_config(&self) -> LogConfig {
         LogConfig {
             retention_days: self.log_retention_days,
+            level: self.log_level.clone(),
+            file_level: self.file_level.clone(),
+            module_levels: self.log_modules.clone(),
         }
     }
 
@@ -162,4 +184,10 @@ pub struct UpdateGatewaySettings {
     pub rate_limit_max_tokens_per_minute: Option<i64>,
     /// 是否启用 prism 日志追踪（调试用）
     pub trace_enabled: Option<bool>,
+    /// 全局日志级别
+    pub log_level: Option<String>,
+    /// 文件日志级别
+    pub file_level: Option<String>,
+    /// 模块级日志覆盖
+    pub log_modules: Option<std::collections::HashMap<String, String>>,
 }

@@ -21,9 +21,17 @@ pub struct GatewaySettingsResponse {
     pub rate_limit_enabled: bool,
     pub rate_limit_max_requests_per_minute: i64,
     pub rate_limit_max_tokens_per_minute: i64,
+    /// 是否启用 prism 日志追踪（调试用）
+    pub trace_enabled: bool,
+    /// 全局日志级别
+    pub log_level: String,
+    /// 文件日志级别
+    pub file_level: String,
+    /// 模块级日志覆盖
+    pub log_modules: std::collections::HashMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct UpdateSettingsPayload {
     pub bind_host: Option<String>,
     pub bind_port: Option<i64>,
@@ -39,6 +47,12 @@ pub struct UpdateSettingsPayload {
     pub rate_limit_max_tokens_per_minute: Option<i64>,
     /// 是否启用 prism 日志追踪（调试用）
     pub trace_enabled: Option<bool>,
+    /// 全局日志级别
+    pub log_level: Option<String>,
+    /// 文件日志级别
+    pub file_level: Option<String>,
+    /// 模块级日志覆盖
+    pub log_modules: Option<std::collections::HashMap<String, String>>,
 }
 
 pub fn get() -> Result<GatewaySettingsResponse, ServiceError> {
@@ -84,6 +98,9 @@ pub async fn update(
         rate_limit_max_requests_per_minute: payload.rate_limit_max_requests_per_minute,
         rate_limit_max_tokens_per_minute: payload.rate_limit_max_tokens_per_minute,
         trace_enabled: payload.trace_enabled,
+        log_level: payload.log_level,
+        file_level: payload.file_level,
+        log_modules: payload.log_modules,
     };
 
     let settings =
@@ -136,6 +153,10 @@ impl From<GatewaySettings> for GatewaySettingsResponse {
             rate_limit_enabled: s.rate_limit_enabled,
             rate_limit_max_requests_per_minute: s.rate_limit_max_requests_per_minute,
             rate_limit_max_tokens_per_minute: s.rate_limit_max_tokens_per_minute,
+            trace_enabled: s.trace_enabled,
+            log_level: s.log_level,
+            file_level: s.file_level,
+            log_modules: s.log_modules,
         }
     }
 }
@@ -231,101 +252,35 @@ mod tests {
     fn validate_rejects_invalid_runtime_settings() {
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
             bind_host: Some(" ".to_string()),
-            bind_port: None,
-            allow_remote: None,
-            log_retention_days: None,
-            launch_at_startup: None,
-            minimize_to_tray: None,
-            close_to_tray: None,
-            auto_start_gateway: None,
-            default_provider_id: None,
-            rate_limit_enabled: None,
-            rate_limit_max_requests_per_minute: None,
-            rate_limit_max_tokens_per_minute: None,
-            trace_enabled: None,
+            ..Default::default()
         }));
 
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
-            bind_host: None,
             bind_port: Some(0),
-            allow_remote: None,
-            log_retention_days: None,
-            launch_at_startup: None,
-            minimize_to_tray: None,
-            close_to_tray: None,
-            auto_start_gateway: None,
-            default_provider_id: None,
-            rate_limit_enabled: None,
-            rate_limit_max_requests_per_minute: None,
-            rate_limit_max_tokens_per_minute: None,
-            trace_enabled: None,
+            ..Default::default()
         }));
 
         // 特权端口（<1024）也应拒绝
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
-            bind_host: None,
             bind_port: Some(1023),
-            allow_remote: None,
-            log_retention_days: None,
-            launch_at_startup: None,
-            minimize_to_tray: None,
-            close_to_tray: None,
-            auto_start_gateway: None,
-            default_provider_id: None,
-            rate_limit_enabled: None,
-            rate_limit_max_requests_per_minute: None,
-            rate_limit_max_tokens_per_minute: None,
-            trace_enabled: None,
+            ..Default::default()
         }));
 
         // 超出用户端口区间（>49151）应拒绝
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
-            bind_host: None,
             bind_port: Some(49152),
-            allow_remote: None,
-            log_retention_days: None,
-            launch_at_startup: None,
-            minimize_to_tray: None,
-            close_to_tray: None,
-            auto_start_gateway: None,
-            default_provider_id: None,
-            rate_limit_enabled: None,
-            rate_limit_max_requests_per_minute: None,
-            rate_limit_max_tokens_per_minute: None,
-            trace_enabled: None,
+            ..Default::default()
         }));
 
         // 冲突端口应拒绝
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
-            bind_host: None,
             bind_port: Some(8080),
-            allow_remote: None,
-            log_retention_days: None,
-            launch_at_startup: None,
-            minimize_to_tray: None,
-            close_to_tray: None,
-            auto_start_gateway: None,
-            default_provider_id: None,
-            rate_limit_enabled: None,
-            rate_limit_max_requests_per_minute: None,
-            rate_limit_max_tokens_per_minute: None,
-            trace_enabled: None,
+            ..Default::default()
         }));
 
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
-            bind_host: None,
-            bind_port: None,
-            allow_remote: None,
-            log_retention_days: None,
-            launch_at_startup: None,
-            minimize_to_tray: None,
-            close_to_tray: None,
-            auto_start_gateway: None,
-            default_provider_id: None,
-            rate_limit_enabled: None,
             rate_limit_max_requests_per_minute: Some(-1),
-            rate_limit_max_tokens_per_minute: None,
-            trace_enabled: None,
+            ..Default::default()
         }));
     }
 
@@ -340,11 +295,11 @@ mod tests {
             minimize_to_tray: Some(true),
             close_to_tray: Some(true),
             auto_start_gateway: Some(false),
-            default_provider_id: None,
             rate_limit_enabled: Some(true),
             rate_limit_max_requests_per_minute: Some(1000),
             rate_limit_max_tokens_per_minute: Some(500000),
             trace_enabled: Some(false),
+            ..Default::default()
         })
         .expect("valid settings");
     }

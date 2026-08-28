@@ -2,6 +2,7 @@ pub mod context;
 pub mod error;
 pub mod header_config;
 pub mod log_cleanup;
+pub mod logging;
 pub mod middleware;
 pub mod pipeline;
 pub mod plugin;
