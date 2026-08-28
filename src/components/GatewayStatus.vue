@@ -16,6 +16,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { gatewayNotifications } from '../utils/notification';
 
 interface GatewayStatus {
   running: boolean;
@@ -51,11 +52,19 @@ async function toggleGateway() {
   try {
     if (status.value?.running) {
       await invoke('gateway_stop');
+      gatewayNotifications.stopped();
     } else {
-      await invoke('gateway_start');
+      const result = await invoke<{ success: boolean; address: string }>('gateway_start');
+      gatewayNotifications.started(result.address);
     }
     await fetchStatus();
   } catch (error) {
+    const errorMsg = String(error);
+    if (status.value?.running) {
+      gatewayNotifications.stopFailed(errorMsg);
+    } else {
+      gatewayNotifications.startFailed(errorMsg);
+    }
     console.error('操作失败:', error);
   } finally {
     loading.value = false;

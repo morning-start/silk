@@ -2,6 +2,7 @@
 import { ref, onMounted, h, computed } from "vue";
 import { formatMs } from "../utils/format";
 import { save } from "@tauri-apps/plugin-dialog";
+import { copyWithFeedback } from "../utils/clipboard";
 import {
   NButton,
   NDataTable,
@@ -145,14 +146,15 @@ function handleViewDetail(row: RequestLog) {
   showDetail.value = true;
 }
 
-function copyDetail() {
+async function copyDetail() {
   if (!selectedLog.value) return;
   const text = JSON.stringify(selectedLog.value, null, 2);
-  navigator.clipboard.writeText(text).then(() => {
+  const ok = await copyWithFeedback(text, "日志详情");
+  if (ok) {
     message.success("已复制");
-  }).catch(() => {
+  } else {
     message.error("复制失败");
-  });
+  }
 }
 
 async function handleCleanup() {

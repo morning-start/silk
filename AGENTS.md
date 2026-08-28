@@ -2,6 +2,18 @@
 
 纯本地桌面 AI 多模型中转网关 (Tauri 2 + Vue 3 + Rust/Axum + SQLite)。
 
+## Tauri Plugins
+
+| Plugin | 用途 |
+|--------|------|
+| `tauri-plugin-autostart` | 开机自启动 |
+| `tauri-plugin-clipboard-manager` | 系统剪贴板读写 |
+| `tauri-plugin-dialog` | 原生对话框 |
+| `tauri-plugin-notification` | 系统通知 |
+| `tauri-plugin-opener` | 打开文件/URL |
+| `tauri-plugin-store` | 持久化 KV 存储 |
+| `tauri-plugin-updater` | 应用自动更新 |
+
 ## Commands
 
 ```bash
@@ -105,7 +117,7 @@ HTTP 网关 `127.0.0.1:1877` 核心：**9 阶段中间件管道** — extract �
 | File | Purpose |
 |------|---------|
 | `src/main.ts` | Vue 入口 |
-| `src/utils/` | 前端工具函数（`formatMs` 等） |
+| `src/utils/` | 前端工具函数（`formatMs`, `clipboard`, `notification`, `store`, `updater` 等） |
 | `src/api/index.ts` | ~50 Tauri invoke 封装 |
 | `src-tauri/src/lib.rs` | Tauri 初始化、DB 迁移、命令注册、网关生命周期 |
 | `src-tauri/src/main.rs` | 调用 `silk_lib::run()` |
