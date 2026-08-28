@@ -36,3 +36,4 @@ test/
 draft
 .agents
 .claude
+.agent-workplace/
