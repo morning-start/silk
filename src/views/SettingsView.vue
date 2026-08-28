@@ -16,7 +16,6 @@ import {
 import { useGatewayStore } from "../stores/gateway";
 import { storeToRefs } from "pinia";
 import { api } from "../api";
-import { checkForUpdates } from "../utils/updater";
 
 /**
  * 端口冲突校验
@@ -57,7 +56,6 @@ const { status, loading } = storeToRefs(gatewayStore);
 const message = useMessage();
 
 const formRef = ref<any>(null);
-const checkingUpdate = ref(false);
 
 const formValue = ref({
   bind_host: "127.0.0.1",
@@ -69,28 +67,6 @@ const formValue = ref({
   auto_start_gateway: true,
   default_provider_id: "",
 });
-
-async function handleCheckUpdate() {
-  checkingUpdate.value = true;
-  try {
-    const info = await checkForUpdates();
-    if (info.available) {
-      const accepted = await confirm(
-        `发现新版本 ${info.version}${info.date ? ` (${info.date})` : ""}。${info.body ? `\n\n${info.body}` : ""}\n\n是否下载并安装？`,
-        { title: "发现更新", kind: "info", okLabel: "更新", cancelLabel: "稍后" }
-      );
-      if (accepted) {
-        message.info("更新功能需要重启应用后生效");
-      }
-    } else {
-      message.success("当前已是最新版本");
-    }
-  } catch (error) {
-    message.error("检查更新失败");
-  } finally {
-    checkingUpdate.value = false;
-  }
-}
 
 async function handleSave() {
   try {
@@ -311,18 +287,6 @@ onMounted(() => {
         </div>
       </div>
 </NCard>
-
-    <NCard :bordered="false" class="settings-card" size="small" title="关于与更新">
-      <div class="data-actions">
-        <div class="data-action">
-          <div>
-            <div class="data-action-title">检查更新</div>
-            <div class="data-action-desc">手动检查 Silk 是否有新版本可用。</div>
-          </div>
-          <NButton size="small" :loading="checkingUpdate" @click="handleCheckUpdate">检查更新</NButton>
-        </div>
-      </div>
-    </NCard>
 
   </div>
 </template>
