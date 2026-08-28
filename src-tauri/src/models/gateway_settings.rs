@@ -58,6 +58,7 @@ pub struct GatewaySettings {
     pub rate_limit_max_requests_per_minute: i64,
     pub rate_limit_max_tokens_per_minute: i64,
     /// 是否启用 prism 日志追踪（调试用）
+    #[serde(default)]
     pub trace_enabled: bool,
 }
 
