@@ -628,6 +628,18 @@ impl SseConverter {
         }
     }
 
+    /// 规范化：SseEvent → StreamEvent
+    pub fn normalize(&self, event: &SseEvent) -> StreamEvent {
+        event.to_stream_event()
+    }
+
+    /// 序列化：StreamEvent → Bytes（当前未使用，保留作为未来 API）
+    pub fn marshal(&self, _event: &StreamEvent) -> Result<Bytes, String> {
+        // TODO: 实现 StreamEvent 到目标协议的序列化
+        // 当前保留作为未来 API，convert() 方法仍使用原有逻辑
+        Err("marshal() 方法尚未实现".to_string())
+    }
+
     /// 逐事件转换：将单个 SSE 事件转换为目标协议格式
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
         if !self.enabled {

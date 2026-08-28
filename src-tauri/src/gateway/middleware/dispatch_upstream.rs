@@ -307,33 +307,15 @@ async fn handle_sse_response(
                                 stream_state.record_event();
                                 total_events += 1;
 
-                                // 从原始 SSE data 中提取上游返回的精确 token 用量
-                                if let Some(ref data) = event.data {
-                                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                        let mut state = shared_for_task.write().await;
-                                        // OpenAI chat: {"usage":{"prompt_tokens":X,"completion_tokens":Y}}
-                                        // Anthropic message_start: {"message":{"usage":{"input_tokens":X}}}
-                                        // Anthropic message_delta: {"usage":{"output_tokens":Y}}
-                                        // OpenResponses: {"usage":{"input_tokens":X,"output_tokens":Y}}
-                                        let usage = json.get("usage")
-                                            .or_else(|| json.get("message").and_then(|m| m.get("usage")));
-                                        if let Some(u) = usage {
-                                            if state.exact_prompt_tokens.is_none() {
-                                                let inp = u.get("prompt_tokens")
-                                                    .or_else(|| u.get("input_tokens"))
-                                                    .and_then(|v| v.as_i64());
-                                                if inp.is_some() {
-                                                    state.exact_prompt_tokens = inp;
-                                                }
-                                            }
-                                            // completion_tokens / output_tokens 可能出现在后续事件中覆盖
-                                            let out = u.get("completion_tokens")
-                                                .or_else(|| u.get("output_tokens"))
-                                                .and_then(|v| v.as_i64());
-                                            if let Some(v) = out {
-                                                state.exact_completion_tokens = Some(v);
-                                            }
-                                        }
+                                // 使用规范化结构提取 usage 信息
+                                let stream_event = converter.normalize(event);
+                                if let Some(usage) = stream_event.extract_usage() {
+                                    let mut state = shared_for_task.write().await;
+                                    if let Some(input_tokens) = usage.input_tokens {
+                                        state.exact_prompt_tokens = Some(input_tokens);
+                                    }
+                                    if let Some(output_tokens) = usage.output_tokens {
+                                        state.exact_completion_tokens = Some(output_tokens);
                                     }
                                 }
 
