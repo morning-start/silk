@@ -466,6 +466,7 @@ async fn restore_settings_from_backup_db(
             rate_limit_max_tokens_per_minute: row.get::<i64, _>(
                 "rate_limit_max_tokens_per_minute",
             ),
+            trace_enabled: row.get::<Option<bool>, _>("trace_enabled").unwrap_or(false),
         };
 
         settings

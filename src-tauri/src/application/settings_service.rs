@@ -37,6 +37,8 @@ pub struct UpdateSettingsPayload {
     pub rate_limit_enabled: Option<bool>,
     pub rate_limit_max_requests_per_minute: Option<i64>,
     pub rate_limit_max_tokens_per_minute: Option<i64>,
+    /// 是否启用 prism 日志追踪（调试用）
+    pub trace_enabled: Option<bool>,
 }
 
 pub fn get() -> Result<GatewaySettingsResponse, ServiceError> {
@@ -81,6 +83,7 @@ pub async fn update(
         rate_limit_enabled: payload.rate_limit_enabled,
         rate_limit_max_requests_per_minute: payload.rate_limit_max_requests_per_minute,
         rate_limit_max_tokens_per_minute: payload.rate_limit_max_tokens_per_minute,
+        trace_enabled: payload.trace_enabled,
     };
 
     let settings =
@@ -239,6 +242,7 @@ mod tests {
             rate_limit_enabled: None,
             rate_limit_max_requests_per_minute: None,
             rate_limit_max_tokens_per_minute: None,
+            trace_enabled: None,
         }));
 
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
@@ -254,6 +258,7 @@ mod tests {
             rate_limit_enabled: None,
             rate_limit_max_requests_per_minute: None,
             rate_limit_max_tokens_per_minute: None,
+            trace_enabled: None,
         }));
 
         // 特权端口（<1024）也应拒绝
@@ -270,6 +275,7 @@ mod tests {
             rate_limit_enabled: None,
             rate_limit_max_requests_per_minute: None,
             rate_limit_max_tokens_per_minute: None,
+            trace_enabled: None,
         }));
 
         // 超出用户端口区间（>49151）应拒绝
@@ -286,6 +292,7 @@ mod tests {
             rate_limit_enabled: None,
             rate_limit_max_requests_per_minute: None,
             rate_limit_max_tokens_per_minute: None,
+            trace_enabled: None,
         }));
 
         // 冲突端口应拒绝
@@ -302,6 +309,7 @@ mod tests {
             rate_limit_enabled: None,
             rate_limit_max_requests_per_minute: None,
             rate_limit_max_tokens_per_minute: None,
+            trace_enabled: None,
         }));
 
         assert_bad_request(validate_update_payload(&UpdateSettingsPayload {
@@ -317,6 +325,7 @@ mod tests {
             rate_limit_enabled: None,
             rate_limit_max_requests_per_minute: Some(-1),
             rate_limit_max_tokens_per_minute: None,
+            trace_enabled: None,
         }));
     }
 
@@ -335,6 +344,7 @@ mod tests {
             rate_limit_enabled: Some(true),
             rate_limit_max_requests_per_minute: Some(1000),
             rate_limit_max_tokens_per_minute: Some(500000),
+            trace_enabled: Some(false),
         })
         .expect("valid settings");
     }

@@ -57,6 +57,8 @@ pub struct GatewaySettings {
     pub rate_limit_enabled: bool,
     pub rate_limit_max_requests_per_minute: i64,
     pub rate_limit_max_tokens_per_minute: i64,
+    /// 是否启用 prism 日志追踪（调试用）
+    pub trace_enabled: bool,
 }
 
 impl Default for GatewaySettings {
@@ -74,6 +76,7 @@ impl Default for GatewaySettings {
             rate_limit_enabled: false,
             rate_limit_max_requests_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_REQUESTS,
             rate_limit_max_tokens_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_TOKENS,
+            trace_enabled: false,
         }
     }
 }
@@ -156,4 +159,6 @@ pub struct UpdateGatewaySettings {
     pub rate_limit_enabled: Option<bool>,
     pub rate_limit_max_requests_per_minute: Option<i64>,
     pub rate_limit_max_tokens_per_minute: Option<i64>,
+    /// 是否启用 prism 日志追踪（调试用）
+    pub trace_enabled: Option<bool>,
 }

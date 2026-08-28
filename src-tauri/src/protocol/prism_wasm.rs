@@ -476,6 +476,36 @@ pub fn convert_stream_event(
     extract_value(&envelope, &format!("event {source}→{target}"))
 }
 
+/// 单事件流式转换 + 追踪日志（调试用，生产环境用 `convert_stream_event`）
+///
+/// 与 `convert_stream_event` 相同，但会将转换详情写入日志缓冲区。
+/// 日志缓冲区需先通过 `init_log()` 分配。
+pub fn convert_stream_event_trace(
+    source: &str,
+    sse_event: &str,
+    target: &str,
+    log_ptr: u32,
+    log_size: u32,
+) -> Result<String, String> {
+    let src = map_provider(source).ok_or_else(|| format!("不支持的源协议: {source}"))?;
+    let dst = map_provider(target).ok_or_else(|| format!("不支持的目标协议: {target}"))?;
+    let start = std::time::Instant::now();
+    let mut p = prism()?;
+    let envelope = p.call_mixed(
+        "wasm_convert_stream_event_trace",
+        &[src, sse_event, dst],
+        &[log_ptr as i32, log_size as i32],
+    )?;
+    let elapsed = start.elapsed();
+    tracing::debug!(
+        source, target,
+        input_bytes = sse_event.len(),
+        elapsed_us = elapsed.as_micros(),
+        "事件转换完成（带追踪）"
+    );
+    extract_value(&envelope, &format!("event_trace {source}→{target}"))
+}
+
 /// 查询全部 provider 主名
 pub fn list_providers() -> Result<Vec<String>, String> {
     let mut p = prism()?;
