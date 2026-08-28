@@ -23,12 +23,15 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
     // 注入 stream:true，使所有请求走流式 SSE 路径
     // 本项目网关以流式为核心处理方式，上游不支持非流式响应时（返回空 body），依赖此机制规避
-    if let Some(body) = ctx.get_parsed_body() {
-        let mut json = body.clone();
-        if !json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if let Some(body) = ctx.get_parsed_body().cloned() {
+        let original_stream = body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+        ctx.client_requested_stream = original_stream;
+        if !original_stream {
+            let mut json = body;
             json["stream"] = serde_json::Value::Bool(true);
             // 请求上游在流式最终 chunk 返回精确 token 用量
             json["stream_options"] = serde_json::json!({"include_usage": true});
+            tracing::debug!("注入 stream:true + stream_options");
             ctx.update_body(json).map_err(|e| {
                 StageError::new(
                     ctx.clone(),
@@ -45,6 +48,7 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
             if body.get("max_tokens").is_none() {
                 let mut json = body.clone();
                 json["max_tokens"] = serde_json::Value::Number(1024.into());
+                tracing::debug!("注入默认 max_tokens:1024 (Claude 协议必需)");
                 ctx.update_body(json).map_err(|e| {
                     StageError::new(
                         ctx.clone(),
@@ -57,15 +61,19 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
 
     // 使用 prism.wasm 进行跨协议转换
     let request_bytes: Bytes = if inbound != outbound {
-        tracing::debug!(
-            "跨协议格式转换: inbound={}, outbound={}",
-            inbound,
-            outbound
-        );
-
         let body_str = String::from_utf8_lossy(&ctx.request_body).to_string();
+        let start = std::time::Instant::now();
         let converted = prism_wasm::convert_request(&inbound, &body_str, &outbound)
             .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e)))?;
+        let elapsed = start.elapsed();
+        tracing::info!(
+            inbound = %inbound,
+            outbound = %outbound,
+            input_bytes = body_str.len(),
+            output_bytes = converted.len(),
+            elapsed_ms = elapsed.as_millis(),
+            "请求体跨协议转换完成"
+        );
         Bytes::from(converted)
     } else {
         Bytes::from(ctx.request_body.to_vec())
@@ -134,6 +142,7 @@ mod tests {
             last_health_check_at: None,
             metadata_json: None,
             custom_headers: "[]".to_string(),
+            models_passthrough: 0,
             created_at: now,
             updated_at: now,
         }

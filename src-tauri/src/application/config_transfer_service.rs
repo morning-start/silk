@@ -661,6 +661,7 @@ mod tests {
             last_health_check_at: None,
             metadata_json: None,
             custom_headers: "[]".to_string(),
+            models_passthrough: 0,
             created_at: chrono::Utc::now().naive_utc(),
             updated_at: chrono::Utc::now().naive_utc(),
         };

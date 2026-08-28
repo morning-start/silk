@@ -528,6 +528,7 @@ mod validation_tests {
             status: Some("enabled".to_string()),
             metadata_json: None,
             custom_headers: None,
+            models_passthrough: None,
         }
     }
 

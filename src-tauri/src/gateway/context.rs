@@ -199,6 +199,8 @@ pub struct RequestContextInner {
     pub channels_available: Vec<String>,
     /// 累计回退尝试次数（换 Key + 换 Provider），用于日志统计
     pub total_retry_attempts: u32,
+    /// 客户端原始请求是否指定了 stream: true
+    pub client_requested_stream: bool,
 }
 
 /// 请求上下文 — 整个网关管道的核心数据结构
@@ -307,6 +309,7 @@ impl RequestContext {
                 failed_providers: Vec::new(),
                 channels_available: Vec::new(),
                 total_retry_attempts: 0,
+                client_requested_stream: false,
             },
             response: None,
             stream_complete_rx: None,

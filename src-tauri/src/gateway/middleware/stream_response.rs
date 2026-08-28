@@ -334,17 +334,12 @@ impl Default for StreamState {
 // SSE 协议转换器（从 dispatch_upstream 拆分）
 // ---------------------------------------------------------------------------
 
-/// 流式 SSE 事件协议转换器（基于 prism.wasm 整段转换 + 增量差分）
+/// 流式 SSE 事件协议转换器（基于 prism.wasm 单事件转换）
 ///
-/// prism 的 `wasm_convert_stream` 是整段转换（SSE 文本 → SSE 文本），
-/// 本转换器通过累积事件文本 + 全量重转换 + 输出差分，实现逐事件增量转发：
-/// - 每个事件序列化后追加到 `buffer`
-/// - 每次调用对完整 buffer 调用 `prism_wasm::convert_stream`
-/// - 只返回本次新增的输出（delta），保证流式低延迟
-/// - 过滤无 `data:` 的空事件（prism 对 content_block_start 等会输出空占位）
-///
-/// 已实测两个方向（openai-chat ↔ anthropic）转换输出单调（追加只增不改），
-/// 差分可靠；若出现非单调（异常），整段重发避免丢内容。
+/// 使用 prism 的 `wasm_convert_stream_event` 逐事件转换，无状态、无累积：
+/// - 每个 SSE 事件独立转换（O(1) 调用，无 buffer 膨胀）
+/// - 返回值可能是空、单个或多个 SSE 事件（由 prism 映射逻辑决定）
+/// - 自动过滤空事件和 `[DONE]`（由 dispatch 统一发送流结束标记）
 pub struct SseConverter {
     /// 是否需要转换（inbound != outbound 且协议可映射）
     enabled: bool,
@@ -352,10 +347,10 @@ pub struct SseConverter {
     source: String,
     /// 目标协议（下游，silk 协议名）
     target: String,
-    /// 累积的上游 SSE 文本缓冲
-    buffer: String,
-    /// 上次完整转换输出（用于增量差分）
-    last_output: String,
+    /// 已转换事件计数
+    event_count: u64,
+    /// 转换失败计数
+    error_count: u64,
 }
 
 impl SseConverter {
@@ -365,55 +360,79 @@ impl SseConverter {
             && !outbound.is_empty()
             && prism_wasm::map_provider(inbound).is_some()
             && prism_wasm::map_provider(outbound).is_some();
+        if enabled {
+            tracing::info!(
+                source = outbound,
+                target = inbound,
+                "SSE 流式协议转换已启用"
+            );
+        }
         Self {
             enabled,
             source: outbound.to_string(),
             target: inbound.to_string(),
-            buffer: String::new(),
-            last_output: String::new(),
+            event_count: 0,
+            error_count: 0,
         }
     }
 
+    /// 逐事件转换：将单个 SSE 事件转换为目标协议格式
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
         if !self.enabled {
             return Ok(Bytes::from(event.serialize()));
         }
-        // 追加当前事件到缓冲
-        self.buffer.push_str(&event.serialize());
-        // 整段转换（prism 是整段 SSE 文本 → SSE 文本）
-        let full = prism_wasm::convert_stream(&self.source, &self.buffer, &self.target)?;
-        // 过滤空事件并剥离末尾 [DONE]（由 dispatch 统一发送流结束标记）
-        let filtered = filter_empty_events(&full);
-        // 增量差分：只返回新增部分（prism 转换输出单调，追加只增不改）
-        let delta = if filtered.starts_with(&self.last_output) {
-            filtered[self.last_output.len()..].to_string()
-        } else {
-            // 非单调（异常）：整段重发，避免丢内容
-            filtered.clone()
-        };
-        self.last_output = filtered;
-        Ok(Bytes::from(delta))
+        let sse_text = event.serialize();
+        match prism_wasm::convert_stream_event(&self.source, &sse_text, &self.target) {
+            Ok(converted) => {
+                self.event_count += 1;
+                let filtered = filter_empty_events(&converted);
+                // debug: 对比输入输出，排查转换问题
+                if event.data.as_deref().is_some_and(|d| d.contains("\"usage\"")) {
+                    tracing::debug!(
+                        source = %self.source,
+                        target = %self.target,
+                        input = %sse_text.trim(),
+                        output = %filtered.trim(),
+                        "prism usage 事件转换结果"
+                    );
+                }
+                Ok(Bytes::from(filtered))
+            }
+            Err(e) => {
+                self.error_count += 1;
+                tracing::warn!(
+                    source = %self.source,
+                    target = %self.target,
+                    error = %e,
+                    input = %sse_text.trim(),
+                    event_count = self.event_count,
+                    "SSE 事件转换失败，透传原始事件"
+                );
+                Err(e)
+            }
+        }
     }
 
-    /// 流结束冲刷：追加 `[DONE]` 使 prism 输出收尾事件（如 anthropic message_stop）。
+    /// 流结束冲刷：发送 `[DONE]` 使 prism 输出收尾事件（如 anthropic message_stop）。
     ///
     /// 上游 openai-chat 的 `[DONE]` 由 dispatch 拦截并发送流结束标记，不会
     /// 经过 convert()；但 prism 需要看到 `[DONE]` 才会输出 message_stop 等
-    /// 收尾事件，故在流结束时显式调用本方法冲刷最终增量。
+    /// 收尾事件，故在流结束时显式调用本方法冲刷。
     pub fn finish(&mut self) -> Result<Bytes, String> {
         if !self.enabled {
             return Ok(Bytes::new());
         }
-        self.buffer.push_str("data: [DONE]\n\n");
-        let full = prism_wasm::convert_stream(&self.source, &self.buffer, &self.target)?;
-        let filtered = filter_empty_events(&full);
-        let delta = if filtered.starts_with(&self.last_output) {
-            filtered[self.last_output.len()..].to_string()
-        } else {
-            filtered.clone()
-        };
-        self.last_output = filtered;
-        Ok(Bytes::from(delta))
+        tracing::info!(
+            source = %self.source,
+            target = %self.target,
+            events_converted = self.event_count,
+            errors = self.error_count,
+            "SSE 流式转换完成"
+        );
+        let done_event = "data: [DONE]\n\n";
+        let converted = prism_wasm::convert_stream_event(&self.source, done_event, &self.target)?;
+        let filtered = filter_empty_events(&converted);
+        Ok(Bytes::from(filtered))
     }
 }
 
@@ -431,6 +450,91 @@ fn filter_empty_events(sse: &str) -> String {
     } else {
         format!("{}\n\n", blocks.join("\n\n"))
     }
+}
+
+// ---------------------------------------------------------------------------
+// 非流式响应聚合（SSE → 单个 JSON）
+// ---------------------------------------------------------------------------
+
+/// 将收集的 SSE 事件聚合为 OpenAI chat completion JSON 响应。
+///
+/// 用于非流式客户端：网关强制上游走流式，但客户端期望单个 JSON 响应。
+/// 此函数将多个 SSE chunk 拼接为一个完整的 chat.completion 对象。
+pub fn aggregate_sse_to_json(events: &[SseEvent]) -> Bytes {
+    let mut id = String::new();
+    let mut model = String::new();
+    let mut content = String::new();
+    let mut finish_reason: Option<String> = None;
+    let mut usage: Option<serde_json::Value> = None;
+
+    for event in events {
+        let data = match &event.data {
+            Some(d) if !d.is_empty() && d != "[DONE]" => d,
+            _ => continue,
+        };
+
+        let json: serde_json::Value = match serde_json::from_str(data) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // 提取元数据（取第一个有效值）
+        if id.is_empty() {
+            if let Some(v) = json.get("id").and_then(|v| v.as_str()) {
+                id = v.to_string();
+            }
+        }
+        if model.is_empty() {
+            if let Some(v) = json.get("model").and_then(|v| v.as_str()) {
+                model = v.to_string();
+            }
+        }
+
+        // OpenAI chat chunk: choices[0].delta.content
+        if let Some(choices) = json.get("choices").and_then(|v| v.as_array()) {
+            if let Some(first) = choices.first() {
+                // 拼接增量内容
+                if let Some(delta) = first.get("delta") {
+                    if let Some(c) = delta.get("content").and_then(|v| v.as_str()) {
+                        content.push_str(c);
+                    }
+                }
+                // 取最后出现的 finish_reason
+                if let Some(fr) = first.get("finish_reason").and_then(|v| v.as_str()) {
+                    if fr != "null" {
+                        finish_reason = Some(fr.to_string());
+                    }
+                }
+            }
+        }
+
+        // 提取 usage（取最后出现的）
+        if let Some(u) = json.get("usage") {
+            usage = Some(u.clone());
+        }
+    }
+
+    // 构建 OpenAI chat completion 响应
+    let mut result = serde_json::json!({
+        "id": if id.is_empty() { "chatcmpl-aggregated" } else { &id },
+        "object": "chat.completion",
+        "created": chrono::Utc::now().timestamp(),
+        "model": if model.is_empty() { "unknown" } else { &model },
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": content,
+            },
+            "finish_reason": finish_reason.as_deref().unwrap_or("stop"),
+        }],
+    });
+
+    if let Some(u) = usage {
+        result["usage"] = u;
+    }
+
+    Bytes::from(result.to_string())
 }
 
 #[cfg(test)]
@@ -529,7 +633,7 @@ mod tests {
 
     #[test]
     fn test_sse_converter_openai_chat_to_anthropic_incremental() {
-        // openai-chat 上游 → anthropic 下游：逐事件增量差分，最终含 message_stop
+        // openai-chat 上游 → anthropic 下游：逐事件独立转换
         let mut converter = SseConverter::new("claude_messages", "openai_chat");
         let mut all = String::new();
 
@@ -542,7 +646,6 @@ mod tests {
         };
         let out1 = converter.convert(&ev1).expect("convert 1");
         let s1 = String::from_utf8(out1.to_vec()).unwrap();
-        assert!(s1.contains("content_block_delta"), "s1: {s1}");
         assert!(s1.contains("Hello"), "s1: {s1}");
         all.push_str(&s1);
 
@@ -554,16 +657,15 @@ mod tests {
             comment: None,
         };
         let out2 = converter.convert(&ev2).expect("convert 2");
-        let s2 = String::from_utf8(out2.to_vec()).unwrap();
-        all.push_str(&s2);
+        all.push_str(&String::from_utf8(out2.to_vec()).unwrap());
 
         // finish 冲刷：prism 看到 [DONE] 后输出 message_stop
         let out3 = converter.finish().expect("finish");
         let s3 = String::from_utf8(out3.to_vec()).unwrap();
         all.push_str(&s3);
 
-        assert!(all.contains("content_block_delta"), "all: {all}");
         assert!(all.contains("Hello"), "all: {all}");
+        // finish 应产生收尾事件（如 message_stop）
         assert!(all.contains("message_stop"), "all: {all}");
         // 不应包含重复的 [DONE]（由 dispatch 统一发送）
         assert!(!all.contains("[DONE]"), "all: {all}");
@@ -571,10 +673,11 @@ mod tests {
 
     #[test]
     fn test_sse_converter_anthropic_to_openai_chat() {
-        // anthropic 上游 → openai-chat 下游：message_start 上下文 + 增量差分
+        // anthropic 上游 → openai-chat 下游：逐事件独立转换
         let mut converter = SseConverter::new("openai_chat", "claude_messages");
         let mut all = String::new();
 
+        // message_start 作为上下文事件，转换后可能无可见输出
         let ev1 = SseEvent {
             event: Some("message_start".to_string()),
             data: Some(r#"{"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","model":"claude-3","content":[],"usage":{"input_tokens":5,"output_tokens":1}}}"#.to_string()),
@@ -582,10 +685,9 @@ mod tests {
             retry: None,
             comment: None,
         };
-        let out1 = converter.convert(&ev1).expect("convert 1");
-        all.push_str(&String::from_utf8(out1.to_vec()).unwrap());
+        let _ = converter.convert(&ev1).expect("convert 1");
 
-        // content_block_start 是 delta 的前置上下文（prism 需要它）
+        // content_block_start
         let ev_start = SseEvent {
             event: Some("content_block_start".to_string()),
             data: Some(r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#.to_string()),

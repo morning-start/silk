@@ -63,7 +63,7 @@ const formValue = ref({
   log_retention_days: 30,
   launch_at_startup: false,
   close_to_tray: true,
-  auto_start_gateway: false,
+  auto_start_gateway: true,
   default_provider_id: "",
 });
 

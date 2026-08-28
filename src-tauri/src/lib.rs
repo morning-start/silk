@@ -108,7 +108,7 @@ pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx:
             let db_path = data_dir.join("silk.db");
             let _ = DB_PATH.set(db_path.clone());
 
-            eprintln!("[silk] 数据库路径: {}", db_path.display());
+            tracing::info!(db_path = %db_path.display(), "数据库路径");
 
             let conn_opts = SqliteConnectOptions::new()
                 .filename(&db_path)
@@ -125,7 +125,7 @@ pub async fn init_database(data_dir: &Path) -> Result<&'static SqlitePool, sqlx:
                 .execute(&pool)
                 .await
                 .map_err(|e| {
-                    eprintln!("[silk] 启用 WAL 模式失败: {e}");
+                    tracing::warn!("启用 WAL 模式失败: {e}");
                     e
                 })?;
             sqlx::query("PRAGMA synchronous = NORMAL")
@@ -258,8 +258,8 @@ pub(crate) async fn init_gateway_settings(data_dir: &Path) -> Result<(), String>
 // Tauri 入口
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 初始化 tracing 日志（输出到终端，开发时通过 `cargo tauri dev` 查看）
-    tracing_subscriber::fmt::init();
+    // tracing 在 setup 中初始化（需要 data_dir 路径写日志文件），
+    // setup 之前的输出走 stderr。
 
     // 日志 channel：容量 1000，背压时丢弃最旧日志
     let (log_sender, log_receiver) =
@@ -286,14 +286,42 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir().expect("无法解析应用数据目录");
 
-            eprintln!("[silk] 应用数据目录: {}", data_dir.display());
+            // 初始化文件日志：data_dir/logs/silk.log（按天轮转，保留 7 天）
+            {
+                let log_dir = data_dir.join("logs");
+                let file_appender = tracing_appender::rolling::daily(&log_dir, "silk.log");
+                let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+                // _guard 必须存活到进程结束，泄漏到全局
+                Box::leak(Box::new(_guard));
+
+                use tracing_subscriber::prelude::*;
+                let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+                let file_layer = tracing_subscriber::fmt::layer()
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .with_target(true);
+
+                let stdout_layer = tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stdout)
+                    .with_target(true);
+
+                tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(file_layer)
+                    .with(stdout_layer)
+                    .init();
+            }
+
+            tracing::info!(data_dir = %data_dir.display(), "应用数据目录");
 
             if let Err(err) = tauri::async_runtime::block_on(async {
                 // 初始化数据库
                 let pool = init_database(&data_dir).await?;
 
                 let db_path = data_dir.join("silk.db");
-                eprintln!("[silk] 数据库文件: {}", db_path.display());
+                tracing::info!(db_path = %db_path.display(), "数据库文件");
 
                 // 初始化网关设置文件
                 init_gateway_settings(&data_dir).await

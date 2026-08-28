@@ -9,15 +9,24 @@ use axum::response::IntoResponse;
 
 /// Provider 协议 → 适配器名称映射
 ///
-/// 同时支持短名（chat/response/message）和完整适配器名（openai_chat 等），
-/// 完整名直接 identity 映射，避免前端传完整名时无法识别。
+/// 同时支持短名和完整适配器名，完整名直接 identity 映射。
 const PROTOCOL_ADAPTER_MAP: &[(&str, &str)] = &[
     ("chat", "openai_chat"),
     ("response", "openai_response"),
     ("message", "claude_messages"),
+    ("gemini", "gemini"),
+    ("azure", "azure_openai"),
+    ("vertex", "google_vertex"),
+    ("codex", "openai_codex"),
+    ("vllm", "openai_vllm"),
     ("openai_chat", "openai_chat"),
     ("openai_response", "openai_response"),
     ("claude_messages", "claude_messages"),
+    ("gemini_generate_content", "gemini"),
+    ("azure_openai", "azure_openai"),
+    ("google_vertex", "google_vertex"),
+    ("openai_codex", "openai_codex"),
+    ("openai_vllm", "openai_vllm"),
 ];
 
 /// 用于负载均衡选渠道的轻量条目

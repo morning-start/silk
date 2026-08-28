@@ -37,6 +37,7 @@ struct ProtocolConfig {
 
 static CONFIGS: Lazy<HashMap<&'static str, ProtocolConfig>> = Lazy::new(|| {
     let mut m = HashMap::new();
+    // OpenAI 系协议（Bearer Token 认证）
     m.insert(
         "openai_chat",
         ProtocolConfig {
@@ -45,16 +46,57 @@ static CONFIGS: Lazy<HashMap<&'static str, ProtocolConfig>> = Lazy::new(|| {
         },
     );
     m.insert(
+        "openai_response",
+        ProtocolConfig {
+            path: "v1/responses",
+            build_headers: build_bearer_headers,
+        },
+    );
+    // Anthropic Messages（x-api-key 认证）
+    m.insert(
         "claude_messages",
         ProtocolConfig {
             path: "v1/messages",
             build_headers: build_anthropic_headers,
         },
     );
+    // Google Gemini generateContent（API Key 通过 URL 参数传递，Header 仅 Content-Type）
     m.insert(
-        "openai_response",
+        "gemini",
+        ProtocolConfig {
+            path: "v1beta/models",
+            build_headers: build_gemini_headers,
+        },
+    );
+    // Azure OpenAI（Bearer Token，路径含部署名，由 Provider base_url 承载）
+    m.insert(
+        "azure_openai",
+        ProtocolConfig {
+            path: "chat/completions",
+            build_headers: build_bearer_headers,
+        },
+    );
+    // Google Vertex AI（OAuth Bearer Token）
+    m.insert(
+        "google_vertex",
+        ProtocolConfig {
+            path: "publishers/google/models",
+            build_headers: build_bearer_headers,
+        },
+    );
+    // OpenAI Codex /agents（Bearer Token）
+    m.insert(
+        "openai_codex",
         ProtocolConfig {
             path: "v1/responses",
+            build_headers: build_bearer_headers,
+        },
+    );
+    // vLLM /v1/completions（Bearer Token）
+    m.insert(
+        "openai_vllm",
+        ProtocolConfig {
+            path: "v1/completions",
             build_headers: build_bearer_headers,
         },
     );
@@ -97,6 +139,16 @@ fn build_anthropic_headers(api_key: &str) -> Result<HeaderMap, GatewayError> {
         "anthropic-version",
         HeaderValue::from_static(ANTHROPIC_API_VERSION),
     );
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    Ok(headers)
+}
+
+/// Gemini API Headers（API Key 通过 URL ?key= 参数传递，此处仅设置 Content-Type）
+fn build_gemini_headers(_api_key: &str) -> Result<HeaderMap, GatewayError> {
+    let mut headers = HeaderMap::new();
     headers.insert(
         axum::http::header::CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
@@ -154,6 +206,7 @@ mod tests {
             last_health_check_at: None,
             metadata_json: None,
             custom_headers: "[]".to_string(),
+            models_passthrough: 0,
             created_at: now,
             updated_at: now,
         }

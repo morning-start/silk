@@ -69,7 +69,7 @@ impl Default for GatewaySettings {
             launch_at_startup: false,
             minimize_to_tray: true,
             close_to_tray: true,
-            auto_start_gateway: false,
+            auto_start_gateway: true,
             default_provider_id: None,
             rate_limit_enabled: false,
             rate_limit_max_requests_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_REQUESTS,
