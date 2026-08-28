@@ -5,6 +5,7 @@ use axum::http::{HeaderMap, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures::Stream;
+use serde::{Deserialize, Serialize};
 
 use crate::gateway::error::GatewayError;
 use crate::protocol::prism_wasm;
@@ -161,6 +162,257 @@ impl SseEvent {
     /// 是否为流结束标记
     pub fn is_end(&self) -> bool {
         self.data.as_deref() == Some("[DONE]")
+    }
+
+    /// 推断事件类型
+    pub fn infer_type(&self) -> StreamEventType {
+        // 1. 检查是否为 [DONE] 标记
+        if self.data.as_deref() == Some("[DONE]") {
+            return StreamEventType::ResponseStop;
+        }
+
+        // 2. 解析 JSON 推断类型
+        if let Some(ref data) = self.data {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                // OpenAI: {"choices":[{"delta":{"content":"..."}}]}
+                if let Some(choices) = json.get("choices").and_then(|v| v.as_array()) {
+                    if let Some(first) = choices.first() {
+                        // 检查 finish_reason（优先级高于 delta）
+                        if let Some(finish_reason) = first.get("finish_reason") {
+                            if finish_reason != "null" && !finish_reason.is_null() {
+                                return StreamEventType::ResponseStop;
+                            }
+                        }
+                        // 检查 delta
+                        if first.get("delta").is_some() {
+                            return StreamEventType::ContentDelta;
+                        }
+                    }
+                }
+
+                // Anthropic: {"type":"content_block_delta","delta":{"text":"..."}}
+                if let Some(event_type) = json.get("type").and_then(|v| v.as_str()) {
+                    match event_type {
+                        "message_start" => return StreamEventType::ResponseStart,
+                        "content_block_start" => return StreamEventType::ResponseStart,
+                        "content_block_delta" => return StreamEventType::ContentDelta,
+                        "content_block_stop" => return StreamEventType::ContentDelta,
+                        "message_stop" => return StreamEventType::ResponseStop,
+                        _ => {}
+                    }
+                }
+
+                // Usage 事件（OpenAI 和 Anthropic 都可能有）
+                if json.get("usage").is_some() {
+                    return StreamEventType::Usage;
+                }
+            }
+        }
+
+        // 默认为内容增量
+        StreamEventType::ContentDelta
+    }
+
+    /// 转换为规范化流式事件
+    pub fn to_stream_event(&self) -> StreamEvent {
+        let event_type = self.infer_type();
+        let mut event = StreamEvent {
+            id: self.id.clone(),
+            model: None,
+            event_type: event_type.clone(),
+            role: None,
+            delta: None,
+            stop_reason: None,
+            usage: None,
+            sequence: None,
+            metadata: None,
+        };
+
+        // 解析 JSON 提取字段
+        if let Some(ref data) = self.data {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                // 提取 id（优先从 JSON 中提取，其次从 SSE id 字段）
+                if event.id.is_none() {
+                    event.id = json.get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                }
+
+                // 提取 model
+                event.model = json.get("model")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                // 提取 role
+                event.role = json.get("role")
+                    .or_else(|| json.get("choices").and_then(|c| c.as_array()?.first()?.get("delta")?.get("role")))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                // 提取 delta
+                event.delta = self.extract_delta(&json, &event_type);
+
+                // 提取 stop_reason
+                event.stop_reason = json.get("finish_reason")
+                    .or_else(|| json.get("choices").and_then(|c| c.as_array()?.first()?.get("finish_reason")))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| *s != "null")
+                    .map(|s| s.to_string());
+
+                // 提取 usage
+                event.usage = self.extract_usage(&json);
+            }
+        }
+
+        event
+    }
+
+    /// 提取增量内容
+    fn extract_delta(&self, json: &serde_json::Value, event_type: &StreamEventType) -> Option<ContentDelta> {
+        match event_type {
+            StreamEventType::ContentDelta => {
+                // OpenAI: {"choices":[{"delta":{"content":"..."}}]}
+                if let Some(choices) = json.get("choices").and_then(|v| v.as_array()) {
+                    if let Some(first) = choices.first() {
+                        if let Some(delta) = first.get("delta") {
+                            if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
+                                return Some(ContentDelta {
+                                    text: Some(content.to_string()),
+                                    tool_calls: None,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Anthropic: {"type":"content_block_delta","delta":{"text":"..."}}
+                if let Some(delta) = json.get("delta") {
+                    if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
+                        return Some(ContentDelta {
+                            text: Some(text.to_string()),
+                            tool_calls: None,
+                        });
+                    }
+                }
+
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// 提取 usage 信息
+    fn extract_usage(&self, json: &serde_json::Value) -> Option<Usage> {
+        // 直接在顶层查找 usage
+        let usage_json = json.get("usage")
+            // Anthropic: {"message":{"usage":{...}}}
+            .or_else(|| json.get("message").and_then(|m| m.get("usage")))?;
+
+        let input_tokens = usage_json.get("prompt_tokens")
+            .or_else(|| usage_json.get("input_tokens"))
+            .and_then(|v| v.as_i64());
+
+        let output_tokens = usage_json.get("completion_tokens")
+            .or_else(|| usage_json.get("output_tokens"))
+            .and_then(|v| v.as_i64());
+
+        let total_tokens = usage_json.get("total_tokens")
+            .and_then(|v| v.as_i64());
+
+        Some(Usage {
+            input_tokens,
+            output_tokens,
+            total_tokens,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 规范化流式事件（参考 OpenTrans StreamEvent）
+// ---------------------------------------------------------------------------
+
+/// 流式事件类型
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamEventType {
+    /// 响应开始
+    ResponseStart,
+    /// 内容增量
+    ContentDelta,
+    /// 响应停止
+    ResponseStop,
+    /// Usage 信息
+    Usage,
+}
+
+/// 增量内容
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentDelta {
+    /// 文本内容
+    pub text: Option<String>,
+    /// 工具调用
+    pub tool_calls: Option<Vec<ToolCall>>,
+}
+
+/// 工具调用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    /// 调用 ID
+    pub id: String,
+    /// 函数名称
+    pub name: String,
+    /// 函数参数（JSON 字符串）
+    pub arguments: String,
+}
+
+/// Token 用量
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Usage {
+    /// 输入 tokens
+    pub input_tokens: Option<i64>,
+    /// 输出 tokens
+    pub output_tokens: Option<i64>,
+    /// 总 tokens
+    pub total_tokens: Option<i64>,
+}
+
+/// 规范化流式事件（参考 OpenTrans StreamEvent）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamEvent {
+    /// 事件 ID
+    pub id: Option<String>,
+    /// 模型名称
+    pub model: Option<String>,
+    /// 事件类型
+    pub event_type: StreamEventType,
+    /// 角色（assistant/user）
+    pub role: Option<String>,
+    /// 增量内容
+    pub delta: Option<ContentDelta>,
+    /// 停止原因
+    pub stop_reason: Option<String>,
+    /// Token 用量
+    pub usage: Option<Usage>,
+    /// 事件序号
+    pub sequence: Option<u64>,
+    /// 扩展元数据
+    pub metadata: Option<serde_json::Value>,
+}
+
+impl StreamEvent {
+    /// 提取 usage 信息
+    pub fn extract_usage(&self) -> Option<&Usage> {
+        self.usage.as_ref()
+    }
+
+    /// 提取 prompt tokens
+    pub fn prompt_tokens(&self) -> Option<i64> {
+        self.usage.as_ref()?.input_tokens
+    }
+
+    /// 提取 completion tokens
+    pub fn completion_tokens(&self) -> Option<i64> {
+        self.usage.as_ref()?.output_tokens
     }
 }
 
@@ -740,5 +992,249 @@ mod tests {
         // finish 在未启用时返回空
         let fin = converter.finish().expect("finish");
         assert!(fin.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // 规范化流式事件测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stream_event_type_serialization() {
+        // 测试 StreamEventType 序列化/反序列化
+        let event_type = StreamEventType::ContentDelta;
+        let json = serde_json::to_string(&event_type).unwrap();
+        assert_eq!(json, "\"content_delta\"");
+
+        let deserialized: StreamEventType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, StreamEventType::ContentDelta);
+    }
+
+    #[test]
+    fn test_stream_event_serialization() {
+        // 测试 StreamEvent 序列化/反序列化
+        let event = StreamEvent {
+            id: Some("123".to_string()),
+            model: Some("gpt-4".to_string()),
+            event_type: StreamEventType::ContentDelta,
+            role: Some("assistant".to_string()),
+            delta: Some(ContentDelta {
+                text: Some("Hello".to_string()),
+                tool_calls: None,
+            }),
+            stop_reason: None,
+            usage: None,
+            sequence: Some(1),
+            metadata: None,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"id\":\"123\""));
+        assert!(json.contains("\"model\":\"gpt-4\""));
+        assert!(json.contains("\"event_type\":\"content_delta\""));
+        assert!(json.contains("\"text\":\"Hello\""));
+
+        let deserialized: StreamEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, Some("123".to_string()));
+        assert_eq!(deserialized.model, Some("gpt-4".to_string()));
+        assert_eq!(deserialized.event_type, StreamEventType::ContentDelta);
+    }
+
+    #[test]
+    fn test_usage_serialization() {
+        // 测试 Usage 序列化/反序列化
+        let usage = Usage {
+            input_tokens: Some(100),
+            output_tokens: Some(50),
+            total_tokens: Some(150),
+        };
+
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(json.contains("\"input_tokens\":100"));
+        assert!(json.contains("\"output_tokens\":50"));
+        assert!(json.contains("\"total_tokens\":150"));
+
+        let deserialized: Usage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.input_tokens, Some(100));
+        assert_eq!(deserialized.output_tokens, Some(50));
+        assert_eq!(deserialized.total_tokens, Some(150));
+    }
+
+    #[test]
+    fn test_sse_event_infer_type_openai() {
+        // 测试 OpenAI 格式的事件类型推断
+        let event = SseEvent {
+            event: None,
+            data: Some(r#"{"choices":[{"delta":{"content":"Hello"}}]}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        assert_eq!(event.infer_type(), StreamEventType::ContentDelta);
+
+        let event = SseEvent {
+            event: None,
+            data: Some(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        assert_eq!(event.infer_type(), StreamEventType::ResponseStop);
+    }
+
+    #[test]
+    fn test_sse_event_infer_type_anthropic() {
+        // 测试 Anthropic 格式的事件类型推断
+        let event = SseEvent {
+            event: Some("message_start".to_string()),
+            data: Some(r#"{"type":"message_start","message":{}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        assert_eq!(event.infer_type(), StreamEventType::ResponseStart);
+
+        let event = SseEvent {
+            event: Some("content_block_delta".to_string()),
+            data: Some(r#"{"type":"content_block_delta","delta":{"text":"Hello"}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        assert_eq!(event.infer_type(), StreamEventType::ContentDelta);
+
+        let event = SseEvent {
+            event: Some("message_stop".to_string()),
+            data: Some(r#"{"type":"message_stop"}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        assert_eq!(event.infer_type(), StreamEventType::ResponseStop);
+    }
+
+    #[test]
+    fn test_sse_event_infer_type_done() {
+        // 测试 [DONE] 事件类型推断
+        let event = SseEvent {
+            event: None,
+            data: Some("[DONE]".to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        assert_eq!(event.infer_type(), StreamEventType::ResponseStop);
+    }
+
+    #[test]
+    fn test_sse_event_infer_type_usage() {
+        // 测试 Usage 事件类型推断
+        let event = SseEvent {
+            event: None,
+            data: Some(r#"{"usage":{"prompt_tokens":100,"completion_tokens":50}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        assert_eq!(event.infer_type(), StreamEventType::Usage);
+    }
+
+    #[test]
+    fn test_sse_event_to_stream_event_openai() {
+        // 测试 OpenAI 格式的事件转换
+        let event = SseEvent {
+            event: None,
+            data: Some(r#"{"id":"123","model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+
+        let stream_event = event.to_stream_event();
+        assert_eq!(stream_event.id, Some("123".to_string()));
+        assert_eq!(stream_event.model, Some("gpt-4".to_string()));
+        assert_eq!(stream_event.event_type, StreamEventType::ContentDelta);
+        assert!(stream_event.delta.is_some());
+        assert_eq!(stream_event.delta.unwrap().text, Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn test_sse_event_to_stream_event_anthropic() {
+        // 测试 Anthropic 格式的事件转换
+        let event = SseEvent {
+            event: Some("content_block_delta".to_string()),
+            data: Some(r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+
+        let stream_event = event.to_stream_event();
+        assert_eq!(stream_event.event_type, StreamEventType::ContentDelta);
+        assert!(stream_event.delta.is_some());
+        assert_eq!(stream_event.delta.unwrap().text, Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn test_sse_event_to_stream_event_usage() {
+        // 测试 Usage 事件转换
+        let event = SseEvent {
+            event: None,
+            data: Some(r#"{"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+
+        let stream_event = event.to_stream_event();
+        assert_eq!(stream_event.event_type, StreamEventType::Usage);
+        assert!(stream_event.usage.is_some());
+        let usage = stream_event.usage.unwrap();
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.output_tokens, Some(50));
+        assert_eq!(usage.total_tokens, Some(150));
+    }
+
+    #[test]
+    fn test_stream_event_extract_usage() {
+        // 测试 StreamEvent 的 usage 提取方法
+        let event = StreamEvent {
+            id: None,
+            model: None,
+            event_type: StreamEventType::Usage,
+            role: None,
+            delta: None,
+            stop_reason: None,
+            usage: Some(Usage {
+                input_tokens: Some(100),
+                output_tokens: Some(50),
+                total_tokens: Some(150),
+            }),
+            sequence: None,
+            metadata: None,
+        };
+
+        assert!(event.extract_usage().is_some());
+        assert_eq!(event.prompt_tokens(), Some(100));
+        assert_eq!(event.completion_tokens(), Some(50));
+    }
+
+    #[test]
+    fn test_stream_event_extract_usage_none() {
+        // 测试 StreamEvent 没有 usage 时的行为
+        let event = StreamEvent {
+            id: None,
+            model: None,
+            event_type: StreamEventType::ContentDelta,
+            role: None,
+            delta: None,
+            stop_reason: None,
+            usage: None,
+            sequence: None,
+            metadata: None,
+        };
+
+        assert!(event.extract_usage().is_none());
+        assert!(event.prompt_tokens().is_none());
+        assert!(event.completion_tokens().is_none());
     }
 }
