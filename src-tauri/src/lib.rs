@@ -342,6 +342,15 @@ pub fn run() {
                 // 加载网关上下文（不启动 HTTP 服务，由用户手动启动）
                 let gateway = load_gateway_context(pool.clone(), log_sender).await?;
 
+                // 初始化追踪管理器
+                {
+                    let settings_guard = gateway.settings.read().await;
+                    let trace_enabled = settings_guard.trace_enabled;
+                    if let Err(e) = crate::gateway::trace_manager::init(trace_enabled) {
+                        tracing::warn!(error = %e, "追踪管理器初始化失败");
+                    }
+                }
+
                 // 加载通用字典表缓存
                 let lookup_cache =
                     Arc::new(RwLock::new(load_lookup_cache(pool).await));
