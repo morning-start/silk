@@ -19,6 +19,7 @@ import {
 import { SearchOutline } from "@vicons/ionicons5";
 import { storeToRefs } from "pinia";
 import { api, type Provider, type ProviderHeaderEntry } from "../api";
+import { copyWithFeedback } from "../utils/clipboard";
 import AppFormModal from "../components/AppFormModal.vue";
 import AppPageShell from "../components/AppPageShell.vue";
 import { useProvidersStore } from "../stores/providers";
@@ -198,10 +199,10 @@ async function copyKeyValue(value: string) {
     message.warning("当前 Key 为空");
     return;
   }
-  try {
-    await navigator.clipboard.writeText(value);
+  const ok = await copyWithFeedback(value, "API Key");
+  if (ok) {
     message.success("Key 已复制到剪贴板");
-  } catch {
+  } else {
     message.error("复制失败");
   }
 }
