@@ -135,6 +135,8 @@ fn apply_upstream_request(
         .map_err(|e| StageError::new(ctx.clone(), GatewayError::Serialization(e.to_string())))?;
 
     ctx.request_body = Bytes::from(new_body);
+    // 清除 parsed_body 缓存，避免后续 edit_body() 使用旧格式覆盖转换后的 body
+    ctx.parsed_body = None;
     ctx.upstream_headers = Some(upstream_req.headers);
     ctx.upstream_url = Some(upstream_req.url);
     ctx.upstream_method = Some(upstream_req.method);

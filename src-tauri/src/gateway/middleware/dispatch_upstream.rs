@@ -187,6 +187,15 @@ async fn dispatch_with_retries(
             )
         })?;
 
+        let body_preview = String::from_utf8_lossy(&ctx.request_body).chars().take(500).collect::<String>();
+        let req_url = ctx.upstream_url.as_ref().map(|u| u.to_string()).unwrap_or_default();
+        tracing::info!(
+            url = %req_url,
+            body_bytes = ctx.request_body.len(),
+            body_preview = %body_preview,
+            "发送上游请求"
+        );
+
         match request_clone.body(ctx.request_body.clone()).send().await {
             Ok(response) => {
                 let status = response.status();
@@ -235,6 +244,7 @@ async fn handle_upstream_error(
     headers: axum::http::HeaderMap,
 ) -> Result<RequestContext, StageError> {
     let status = response.status();
+    tracing::warn!(status = %status, "上游返回错误状态码");
     let body = response.bytes().await.unwrap_or_else(|err| {
         bytes::Bytes::from(
             serde_json::json!({
@@ -246,10 +256,12 @@ async fn handle_upstream_error(
             .to_string(),
         )
     });
+    let body_str = String::from_utf8_lossy(&body).chars().take(500).collect::<String>();
+    tracing::error!(status = %status, body = %body_str, "上游错误响应内容");
     let parsed_body = serde_json::from_slice(&body).unwrap_or_else(|_| {
         serde_json::json!({
             "error": {
-                "message": String::from_utf8_lossy(&body).chars().take(500).collect::<String>(),
+                "message": body_str,
                 "type": "upstream_error"
             }
         })
@@ -488,6 +500,13 @@ async fn process_sse_events(
         stream_state.record_event();
         *total_events += 1;
 
+        tracing::debug!(
+            event_type = ?event.event,
+            data_preview = %event.data.as_deref().unwrap_or("").chars().take(120).collect::<String>(),
+            is_end = event.is_end(),
+            "收到 SSE 事件"
+        );
+
         if let Some(usage) = event.parse_usage() {
             shared.write().await.record_usage(&usage);
         }
@@ -509,7 +528,14 @@ async fn process_sse_events(
 
         // 协议转换（流式场景按事件逐条转换）
         match converter.convert(event) {
-            Ok(bytes) => output.extend_from_slice(&bytes),
+            Ok(bytes) => {
+                tracing::debug!(
+                    converted_bytes = bytes.len(),
+                    converted_preview = %String::from_utf8_lossy(&bytes).chars().take(120).collect::<String>(),
+                    "转换输出"
+                );
+                output.extend_from_slice(&bytes);
+            }
             Err(e) => {
                 tracing::warn!("流式协议转换失败: {e}");
                 // 转换失败时透传原始事件，避免打断客户端流
