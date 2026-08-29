@@ -298,22 +298,13 @@ static PRISM: LazyLock<Result<Mutex<PrismWasm>, String>> = LazyLock::new(|| {
         match p.call("wasm_list_providers", &[]) {
             Ok(raw) => {
                 if let Ok(providers) = serde_json::from_str::<Vec<String>>(&raw) {
-                    let all_mapped: &[(&str, &str)] = &[
-                        ("openai", "openai"),
-                        ("messages", "messages"),
-                        ("responses", "responses"),
-                        ("gemini", "gemini"),
-                        ("azure_openai", "azure-openai"),
-                        ("google_vertex", "google-vertex"),
-                        ("openai_codex", "openai-codex"),
-                        ("openai_vllm", "openai-vllm"),
-                    ];
-                    for &(silk_name, prism_name) in all_mapped {
-                        if !providers.iter().any(|pp| pp == prism_name) {
+                    // 只校验核心4个 provider（其他别名都映射到这4个）
+                    let core_providers = ["openai", "messages", "responses", "gemini"];
+                    for name in &core_providers {
+                        if !providers.iter().any(|pp| pp == *name) {
                             tracing::warn!(
-                                silk = silk_name,
-                                prism = prism_name,
-                                "映射的 prism provider 不在 wasm 支持列表中"
+                                provider = name,
+                                "核心 provider 不在 wasm 支持列表中"
                             );
                         }
                     }
@@ -336,23 +327,29 @@ fn prism() -> Result<MutexGuard<'static, PrismWasm>, String> {
 
 /// silk 协议名 → prism provider 名映射
 ///
-/// silk 与 prism 统一使用相同协议名：
+/// prism 只支持 4 个核心 provider，其他协议映射到对应的核心 provider：
 /// - openai    （OpenAI Chat Completions）
 /// - responses （OpenAI Responses API）
 /// - messages  （Anthropic Messages）
 /// - gemini    （Google Gemini）
-///
-/// 其他协议（azure_openai/google_vertex/openai_codex/openai_vllm）保留旧名。
 pub fn map_provider(protocol: &str) -> Option<&'static str> {
     match protocol {
         "openai" => Some("openai"),
         "messages" => Some("messages"),
         "responses" => Some("responses"),
         "gemini" => Some("gemini"),
-        "azure_openai" => Some("azure-openai"),
-        "google_vertex" => Some("google-vertex"),
-        "openai_codex" => Some("openai-codex"),
-        "openai_vllm" => Some("openai-vllm"),
+        // 兼容旧名：映射到核心 provider
+        "openai_chat" => Some("openai"),
+        "claude_messages" => Some("messages"),
+        "openai_response" => Some("responses"),
+        // Azure OpenAI 使用 OpenAI 格式
+        "azure_openai" => Some("openai"),
+        // Google Vertex 使用 Gemini 格式
+        "google_vertex" => Some("gemini"),
+        // Codex 使用 Responses 格式
+        "openai_codex" => Some("responses"),
+        // vLLM 使用 OpenAI 格式
+        "openai_vllm" => Some("openai"),
         _ => None,
     }
 }

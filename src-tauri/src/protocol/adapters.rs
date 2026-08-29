@@ -101,6 +101,28 @@ static CONFIGS: Lazy<HashMap<&'static str, ProtocolConfig>> = Lazy::new(|| {
             build_headers: build_bearer_headers,
         },
     );
+    // 兼容旧名
+    m.insert(
+        "openai_chat",
+        ProtocolConfig {
+            path: "v1/chat/completions",
+            build_headers: build_bearer_headers,
+        },
+    );
+    m.insert(
+        "claude_messages",
+        ProtocolConfig {
+            path: "v1/messages",
+            build_headers: build_anthropic_headers,
+        },
+    );
+    m.insert(
+        "openai_response",
+        ProtocolConfig {
+            path: "v1/responses",
+            build_headers: build_bearer_headers,
+        },
+    );
     m
 });
 
