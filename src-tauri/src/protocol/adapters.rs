@@ -69,60 +69,6 @@ static CONFIGS: Lazy<HashMap<&'static str, ProtocolConfig>> = Lazy::new(|| {
             build_headers: build_gemini_headers,
         },
     );
-    // Azure OpenAI（Bearer Token，路径含部署名，由 Provider base_url 承载）
-    m.insert(
-        "azure_openai",
-        ProtocolConfig {
-            path: "chat/completions",
-            build_headers: build_bearer_headers,
-        },
-    );
-    // Google Vertex AI（OAuth Bearer Token）
-    m.insert(
-        "google_vertex",
-        ProtocolConfig {
-            path: "publishers/google/models",
-            build_headers: build_bearer_headers,
-        },
-    );
-    // OpenAI Codex /agents（Bearer Token）
-    m.insert(
-        "openai_codex",
-        ProtocolConfig {
-            path: "v1/responses",
-            build_headers: build_bearer_headers,
-        },
-    );
-    // vLLM /v1/completions（Bearer Token）
-    m.insert(
-        "openai_vllm",
-        ProtocolConfig {
-            path: "v1/completions",
-            build_headers: build_bearer_headers,
-        },
-    );
-    // 兼容旧名
-    m.insert(
-        "openai_chat",
-        ProtocolConfig {
-            path: "v1/chat/completions",
-            build_headers: build_bearer_headers,
-        },
-    );
-    m.insert(
-        "claude_messages",
-        ProtocolConfig {
-            path: "v1/messages",
-            build_headers: build_anthropic_headers,
-        },
-    );
-    m.insert(
-        "openai_response",
-        ProtocolConfig {
-            path: "v1/responses",
-            build_headers: build_bearer_headers,
-        },
-    );
     m
 });
 

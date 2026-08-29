@@ -327,7 +327,7 @@ fn prism() -> Result<MutexGuard<'static, PrismWasm>, String> {
 
 /// silk 协议名 → prism provider 名映射
 ///
-/// prism 只支持 4 个核心 provider，其他协议映射到对应的核心 provider：
+/// 只支持 4 个核心协议：
 /// - openai    （OpenAI Chat Completions）
 /// - responses （OpenAI Responses API）
 /// - messages  （Anthropic Messages）
@@ -338,18 +338,6 @@ pub fn map_provider(protocol: &str) -> Option<&'static str> {
         "messages" => Some("messages"),
         "responses" => Some("responses"),
         "gemini" => Some("gemini"),
-        // 兼容旧名：映射到核心 provider
-        "openai_chat" => Some("openai"),
-        "claude_messages" => Some("messages"),
-        "openai_response" => Some("responses"),
-        // Azure OpenAI 使用 OpenAI 格式
-        "azure_openai" => Some("openai"),
-        // Google Vertex 使用 Gemini 格式
-        "google_vertex" => Some("gemini"),
-        // Codex 使用 Responses 格式
-        "openai_codex" => Some("responses"),
-        // vLLM 使用 OpenAI 格式
-        "openai_vllm" => Some("openai"),
         _ => None,
     }
 }
