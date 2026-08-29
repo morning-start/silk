@@ -171,6 +171,12 @@ impl GatewayPipeline {
                 ctx = select_channel::run(ctx).await?;
                 ctx = transform_request::run(ctx).await?;
 
+                tracing::info!(
+                    body_bytes = ctx.request_body.len(),
+                    body_preview = %String::from_utf8_lossy(&ctx.request_body).chars().take(150).collect::<String>(),
+                    "transform_request 完成，request_body 已更新"
+                );
+
                 // 执行插件 before_upstream 钩子
                 for plugin in &self.runtime.plugins {
                     ctx = plugin.before_upstream(ctx, &self.runtime).await?;

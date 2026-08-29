@@ -161,16 +161,22 @@ impl SseEvent {
 
     /// 是否为流结束标记
     ///
-    /// OpenAI 用 `[DONE]`，Anthropic 用 `message_stop` 类型字段。
+    /// OpenAI 用 `[DONE]`，Anthropic 用 `message_stop`，Responses 用 `response.completed`。
     pub fn is_end(&self) -> bool {
         if self.data.as_deref() == Some("[DONE]") {
             return true;
         }
-        // Anthropic: {"type":"message_stop"}
         if let Some(ref data) = self.data {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                if json.get("type").and_then(|v| v.as_str()) == Some("message_stop") {
-                    return true;
+                if let Some(event_type) = json.get("type").and_then(|v| v.as_str()) {
+                    // Anthropic
+                    if event_type == "message_stop" {
+                        return true;
+                    }
+                    // Responses
+                    if event_type == "response.completed" {
+                        return true;
+                    }
                 }
             }
         }
@@ -212,11 +218,23 @@ impl SseEvent {
                 // Anthropic: {"type":"content_block_delta","delta":{"text":"..."}}
                 if let Some(event_type) = json.get("type").and_then(|v| v.as_str()) {
                     match event_type {
+                        // Anthropic (messages)
                         "message_start" => return StreamEventType::ResponseStart,
                         "content_block_start" => return StreamEventType::ResponseStart,
                         "content_block_delta" => return StreamEventType::ContentDelta,
                         "content_block_stop" => return StreamEventType::ResponseStop,
                         "message_stop" => return StreamEventType::ResponseStop,
+                        // Responses
+                        "response.created" => return StreamEventType::ResponseStart,
+                        "response.output_item.added" => return StreamEventType::ResponseStart,
+                        "response.content_part.added" => return StreamEventType::ResponseStart,
+                        "response.output_text.delta" => return StreamEventType::ContentDelta,
+                        "response.output_text.done" => return StreamEventType::ResponseStop,
+                        "response.reasoning_summary_text.delta" => return StreamEventType::ContentDelta,
+                        "response.reasoning_summary_text.done" => return StreamEventType::ResponseStop,
+                        "response.function_call_arguments.delta" => return StreamEventType::ContentDelta,
+                        "response.function_call_arguments.done" => return StreamEventType::ResponseStop,
+                        "response.completed" => return StreamEventType::ResponseStop,
                         _ => {}
                     }
                 }
@@ -320,12 +338,14 @@ impl SseEvent {
         }
     }
 
-    /// 从已解析的 JSON 中提取 usage 信息（兼容 OpenAI / Anthropic 字段名与嵌套位置）
+    /// 从已解析的 JSON 中提取 usage 信息（兼容 OpenAI / Anthropic / Responses 字段名与嵌套位置）
     pub fn extract_usage(&self, json: &serde_json::Value) -> Option<Usage> {
         // 直接在顶层查找 usage
         let usage_json = json.get("usage")
             // Anthropic: {"message":{"usage":{...}}}
-            .or_else(|| json.get("message").and_then(|m| m.get("usage")))?;
+            .or_else(|| json.get("message").and_then(|m| m.get("usage")))
+            // Responses: {"response":{"usage":{...}}}
+            .or_else(|| json.get("response").and_then(|r| r.get("usage")))?;
 
         let input_tokens = usage_json.get("prompt_tokens")
             .or_else(|| usage_json.get("input_tokens"))
@@ -703,6 +723,8 @@ impl SseConverter {
     /// 上游 openai-chat 的 `[DONE]` 由 dispatch 拦截并发送流结束标记，不会
     /// 经过 convert()；但 prism 需要看到 `[DONE]` 才会输出 message_stop 等
     /// 收尾事件，故在流结束时显式调用本方法冲刷。
+    ///
+    /// responses 格式不使用 `[DONE]`，跳过冲刷。
     pub fn finish(&mut self) -> Result<Bytes, String> {
         if !self.enabled {
             return Ok(Bytes::new());
@@ -714,6 +736,10 @@ impl SseConverter {
             errors = self.error_count,
             "SSE 流式转换完成"
         );
+        // responses 格式以 response.completed 结束，不使用 [DONE]
+        if self.source == "responses" {
+            return Ok(Bytes::new());
+        }
         let done_event = "data: [DONE]\n\n";
         let converted = prism_wasm::convert_stream_event(&self.source, done_event, &self.target)?;
         let filtered = filter_empty_events(&converted);

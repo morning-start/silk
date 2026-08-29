@@ -661,6 +661,24 @@ mod tests {
     }
 
     #[test]
+    fn test_convert_anthropic_message_stop_to_openai() {
+        // 测试 message_stop 事件转换
+        let event = "data: {\"type\":\"message_stop\"}\n\n";
+        let out = convert_stream_event("messages", event, "openai")
+            .expect("convert message_stop");
+        eprintln!("=== message_stop 转换结果 ===\n{out}\n========================");
+    }
+
+    #[test]
+    fn test_convert_anthropic_content_block_stop_to_openai() {
+        // 测试 content_block_stop 事件转换
+        let event = "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
+        let out = convert_stream_event("messages", event, "openai")
+            .expect("convert content_block_stop");
+        eprintln!("=== content_block_stop 转换结果 ===\n{out}\n========================");
+    }
+
+    #[test]
     fn test_convert_anthropic_event_to_openai() {
         // 模拟 Anthropic 的 content_block_delta 事件转换为 OpenAI 格式
         let anthropic_event = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n";
