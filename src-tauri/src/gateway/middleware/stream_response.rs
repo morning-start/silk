@@ -661,29 +661,13 @@ impl SseConverter {
     /// 逐事件转换：将单个 SSE 事件转换为目标协议格式
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
         if !self.enabled {
-            tracing::trace!("转换器未启用，透传原始事件");
             return Ok(Bytes::from(event.serialize()));
         }
         let sse_text = event.serialize();
-        tracing::debug!(
-            source = %self.source,
-            target = %self.target,
-            event_count = self.event_count,
-            input_len = sse_text.len(),
-            "开始转换 SSE 事件"
-        );
         match prism_wasm::convert_stream_event(&self.source, &sse_text, &self.target) {
             Ok(converted) => {
                 self.event_count += 1;
                 let filtered = filter_empty_events(&converted);
-                tracing::debug!(
-                    source = %self.source,
-                    target = %self.target,
-                    input_len = sse_text.len(),
-                    output_len = filtered.len(),
-                    event_count = self.event_count,
-                    "SSE 事件转换成功"
-                );
                 Ok(Bytes::from(filtered))
             }
             Err(e) => {
@@ -692,9 +676,9 @@ impl SseConverter {
                     source = %self.source,
                     target = %self.target,
                     error = %e,
-                    input = %sse_text.trim(),
+                    input_preview = %sse_text.chars().take(100).collect::<String>(),
                     event_count = self.event_count,
-                    "SSE 事件转换失败，透传原始事件"
+                    "SSE 事件转换失败"
                 );
                 Err(e)
             }

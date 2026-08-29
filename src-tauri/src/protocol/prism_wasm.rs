@@ -676,6 +676,26 @@ mod tests {
     }
 
     #[test]
+    fn test_convert_anthropic_event_to_openai() {
+        // 模拟 Anthropic 的 content_block_delta 事件转换为 OpenAI 格式
+        let anthropic_event = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n";
+        let out = convert_stream_event("messages", anthropic_event, "openai")
+            .expect("convert anthropic event");
+        eprintln!("=== Anthropic → OpenAI 转换结果 ===\n{out}\n========================");
+        // 应该包含 choices 和 content
+        assert!(out.contains("choices") || out.contains("data:"), "输出为空或不含 choices: {out}");
+    }
+
+    #[test]
+    fn test_convert_anthropic_message_start_to_openai() {
+        // 模拟 Anthropic 的 message_start 事件
+        let anthropic_event = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3\",\"content\":[]}}\n\n";
+        let out = convert_stream_event("messages", anthropic_event, "openai")
+            .expect("convert message_start");
+        eprintln!("=== message_start 转换结果 ===\n{out}\n========================");
+    }
+
+    #[test]
     fn test_convert_stream_openai_to_messages() {
         let sse = [
             "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}",

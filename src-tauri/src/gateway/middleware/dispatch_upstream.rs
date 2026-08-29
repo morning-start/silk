@@ -387,24 +387,13 @@ async fn run_sse_read_task(
                         stream_state.record_data(bytes.len());
                         shared.write().await.bytes_received += bytes.len() as u64;
 
-                        tracing::debug!(
-                            chunk_len = bytes.len(),
-                            "收到上游 SSE 数据块"
-                        );
-
                         let events = parser.feed(&bytes);
-                        tracing::debug!(
-                            parsed_events = events.len(),
-                            "解析出 SSE 事件"
-                        );
-
                         if events.is_empty() {
                             // 不完整 chunk：可能是部分 SSE 事件、纯注释行、或空行。
                             // 不能直接转发原始字节——否则上游心跳注释（": xxx"）或
                             // 不完整 JSON 会与 silk 自己的 keep-alive 合并，产生
                             // "\:" 等非法 JSON 转义。丢弃即可，完整事件会在后续
                             // chunk 中由 parser 重组后走正常转换路径。
-                            tracing::debug!("无完整事件，跳过");
                             continue;
                         }
 
@@ -421,7 +410,6 @@ async fn run_sse_read_task(
                                 shared.write().await.bytes_sent += output.len() as u64;
                                 if tx.send(Ok(Bytes::from(output))).await.is_err() {
                                     // 客户端已断开，确保 complete_tx 被发送
-                                    tracing::debug!("客户端断开连接，停止流处理");
                                     let _ = complete_tx.send(());
                                     return;
                                 }
@@ -496,8 +484,6 @@ async fn process_sse_events(
 ) -> ChunkOutcome {
     let mut output = Vec::new();
 
-    tracing::debug!("处理 {} 个 SSE 事件", events.len());
-
     for event in events {
         stream_state.record_event();
         *total_events += 1;
@@ -510,23 +496,14 @@ async fn process_sse_events(
         }
 
         if event.is_end() {
-            tracing::debug!("收到流结束标记 [DONE]");
             // 冲刷转换器收尾事件（如 anthropic message_stop）
             let flush = converter.finish().unwrap_or_default();
             return ChunkOutcome::End(flush.to_vec());
         }
 
         // 协议转换（流式场景按事件逐条转换）
-        tracing::debug!(
-            event_type = ?event.event,
-            data_len = event.data.as_ref().map(|d| d.len()).unwrap_or(0),
-            "转换 SSE 事件"
-        );
         match converter.convert(event) {
-            Ok(bytes) => {
-                tracing::debug!(output_len = bytes.len(), "事件转换完成");
-                output.extend_from_slice(&bytes);
-            }
+            Ok(bytes) => output.extend_from_slice(&bytes),
             Err(e) => {
                 tracing::warn!("流式协议转换失败: {e}");
                 // 转换失败时透传原始事件，避免打断客户端流
