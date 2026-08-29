@@ -162,19 +162,22 @@ impl SseEvent {
     /// 是否为流结束标记
     ///
     /// OpenAI 用 `[DONE]`，Anthropic 用 `message_stop`，Responses 用 `response.completed`。
+    /// 同时检查 event: 字段和 data 中的 type 字段，兼容不同服务器格式。
     pub fn is_end(&self) -> bool {
         if self.data.as_deref() == Some("[DONE]") {
             return true;
         }
+        // 检查 event: 字段（SSE 规范的事件类型）
+        if let Some(ref event_name) = self.event {
+            if event_name == "response.completed" || event_name == "message_stop" {
+                return true;
+            }
+        }
+        // 检查 data: 中的 type 字段
         if let Some(ref data) = self.data {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                 if let Some(event_type) = json.get("type").and_then(|v| v.as_str()) {
-                    // Anthropic
-                    if event_type == "message_stop" {
-                        return true;
-                    }
-                    // Responses
-                    if event_type == "response.completed" {
+                    if event_type == "message_stop" || event_type == "response.completed" {
                         return true;
                     }
                 }
@@ -194,6 +197,17 @@ impl SseEvent {
         // 1. 检查是否为 [DONE] 标记
         if self.data.as_deref() == Some("[DONE]") {
             return StreamEventType::ResponseStop;
+        }
+
+        // 1.5 检查 event: 字段（SSE 规范的事件类型）
+        if let Some(ref event_name) = self.event {
+            match event_name.as_str() {
+                "response.completed" | "message_stop" => return StreamEventType::ResponseStop,
+                "response.created" | "message_start" => return StreamEventType::ResponseStart,
+                "response.output_text.delta" | "content_block_delta" => return StreamEventType::ContentDelta,
+                "response.output_text.done" | "content_block_stop" => return StreamEventType::ResponseStop,
+                _ => {}
+            }
         }
 
         // 2. 解析 JSON 推断类型
