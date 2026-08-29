@@ -377,6 +377,7 @@ async fn run_sse_read_task(
                     if !stream_state.ended {
                         let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
                     }
+                    // tx 在此被 drop，ReceiverStream 结束，HTTP 响应完成
                     let _ = complete_tx.send(());
                     return;
                 };
@@ -408,10 +409,14 @@ async fn run_sse_read_task(
                             ChunkOutcome::Data(output) => {
                                 shared.write().await.bytes_sent += output.len() as u64;
                                 if tx.send(Ok(Bytes::from(output))).await.is_err() {
-                                    break; // 客户端已断开
+                                    // 客户端已断开，确保 complete_tx 被发送
+                                    tracing::debug!("客户端断开连接，停止流处理");
+                                    let _ = complete_tx.send(());
+                                    return;
                                 }
                             }
                             ChunkOutcome::End(flush) => {
+                                stream_state.ended = true;
                                 if !flush.is_empty() {
                                     let _ = tx.send(Ok(Bytes::from(flush))).await;
                                 }
@@ -426,6 +431,7 @@ async fn run_sse_read_task(
                                     "SSE 流正常结束"
                                 );
                                 let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
+                                // tx 在此被 drop，ReceiverStream 结束，HTTP 响应完成
                                 let _ = complete_tx.send(());
                                 return;
                             }
@@ -439,6 +445,7 @@ async fn run_sse_read_task(
                             "SSE 流上游错误"
                         );
                         let _ = tx.send(Err(GatewayError::Upstream(err))).await;
+                        // tx 在此被 drop，ReceiverStream 结束，HTTP 响应完成
                         let _ = complete_tx.send(());
                         return;
                     }
@@ -453,17 +460,19 @@ async fn run_sse_read_task(
                         "SSE 流超时"
                     );
                     let _ = tx.send(Err(GatewayError::Timeout)).await;
+                    // tx 在此被 drop，ReceiverStream 结束，HTTP 响应完成
                     let _ = complete_tx.send(());
                     return;
                 }
                 if tx.send(Ok(stream_response::heartbeat_comment())).await.is_err() {
-                    break; // 客户端已断开
+                    // 客户端已断开，确保 complete_tx 被发送
+                    tracing::debug!("客户端断开连接（心跳检测）");
+                    let _ = complete_tx.send(());
+                    return;
                 }
             }
         }
     }
-
-    let _ = complete_tx.send(());
 }
 
 /// 将一批 SSE 事件转换为待下发字节，并同步用量 / last_event_id 到共享状态
