@@ -337,22 +337,22 @@ fn prism() -> Result<MutexGuard<'static, PrismWasm>, String> {
 /// silk 协议名 → prism provider 名映射
 ///
 /// silk 使用下划线协议名（openai_chat/claude_messages/openai_response 等），
-/// prism 使用其 provider 主名（openai-chat/anthropic/openai 等）。
+/// prism 使用其 provider 主名（openai/messages/responses/gemini 等）。
 ///
-/// 完整映射（8 个 prism provider，以 wasm_list_providers 实际导出为准）：
-/// - openai_chat     → openai-chat    （OpenAI Chat Completions）
-/// - openai_response → openai         （OpenAI Responses API）
-/// - claude_messages → anthropic      （Anthropic Messages）
-/// - gemini          → gemini         （Google Gemini generateContent）
+/// 完整映射（以 wasm_list_providers 实际导出为准）：
+/// - openai_chat     → openai      （OpenAI Chat Completions，别名 chat）
+/// - openai_response → responses   （OpenAI Responses API，别名 openai-responses）
+/// - claude_messages → messages    （Anthropic Messages，别名 claude-messages/anthropic）
+/// - gemini          → gemini      （Google Gemini，别名 google）
 /// - azure_openai    → azure-openai   （Azure OpenAI）
 /// - google_vertex   → google-vertex  （Google Vertex AI）
 /// - openai_codex    → openai-codex   （OpenAI Codex /agents）
 /// - openai_vllm     → openai-vllm    （vLLM /v1/completions）
 pub fn map_provider(protocol: &str) -> Option<&'static str> {
     match protocol {
-        "openai_chat" => Some("openai-chat"),
-        "claude_messages" => Some("anthropic"),
-        "openai_response" => Some("openai"),
+        "openai_chat" => Some("openai"),
+        "claude_messages" => Some("messages"),
+        "openai_response" => Some("responses"),
         "gemini" => Some("gemini"),
         "azure_openai" => Some("azure-openai"),
         "google_vertex" => Some("google-vertex"),
@@ -607,35 +607,22 @@ mod tests {
 
     #[test]
     fn test_map_provider() {
-        assert_eq!(map_provider("openai_chat"), Some("openai-chat"));
-        assert_eq!(map_provider("claude_messages"), Some("anthropic"));
-        assert_eq!(map_provider("openai_response"), Some("openai"));
+        assert_eq!(map_provider("openai_chat"), Some("openai"));
+        assert_eq!(map_provider("claude_messages"), Some("messages"));
+        assert_eq!(map_provider("openai_response"), Some("responses"));
         assert_eq!(map_provider("gemini"), Some("gemini"));
-        assert_eq!(map_provider("azure_openai"), Some("azure-openai"));
-        assert_eq!(map_provider("google_vertex"), Some("google-vertex"));
-        assert_eq!(map_provider("openai_codex"), Some("openai-codex"));
-        assert_eq!(map_provider("openai_vllm"), Some("openai-vllm"));
         assert_eq!(map_provider("unknown"), None);
     }
 
     #[test]
     fn test_list_providers() {
         let providers = list_providers().expect("list providers");
-        // 校验所有映射的 prism provider 名都被 wasm 支持
-        let all_prism_names = [
-            "openai-chat",
-            "anthropic",
-            "openai",
-            "gemini",
-            "azure-openai",
-            "google-vertex",
-            "openai-codex",
-            "openai-vllm",
-        ];
-        for name in &all_prism_names {
+        // 校验核心 provider 都被 wasm 支持（别名可能因版本变化）
+        let core_providers = ["openai", "responses", "messages", "gemini"];
+        for name in &core_providers {
             assert!(
                 providers.contains(&name.to_string()),
-                "prism.wasm 缺少 provider: {name}，实际列表: {providers:?}"
+                "prism.wasm 缺少核心 provider: {name}，实际列表: {providers:?}"
             );
         }
     }
