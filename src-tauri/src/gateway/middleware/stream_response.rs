@@ -160,8 +160,21 @@ impl SseEvent {
     }
 
     /// 是否为流结束标记
+    ///
+    /// OpenAI 用 `[DONE]`，Anthropic 用 `message_stop` 类型字段。
     pub fn is_end(&self) -> bool {
-        self.data.as_deref() == Some("[DONE]")
+        if self.data.as_deref() == Some("[DONE]") {
+            return true;
+        }
+        // Anthropic: {"type":"message_stop"}
+        if let Some(ref data) = self.data {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                if json.get("type").and_then(|v| v.as_str()) == Some("message_stop") {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// 从事件的 data 中解析 token 用量（data 非 JSON 或不含 usage 时返回 None）
@@ -202,7 +215,7 @@ impl SseEvent {
                         "message_start" => return StreamEventType::ResponseStart,
                         "content_block_start" => return StreamEventType::ResponseStart,
                         "content_block_delta" => return StreamEventType::ContentDelta,
-                        "content_block_stop" => return StreamEventType::ContentDelta,
+                        "content_block_stop" => return StreamEventType::ResponseStop,
                         "message_stop" => return StreamEventType::ResponseStop,
                         _ => {}
                     }
