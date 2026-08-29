@@ -496,32 +496,14 @@ async fn process_sse_events(
         }
 
         if event.is_end() {
-            // 先转换结束事件本身
+            // 先转换结束事件本身（message_stop → finish_reason:stop）
             let mut end_output = Vec::new();
-            match converter.convert(event) {
-                Ok(bytes) => end_output.extend_from_slice(&bytes),
-                Err(e) => tracing::warn!("结束事件转换失败: {e}"),
+            if let Ok(bytes) = converter.convert(event) {
+                end_output.extend_from_slice(&bytes);
             }
             // 冲刷转换器收尾事件
             let flush = converter.finish().unwrap_or_default();
             end_output.extend_from_slice(&flush);
-            // 如果转换器没有生成 finish_reason，手动补一个
-            let output_str = String::from_utf8_lossy(&end_output);
-            if !output_str.contains("finish_reason") {
-                let finish_chunk = serde_json::json!({
-                    "id": "",
-                    "object": "chat.completion.chunk",
-                    "created": 0,
-                    "model": "",
-                    "choices": [{
-                        "index": 0,
-                        "delta": {},
-                        "finish_reason": "stop"
-                    }]
-                });
-                let finish_line = format!("data: {}\n\n", finish_chunk);
-                end_output.extend_from_slice(finish_line.as_bytes());
-            }
             return ChunkOutcome::End(end_output);
         }
 
