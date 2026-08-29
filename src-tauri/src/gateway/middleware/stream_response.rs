@@ -613,11 +613,23 @@ pub struct SseConverter {
 
 impl SseConverter {
     pub fn new(inbound: &str, outbound: &str) -> Self {
+        let inbound_mapped = prism_wasm::map_provider(inbound);
+        let outbound_mapped = prism_wasm::map_provider(outbound);
         let enabled = inbound != outbound
             && !inbound.is_empty()
             && !outbound.is_empty()
-            && prism_wasm::map_provider(inbound).is_some()
-            && prism_wasm::map_provider(outbound).is_some();
+            && inbound_mapped.is_some()
+            && outbound_mapped.is_some();
+
+        tracing::debug!(
+            inbound,
+            outbound,
+            inbound_mapped = ?inbound_mapped,
+            outbound_mapped = ?outbound_mapped,
+            enabled,
+            "SseConverter 初始化"
+        );
+
         if enabled {
             tracing::info!(
                 source = outbound,
@@ -649,23 +661,29 @@ impl SseConverter {
     /// 逐事件转换：将单个 SSE 事件转换为目标协议格式
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
         if !self.enabled {
+            tracing::trace!("转换器未启用，透传原始事件");
             return Ok(Bytes::from(event.serialize()));
         }
         let sse_text = event.serialize();
+        tracing::debug!(
+            source = %self.source,
+            target = %self.target,
+            event_count = self.event_count,
+            input_len = sse_text.len(),
+            "开始转换 SSE 事件"
+        );
         match prism_wasm::convert_stream_event(&self.source, &sse_text, &self.target) {
             Ok(converted) => {
                 self.event_count += 1;
                 let filtered = filter_empty_events(&converted);
-                // debug: 对比输入输出，排查转换问题
-                if event.data.as_deref().is_some_and(|d| d.contains("\"usage\"")) {
-                    tracing::debug!(
-                        source = %self.source,
-                        target = %self.target,
-                        input = %sse_text.trim(),
-                        output = %filtered.trim(),
-                        "prism usage 事件转换结果"
-                    );
-                }
+                tracing::debug!(
+                    source = %self.source,
+                    target = %self.target,
+                    input_len = sse_text.len(),
+                    output_len = filtered.len(),
+                    event_count = self.event_count,
+                    "SSE 事件转换成功"
+                );
                 Ok(Bytes::from(filtered))
             }
             Err(e) => {
