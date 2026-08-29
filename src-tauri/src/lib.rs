@@ -288,98 +288,20 @@ pub fn run() {
         })
         .setup(|app| {
             let data_dir = app.path().app_data_dir().expect("无法解析应用数据目录");
-
-            // 加载设置（用于日志配置）
             let settings_path = data_dir.join("gateway.json");
             let settings = crate::models::GatewaySettings::load(&settings_path)
                 .unwrap_or_default();
 
-            // 初始化分层级日志系统
-            {
-                let log_dir = data_dir.join("logs");
-                let _ = std::fs::create_dir_all(&log_dir);
-                let log_config = crate::gateway::logging::LoggingConfig::from_settings(&settings, log_dir);
-                let _guard = crate::gateway::logging::init_logging(log_config);
-                // _guard 必须存活到进程结束，泄漏到全局
-                Box::leak(Box::new(_guard));
-            }
-
+            // 必须早于任何日志输出：setup 之前的日志只能走 stderr
+            init_logging_system(&data_dir, &settings);
             tracing::info!(data_dir = %data_dir.display(), "应用数据目录");
 
-            if let Err(err) = tauri::async_runtime::block_on(async {
-                // 初始化数据库
-                let pool = init_database(&data_dir).await?;
-
-                let db_path = data_dir.join("silk.db");
-                tracing::info!(db_path = %db_path.display(), "数据库文件");
-
-                // 初始化网关设置文件
-                init_gateway_settings(&data_dir).await
-                    .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
-
-                // 初始化用户家目录
-                let home = std::env::var("HOME")
-                    .or_else(|_| std::env::var("USERPROFILE"))
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| data_dir.clone());
-                let _ = HOME_DIR.set(home);
-
-                // 启动后台日志写入任务
-                let log_writer_handle =
-                    crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
-                app.manage(log_writer_handle);
-
-                // 加载网关上下文（不启动 HTTP 服务，由用户手动启动）
-                let gateway = load_gateway_context(pool.clone(), log_sender).await?;
-
-                // 初始化追踪管理器
-                {
-                    let settings_guard = gateway.settings.read().await;
-                    let trace_enabled = settings_guard.trace_enabled;
-                    if let Err(e) = crate::gateway::trace_manager::init(trace_enabled) {
-                        tracing::warn!(error = %e, "追踪管理器初始化失败");
-                    }
-                }
-
-                // 加载通用字典表缓存
-                let lookup_cache =
-                    Arc::new(RwLock::new(load_lookup_cache(pool).await));
-
-                // 启动后台日志清理任务
-                let cleanup_handle = crate::gateway::log_cleanup::spawn_log_cleanup_task(
-                    pool.clone(),
-                    gateway.settings.clone(),
-                );
-                app.manage(cleanup_handle);
-
-                // 创建设置变更广播通道（容量 16，避免背压阻塞）
-                let (settings_change_tx, _settings_change_rx) =
-                    tokio::sync::broadcast::channel::<()>(16);
-
-                app.manage(AppState {
-                    gateway: Arc::new(RwLock::new(gateway)),
-                    gateway_server: Arc::new(RwLock::new(None)),
-                    lookup_cache,
-                    settings_change_tx,
-                });
-
-                let state = app.state::<AppState>();
-                let should_auto_start = {
-                    let gateway_guard = state.gateway.read().await;
-                    let settings_guard = gateway_guard.settings.read().await;
-                    let _ = crate::application::settings_service::sync_autostart(
-                        &app.handle().clone(),
-                        settings_guard.launch_at_startup,
-                    );
-                    settings_guard.auto_start_gateway
-                };
-                if should_auto_start {
-                    start_existing_gateway(state.inner()).await.map_err(|err| {
-                        sqlx::Error::Io(std::io::Error::other(err))
-                    })?;
-                }
-                Ok::<(), sqlx::Error>(())
-            }) {
+            if let Err(err) = tauri::async_runtime::block_on(bootstrap(
+                app,
+                &data_dir,
+                log_sender,
+                log_receiver,
+            )) {
                 panic!("数据库初始化失败: {err}");
             }
 
@@ -387,34 +309,7 @@ pub fn run() {
                 panic!("托盘初始化失败: {err}");
             }
 
-            // 设置变更监听：配置变更时自动重启网关
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let mut rx = {
-                    let state = app_handle.state::<AppState>();
-                    state.settings_change_tx.subscribe()
-                };
-                loop {
-                    match rx.recv().await {
-                        Ok(()) => {
-                            let state = app_handle.state::<AppState>();
-                            if state.gateway_server.read().await.is_some() {
-                                tracing::info!("设置变更，自动重启网关");
-                                let _ = crate::application::gateway_service::restart(
-                                    state.inner(),
-                                )
-                                .await;
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                            continue; // 丢弃，继续监听
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            break; // channel 关闭，退出
-                        }
-                    }
-                }
-            });
+            spawn_settings_watchdog(app.handle().clone());
 
             Ok(())
         })
@@ -477,4 +372,130 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 初始化分层级日志系统
+///
+/// 日志 guard 必须存活到进程结束，因此泄漏到全局。
+fn init_logging_system(data_dir: &Path, settings: &crate::models::GatewaySettings) {
+    let log_dir = data_dir.join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_config = crate::gateway::logging::LoggingConfig::from_settings(settings, log_dir);
+    let guard = crate::gateway::logging::init_logging(log_config);
+    Box::leak(Box::new(guard));
+}
+
+/// 装配应用运行时：数据库、后台任务、AppState，必要时拉起网关
+///
+/// 网关 HTTP 服务默认不启动（由用户手动启动），仅当设置开启自动启动时才拉起。
+async fn bootstrap(
+    app: &mut tauri::App,
+    data_dir: &Path,
+    log_sender: tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
+    log_receiver: tokio::sync::mpsc::Receiver<crate::models::NewRequestLog>,
+) -> Result<(), sqlx::Error> {
+    let pool = init_database(data_dir).await?;
+    tracing::info!(db_path = %data_dir.join("silk.db").display(), "数据库文件");
+
+    init_gateway_settings(data_dir)
+        .await
+        .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
+
+    init_home_dir(data_dir);
+
+    // 启动后台日志写入任务
+    let log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);
+    app.manage(log_writer_handle);
+
+    // 加载网关上下文（不启动 HTTP 服务，由用户手动启动）
+    let gateway = load_gateway_context(pool.clone(), log_sender).await?;
+    init_trace_manager(&gateway).await;
+
+    // 加载通用字典表缓存
+    let lookup_cache = Arc::new(RwLock::new(load_lookup_cache(pool).await));
+
+    // 启动后台日志清理任务
+    let cleanup_handle = crate::gateway::log_cleanup::spawn_log_cleanup_task(
+        pool.clone(),
+        gateway.settings.clone(),
+    );
+    app.manage(cleanup_handle);
+
+    // 设置变更广播通道（容量 16，避免背压阻塞）
+    let (settings_change_tx, _settings_change_rx) = tokio::sync::broadcast::channel::<()>(16);
+    app.manage(AppState {
+        gateway: Arc::new(RwLock::new(gateway)),
+        gateway_server: Arc::new(RwLock::new(None)),
+        lookup_cache,
+        settings_change_tx,
+    });
+
+    auto_start_gateway_if_enabled(app).await?;
+
+    Ok(())
+}
+
+/// 初始化用户家目录（AI 工具配置文件写入位置），失败时回退到应用数据目录
+fn init_home_dir(data_dir: &Path) {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| data_dir.to_path_buf());
+    let _ = HOME_DIR.set(home);
+}
+
+/// 初始化追踪管理器，失败仅告警不阻断启动
+async fn init_trace_manager(gateway: &GatewayContext) {
+    let trace_enabled = gateway.settings.read().await.trace_enabled;
+    if let Err(e) = crate::gateway::trace_manager::init(trace_enabled) {
+        tracing::warn!(error = %e, "追踪管理器初始化失败");
+    }
+}
+
+/// 同步开机自启设置，并在开启了「启动时自动运行网关」时拉起网关
+async fn auto_start_gateway_if_enabled(app: &mut tauri::App) -> Result<(), sqlx::Error> {
+    let state = app.state::<AppState>();
+    let should_auto_start = {
+        let gateway_guard = state.gateway.read().await;
+        let settings_guard = gateway_guard.settings.read().await;
+        let _ = crate::application::settings_service::sync_autostart(
+            &app.handle().clone(),
+            settings_guard.launch_at_startup,
+        );
+        settings_guard.auto_start_gateway
+    };
+
+    if should_auto_start {
+        start_existing_gateway(state.inner())
+            .await
+            .map_err(|err| sqlx::Error::Io(std::io::Error::other(err)))?;
+    }
+
+    Ok(())
+}
+
+/// 监听设置变更，网关运行期间自动重启以应用新配置
+fn spawn_settings_watchdog(app_handle: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut rx = {
+            let state = app_handle.state::<AppState>();
+            state.settings_change_tx.subscribe()
+        };
+
+        loop {
+            match rx.recv().await {
+                Ok(()) => {
+                    let state = app_handle.state::<AppState>();
+                    if state.gateway_server.read().await.is_some() {
+                        tracing::info!("设置变更，自动重启网关");
+                        let _ = crate::application::gateway_service::restart(state.inner()).await;
+                    }
+                }
+                // 广播积压：丢弃跳过的通知，继续监听
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                // channel 关闭：退出监听循环
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }

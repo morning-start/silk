@@ -11,17 +11,20 @@ use axum::response::IntoResponse;
 ///
 /// 同时支持短名和完整适配器名，完整名直接 identity 映射。
 const PROTOCOL_ADAPTER_MAP: &[(&str, &str)] = &[
-    ("chat", "openai_chat"),
-    ("response", "openai_response"),
-    ("message", "claude_messages"),
+    ("chat", "openai"),
+    ("response", "responses"),
+    ("message", "messages"),
+    ("openai", "openai"),
+    ("responses", "responses"),
+    ("messages", "messages"),
     ("gemini", "gemini"),
     ("azure", "azure_openai"),
     ("vertex", "google_vertex"),
     ("codex", "openai_codex"),
     ("vllm", "openai_vllm"),
-    ("openai_chat", "openai_chat"),
-    ("openai_response", "openai_response"),
-    ("claude_messages", "claude_messages"),
+    ("openai_chat", "openai"),       // 兼容旧名
+    ("openai_response", "responses"), // 兼容旧名
+    ("claude_messages", "messages"),  // 兼容旧名
     ("gemini_generate_content", "gemini"),
     ("azure_openai", "azure_openai"),
     ("google_vertex", "google_vertex"),
@@ -332,40 +335,40 @@ fn fill_routing_context(
 /// 从请求路径 + 请求体中检测客户端使用的入站协议
 ///
 /// 检测优先级：
-/// 1. 路径匹配（优先）：/v1/chat/completions → openai_chat,
-///    /v1/responses → openai_response, /v1/messages → claude_messages
-/// 2. 请求体 JSON 顶层键（兜底）：有 "input" → openai_response,
-///    有 "messages" → openai_chat, 其他 → openai_chat
+/// 1. 路径匹配（优先）：/v1/chat/completions → openai,
+///    /v1/responses → responses, /v1/messages → messages
+/// 2. 请求体 JSON 顶层键（兜底）：有 "input" → responses,
+///    有 "messages" → openai, 其他 → openai
 fn detect_inbound_protocol(path: &str, body: &serde_json::Value) -> &'static str {
     match path {
-        "/v1/chat/completions" => return "openai_chat",
-        "/v1/responses" => return "openai_response",
-        "/v1/messages" | "/v1/anthropic" => return "claude_messages",
+        "/v1/chat/completions" => return "openai",
+        "/v1/responses" => return "responses",
+        "/v1/messages" | "/v1/anthropic" => return "messages",
         _ => {}
     }
     if body.get("input").is_some() {
-        "openai_response"
+        "responses"
     } else if body.get("messages").is_some() {
         // messages 字段可能来自 OpenAI Chat 或 Claude Messages
-        // 通过 model 前缀区分：claude- 开头 → claude_messages，否则 → openai_chat
+        // 通过 model 前缀区分：claude- 开头 → messages，否则 → openai
         if let Some(model) = body.get("model").and_then(|v| v.as_str()) {
             if model.starts_with("claude-") {
-                return "claude_messages";
+                return "messages";
             }
         }
-        "openai_chat"
+        "openai"
     } else {
-        "openai_chat"
+        "openai"
     }
 }
 
 /// 根据 Provider 的 protocols 字段解析对应的适配器名称
 ///
 /// 取第一个支持的协议映射到 adapter，例如：
-/// - ["chat"] → "openai_chat"
-/// - ["response"] → "openai_response"
-/// - ["message"] → "claude_messages"
-/// - 不支持任何协议或未知协议 → 默认 "openai_chat"
+/// - ["chat"] → "openai"
+/// - ["response"] → "responses"
+/// - ["message"] → "messages"
+/// - 不支持任何协议或未知协议 → 默认 "openai"
 fn resolve_protocol_adapter(provider: &Provider) -> String {
     let protocols = provider.protocols_vec();
     for protocol in &protocols {
@@ -375,8 +378,8 @@ fn resolve_protocol_adapter(provider: &Provider) -> String {
             }
         }
     }
-    // 默认使用 openai_chat
-    "openai_chat".to_string()
+    // 默认使用 openai
+    "openai".to_string()
 }
 
 // ===== 工具函数：缓存加载 =====

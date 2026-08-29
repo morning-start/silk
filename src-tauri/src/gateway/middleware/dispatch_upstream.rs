@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use tokio::sync::RwLock;
 
 use crate::gateway::context::{GatewayContext, RequestContext, StreamSharedState};
@@ -19,57 +19,93 @@ pub async fn run(
     runtime: &GatewayContext,
     ctx: RequestContext,
 ) -> Result<RequestContext, StageError> {
-    let error_ctx = ctx.clone();
     let provider = ctx.provider.as_ref().cloned().ok_or_else(|| {
         StageError::new(
-            error_ctx.clone(),
+            ctx.clone(),
             GatewayError::Internal("缺少 provider".to_string()),
         )
     })?;
 
-    let upstream_url = if let Some(ref url) = ctx.upstream_url {
-        reqwest::Url::parse(url).map_err(|err| {
-            StageError::new(
-                error_ctx.clone(),
-                GatewayError::BadRequest(format!("无效的上游地址: {err}")),
-            )
-        })?
-    } else {
-        build_upstream_url(&provider.api_base_url, &ctx.uri)
-            .map_err(|error| StageError::new(error_ctx.clone(), error))?
+    let upstream_url = build_upstream_url_checked(&ctx, &provider)?;
+    let reqwest_method = build_upstream_method(&ctx)?;
+    let upstream_request = build_upstream_request(runtime, &ctx, upstream_url, reqwest_method, &provider)?;
+
+    let max_retries = provider.max_retries as u32;
+    let client_requested_stream = ctx.client_requested_stream;
+    let stream_config = StreamConfig {
+        max_retries,
+        ..Default::default()
     };
 
-    // transform_request 已注入 stream:true，统一使用流式客户端
-    let client = &runtime.http_client_streaming;
+    log_upstream_request(&ctx, &upstream_request, &provider);
 
-    let reqwest_method = if let Some(ref method) = ctx.upstream_method {
+    dispatch_with_retries(
+        ctx,
+        upstream_request,
+        &stream_config,
+        provider,
+        client_requested_stream,
+    )
+    .await
+}
+
+/// 构建并验证上游 URL
+fn build_upstream_url_checked(
+    ctx: &RequestContext,
+    provider: &crate::models::Provider,
+) -> Result<reqwest::Url, StageError> {
+    if let Some(ref url) = ctx.upstream_url {
+        reqwest::Url::parse(url).map_err(|err| {
+            StageError::new(
+                ctx.clone(),
+                GatewayError::BadRequest(format!("无效的上游地址: {err}")),
+            )
+        })
+    } else {
+        build_upstream_url(&provider.api_base_url, &ctx.uri).map_err(|error| {
+            StageError::new(ctx.clone(), error)
+        })
+    }
+}
+
+/// 构建上游 HTTP 方法
+fn build_upstream_method(ctx: &RequestContext) -> Result<reqwest::Method, StageError> {
+    if let Some(ref method) = ctx.upstream_method {
         reqwest::Method::from_bytes(method.as_bytes()).map_err(|err| {
             StageError::new(
-                error_ctx.clone(),
+                ctx.clone(),
                 GatewayError::BadRequest(format!("无效的上游方法: {err}")),
             )
-        })?
+        })
     } else {
         reqwest::Method::from_bytes(ctx.method.as_str().as_bytes()).map_err(|err| {
             StageError::new(
-                error_ctx.clone(),
+                ctx.clone(),
                 GatewayError::BadRequest(format!("不支持的方法: {err}")),
             )
-        })?
-    };
+        })
+    }
+}
 
-    // 保存 URL 和方法的字符串形式（用于日志，因为后续会被 move）
-    let url_str = upstream_url.to_string();
-    let method_str = reqwest_method.as_str().to_string();
+/// 构建上游请求（URL + 方法 + Headers）
+fn build_upstream_request(
+    runtime: &GatewayContext,
+    ctx: &RequestContext,
+    upstream_url: reqwest::Url,
+    reqwest_method: reqwest::Method,
+    provider: &crate::models::Provider,
+) -> Result<reqwest::RequestBuilder, StageError> {
+    let client = &runtime.http_client_streaming;
+    let mut request = client.request(reqwest_method, upstream_url);
 
-    let mut upstream_request = client.request(reqwest_method, upstream_url);
-    // 应用适配器生成的上游请求头（API Key、Content-Type 等）
+    // 1. 应用适配器生成的上游请求头（API Key、Content-Type 等）
     if let Some(ref adapter_headers) = ctx.upstream_headers {
         for (name, value) in adapter_headers.iter() {
-            upstream_request = upstream_request.header(name, value);
+            request = request.header(name, value);
         }
     }
-    // 转发客户端头（使用 HeaderConfig 配置）
+
+    // 2. 转发客户端头（使用 HeaderConfig 配置）
     let header_config = crate::gateway::header_config::HeaderConfig::default();
     for (name, value) in ctx.headers.iter() {
         // 跳过已经被适配器设置的 header
@@ -80,87 +116,96 @@ pub async fn run(
         {
             continue;
         }
-        
-        // 使用配置决定是否转发
         if header_config.should_forward(name.as_str()) {
-            upstream_request = upstream_request.header(name, value);
-        }
-    }
-    // 应用 Provider 自定义请求头（覆盖适配器头和转发头）
-    if let Some(ref provider) = ctx.provider {
-        let custom_headers = provider.custom_headers_vec();
-        for entry in &custom_headers {
-            if entry.enabled && !entry.name.is_empty() {
-                upstream_request = upstream_request.header(&entry.name, &entry.value);
-            }
+            request = request.header(name, value);
         }
     }
 
-    let max_retries = provider.max_retries as u32;
-    let client_requested_stream = ctx.client_requested_stream;
-    let stream_config = StreamConfig {
-        max_retries,
-        ..Default::default()
-    };
+    // 3. 应用 Provider 自定义请求头（最高优先级）
+    let custom_headers = provider.custom_headers_vec();
+    for entry in &custom_headers {
+        if entry.enabled && !entry.name.is_empty() {
+            request = request.header(&entry.name, &entry.value);
+        }
+    }
 
+    Ok(request)
+}
+
+/// 输出上游请求调试日志
+fn log_upstream_request(
+    ctx: &RequestContext,
+    _request: &reqwest::RequestBuilder,
+    provider: &crate::models::Provider,
+) {
+    let masked_key = ctx
+        .selected_api_key
+        .as_deref()
+        .map(mask_api_key)
+        .unwrap_or_default();
+    let body_preview = String::from_utf8_lossy(&ctx.request_body)
+        .chars()
+        .take(200)
+        .collect::<String>();
+
+    // 从 RequestBuilder 中提取 URL 和 method 信息
+    tracing::debug!(
+        api_key = %masked_key,
+        body_len = ctx.request_body.len(),
+        body_preview = %body_preview,
+        provider = %provider.name,
+        "转发上游请求"
+    );
+}
+
+/// 执行带重试的上游请求分发
+async fn dispatch_with_retries(
+    ctx: RequestContext,
+    mut upstream_request: reqwest::RequestBuilder,
+    stream_config: &StreamConfig,
+    provider: crate::models::Provider,
+    client_requested_stream: bool,
+) -> Result<RequestContext, StageError> {
+    let max_retries = stream_config.max_retries;
     let mut last_error = None;
-
-    // 调试日志：输出实际上游请求信息
-    {
-        let masked_key = ctx
-            .selected_api_key
-            .as_deref()
-            .map(mask_api_key)
-            .unwrap_or_default();
-        let body_preview = String::from_utf8_lossy(&ctx.request_body)
-            .chars().take(200).collect::<String>();
-        tracing::debug!(
-            url = %url_str,
-            method = %method_str,
-            api_key = %masked_key,
-            body_len = ctx.request_body.len(),
-            body_preview = %body_preview,
-            "转发上游请求"
-        );
-    }
 
     for attempt in 0..=max_retries {
         if attempt > 0 {
-            let backoff = calculate_backoff(attempt, &stream_config);
+            let backoff = calculate_backoff(attempt, stream_config);
             tokio::time::sleep(backoff).await;
 
             // SSE 断线重连：添加 Last-Event-ID
-            let last_event_id = ctx.last_event_id.clone();
-            if let Some(ref event_id) = last_event_id {
+            if let Some(ref event_id) = ctx.last_event_id {
                 upstream_request = upstream_request.header("Last-Event-ID", event_id);
             }
         }
 
         let request_clone = upstream_request.try_clone().ok_or_else(|| {
             StageError::new(
-                error_ctx.clone(),
+                ctx.clone(),
                 GatewayError::Internal("请求不可克隆".to_string()),
             )
         })?;
 
-        let result = request_clone.body(ctx.request_body.clone()).send().await;
-
-        match result {
+        match request_clone.body(ctx.request_body.clone()).send().await {
             Ok(response) => {
                 let status = response.status();
                 let headers = response.headers().clone();
-                tracing::debug!(
-                    status = %status,
-                    attempt = attempt,
-                    "收到上游响应"
-                );
+                tracing::debug!(status = %status, attempt, "收到上游响应");
 
                 if !status.is_success() {
                     return handle_upstream_error(ctx, response, headers).await;
                 }
 
-                return handle_sse_response(ctx, response, headers, provider, &stream_config, client_requested_stream)
-                    .await;
+                return handle_sse_response(
+                    ctx,
+                    response,
+                    headers,
+                    provider,
+                    stream_config,
+                    client_requested_stream,
+                )
+                .await;
             }
             Err(err) => {
                 last_error = Some(err);
@@ -168,17 +213,18 @@ pub async fn run(
         }
     }
 
-    // 所有重试都失败，返回最后一条错误（或兜底错误消息）
-    let final_error = match last_error {
-        Some(err) => GatewayError::UpstreamError {
-            status: 0,
-            body: serde_json::json!({"error": {"message": err.to_string(), "type": "upstream_error"}}),
-        },
-        None => GatewayError::Internal("上游请求失败（无详细错误）".to_string()),
-    };
+    // 所有重试耗尽，返回最后一条错误
     Err(StageError::new(
-        error_ctx,
-        final_error,
+        ctx,
+        match last_error {
+            Some(err) => GatewayError::UpstreamError {
+                status: 0,
+                body: serde_json::json!({
+                    "error": { "message": err.to_string(), "type": "upstream_error" }
+                }),
+            },
+            None => GatewayError::Internal("上游请求失败（无详细错误）".to_string()),
+        },
     ))
 }
 
@@ -245,178 +291,29 @@ async fn handle_sse_response(
     client_requested_stream: bool,
 ) -> Result<RequestContext, StageError> {
     if !client_requested_stream {
-        return handle_nonstreaming_aggregate(ctx, response, headers, provider, config).await;
+        return handle_nonstreaming_aggregate(ctx, response, provider).await;
     }
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, GatewayError>>(256);
     let shared = Arc::new(RwLock::new(StreamSharedState::default()));
-    let mut stream_state = StreamState::new();
     let status = response.status();
-
-    // 判断是否需要流式协议转换
-    let inbound = ctx.inbound_protocol.clone().unwrap_or_default();
-    let outbound = ctx.outbound_protocol.clone().unwrap_or_default();
-    let inbound_clone = inbound.clone();
-    let outbound_clone = outbound.clone();
 
     // 流结束通知通道：后台任务 → pipeline
     let (complete_tx, complete_rx) = tokio::sync::oneshot::channel::<()>();
 
     // 启动后台读取任务
-    let response_stream = response.bytes_stream();
-    let stream_config = config.clone();
-    let shared_for_task = shared.clone();
-    let stream_start = std::time::Instant::now();
-    let _read_task = tokio::spawn(async move {
-        let mut parser = SseParser::new();
-        let mut pinned_stream = std::pin::pin!(response_stream);
-        let mut heartbeat = tokio::time::interval(stream_config.heartbeat_interval);
-        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let inbound = ctx.inbound_protocol.clone().unwrap_or_default();
+    let outbound = ctx.outbound_protocol.clone().unwrap_or_default();
 
-        // 创建协议转换器
-        let mut converter = SseConverter::new(&inbound_clone, &outbound_clone);
-        let mut total_events: u64 = 0;
-
-        loop {
-            tokio::select! {
-                chunk = pinned_stream.next() => {
-                    match chunk {
-                        Some(Ok(bytes)) => {
-                            stream_state.record_data(bytes.len());
-
-                            // 追踪接收字节数
-                            {
-                                let mut state = shared_for_task.write().await;
-                                state.bytes_received += bytes.len() as u64;
-                            }
-
-                            // 解析 SSE 事件，追踪 last_event_id
-                            let events = parser.feed(&bytes);
-                            if events.is_empty() {
-                                // 不完整 chunk：可能是部分 SSE 事件、纯注释行、或空行。
-                                // 不能直接转发原始字节——否则上游心跳注释（": xxx"）或
-                                // 不完整 JSON 会与 silk 自己的 keep-alive 合并，产生
-                                // "\:" 等非法 JSON 转义。丢弃即可，完整事件会在后续
-                                // chunk 中由 parser 重组后走正常转换路径。
-                                continue;
-                            }
-
-                            let mut output = Vec::new();
-
-                            for event in &events {
-                                stream_state.record_event();
-                                total_events += 1;
-
-                                // 使用规范化结构提取 usage 信息
-                                let stream_event = converter.normalize(event);
-                                if let Some(usage) = stream_event.extract_usage() {
-                                    let mut state = shared_for_task.write().await;
-                                    if let Some(input_tokens) = usage.input_tokens {
-                                        state.exact_prompt_tokens = Some(input_tokens);
-                                    }
-                                    if let Some(output_tokens) = usage.output_tokens {
-                                        state.exact_completion_tokens = Some(output_tokens);
-                                    }
-                                }
-
-                                // 更新 last_event_id
-                                if let Some(ref id) = event.id {
-                                    let mut state = shared_for_task.write().await;
-                                    state.last_event_id = Some(id.clone());
-                                }
-
-                                if event.is_end() {
-                                    // 冲刷转换器收尾事件（如 anthropic message_stop）
-                                    if let Ok(bytes) = converter.finish() {
-                                        if !bytes.is_empty() {
-                                            let _ = tx.send(Ok(bytes)).await;
-                                        }
-                                    }
-                                    let elapsed = stream_start.elapsed();
-                                    let state = shared_for_task.read().await;
-                                    tracing::info!(
-                                        total_events,
-                                        bytes_received = state.bytes_received,
-                                        bytes_sent = state.bytes_sent,
-                                        elapsed_ms = elapsed.as_millis(),
-                                        prompt_tokens = state.exact_prompt_tokens.unwrap_or(0),
-                                        completion_tokens = state.exact_completion_tokens.unwrap_or(0),
-                                        "SSE 流正常结束"
-                                    );
-                                    let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
-                                    let _ = complete_tx.send(());
-                                    return;
-                                }
-
-                                // 协议转换（流式场景按事件逐条转换）
-                                match converter.convert(event) {
-                                    Ok(bytes) => output.extend_from_slice(&bytes),
-                                    Err(e) => {
-                                        tracing::warn!("流式协议转换失败: {e}");
-                                        // 转换失败时透传原始事件
-                                        output.extend_from_slice(event.serialize().as_bytes());
-                                    }
-                                }
-                            }
-
-                            // 更新已发送字节数
-                            {
-                                let mut state = shared_for_task.write().await;
-                                state.bytes_sent += output.len() as u64;
-                            }
-
-                            if tx.send(Ok(Bytes::from(output))).await.is_err() {
-                                break;
-                            }
-                        }
-                        Some(Err(err)) => {
-                            let elapsed = stream_start.elapsed();
-                            tracing::warn!(
-                                error = %err,
-                                total_events,
-                                elapsed_ms = elapsed.as_millis(),
-                                "SSE 流上游错误"
-                            );
-                            let _ = tx.send(Err(GatewayError::Upstream(err))).await;
-                            let _ = complete_tx.send(());
-                            return;
-                        }
-                        None => {
-                            let elapsed = stream_start.elapsed();
-                            tracing::info!(
-                                total_events,
-                                elapsed_ms = elapsed.as_millis(),
-                                "SSE 流连接关闭（无 [DONE] 标记）"
-                            );
-                            if !stream_state.ended {
-                                let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
-                            }
-                            let _ = complete_tx.send(());
-                            return;
-                        }
-                    }
-                }
-                _ = heartbeat.tick() => {
-                    if stream_state.is_timed_out(stream_config.stream_timeout) {
-                        let elapsed = stream_start.elapsed();
-                        tracing::warn!(
-                            total_events,
-                            elapsed_ms = elapsed.as_millis(),
-                            timeout_secs = stream_config.stream_timeout.as_secs(),
-                            "SSE 流超时"
-                        );
-                        let _ = tx.send(Err(GatewayError::Timeout)).await;
-                        let _ = complete_tx.send(());
-                        return;
-                    }
-                    if tx.send(Ok(stream_response::heartbeat_comment())).await.is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-        let _ = complete_tx.send(());
-    });
+    tokio::spawn(run_sse_read_task(
+        response.bytes_stream(),
+        tx,
+        complete_tx,
+        shared.clone(),
+        config.clone(),
+        inbound,
+        outbound,
+    ));
 
     // 构建流式响应
     let stream_response = StreamResponse::Sse {
@@ -436,6 +333,180 @@ async fn handle_sse_response(
     Ok(ctx)
 }
 
+/// 一个 chunk 解析出的 SSE 事件的处理结果
+enum ChunkOutcome {
+    /// 已转换为待下发字节（可能为空）
+    Data(Vec<u8>),
+    /// 上游标记流结束（如 `[DONE]`），携带转换器冲刷出的收尾事件
+    /// （如 anthropic `message_stop`）的字节
+    End(Vec<u8>),
+}
+
+/// SSE 后台读取任务：读取上游字节流 → 解析 SSE 事件 → 协议转换 → 推送到 `tx`
+///
+/// 任务退出前必定通过 `complete_tx` 通知 pipeline（正常结束、上游错误、超时或客户端断开）。
+/// 心跳分支在 `stream_timeout` 内未收到任何数据时判定超时。
+async fn run_sse_read_task(
+    response_stream: impl Stream<Item = reqwest::Result<Bytes>>,
+    tx: tokio::sync::mpsc::Sender<Result<Bytes, GatewayError>>,
+    complete_tx: tokio::sync::oneshot::Sender<()>,
+    shared: Arc<RwLock<StreamSharedState>>,
+    config: StreamConfig,
+    inbound: String,
+    outbound: String,
+) {
+    let mut parser = SseParser::new();
+    let mut pinned_stream = std::pin::pin!(response_stream);
+    let mut heartbeat = tokio::time::interval(config.heartbeat_interval);
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let mut converter = SseConverter::new(&inbound, &outbound);
+    let mut stream_state = StreamState::new();
+    let mut total_events: u64 = 0;
+    let stream_start = std::time::Instant::now();
+
+    loop {
+        tokio::select! {
+            chunk = pinned_stream.next() => {
+                let Some(chunk) = chunk else {
+                    tracing::info!(
+                        total_events,
+                        elapsed_ms = stream_start.elapsed().as_millis(),
+                        "SSE 流连接关闭（无 [DONE] 标记）"
+                    );
+                    if !stream_state.ended {
+                        let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
+                    }
+                    let _ = complete_tx.send(());
+                    return;
+                };
+
+                match chunk {
+                    Ok(bytes) => {
+                        stream_state.record_data(bytes.len());
+                        shared.write().await.bytes_received += bytes.len() as u64;
+
+                        let events = parser.feed(&bytes);
+                        if events.is_empty() {
+                            // 不完整 chunk：可能是部分 SSE 事件、纯注释行、或空行。
+                            // 不能直接转发原始字节——否则上游心跳注释（": xxx"）或
+                            // 不完整 JSON 会与 silk 自己的 keep-alive 合并，产生
+                            // "\:" 等非法 JSON 转义。丢弃即可，完整事件会在后续
+                            // chunk 中由 parser 重组后走正常转换路径。
+                            continue;
+                        }
+
+                        let outcome = process_sse_events(
+                            &events,
+                            &mut converter,
+                            &shared,
+                            &mut stream_state,
+                            &mut total_events,
+                        ).await;
+
+                        match outcome {
+                            ChunkOutcome::Data(output) => {
+                                shared.write().await.bytes_sent += output.len() as u64;
+                                if tx.send(Ok(Bytes::from(output))).await.is_err() {
+                                    break; // 客户端已断开
+                                }
+                            }
+                            ChunkOutcome::End(flush) => {
+                                if !flush.is_empty() {
+                                    let _ = tx.send(Ok(Bytes::from(flush))).await;
+                                }
+                                let state = shared.read().await;
+                                tracing::info!(
+                                    total_events,
+                                    bytes_received = state.bytes_received,
+                                    bytes_sent = state.bytes_sent,
+                                    elapsed_ms = stream_start.elapsed().as_millis(),
+                                    prompt_tokens = state.exact_prompt_tokens.unwrap_or(0),
+                                    completion_tokens = state.exact_completion_tokens.unwrap_or(0),
+                                    "SSE 流正常结束"
+                                );
+                                let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
+                                let _ = complete_tx.send(());
+                                return;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            error = %err,
+                            total_events,
+                            elapsed_ms = stream_start.elapsed().as_millis(),
+                            "SSE 流上游错误"
+                        );
+                        let _ = tx.send(Err(GatewayError::Upstream(err))).await;
+                        let _ = complete_tx.send(());
+                        return;
+                    }
+                }
+            }
+            _ = heartbeat.tick() => {
+                if stream_state.is_timed_out(config.stream_timeout) {
+                    tracing::warn!(
+                        total_events,
+                        elapsed_ms = stream_start.elapsed().as_millis(),
+                        timeout_secs = config.stream_timeout.as_secs(),
+                        "SSE 流超时"
+                    );
+                    let _ = tx.send(Err(GatewayError::Timeout)).await;
+                    let _ = complete_tx.send(());
+                    return;
+                }
+                if tx.send(Ok(stream_response::heartbeat_comment())).await.is_err() {
+                    break; // 客户端已断开
+                }
+            }
+        }
+    }
+
+    let _ = complete_tx.send(());
+}
+
+/// 将一批 SSE 事件转换为待下发字节，并同步用量 / last_event_id 到共享状态
+async fn process_sse_events(
+    events: &[SseEvent],
+    converter: &mut SseConverter,
+    shared: &Arc<RwLock<StreamSharedState>>,
+    stream_state: &mut StreamState,
+    total_events: &mut u64,
+) -> ChunkOutcome {
+    let mut output = Vec::new();
+
+    for event in events {
+        stream_state.record_event();
+        *total_events += 1;
+
+        if let Some(usage) = event.parse_usage() {
+            shared.write().await.record_usage(&usage);
+        }
+        if let Some(ref id) = event.id {
+            shared.write().await.last_event_id = Some(id.clone());
+        }
+
+        if event.is_end() {
+            // 冲刷转换器收尾事件（如 anthropic message_stop）
+            let flush = converter.finish().unwrap_or_default();
+            return ChunkOutcome::End(flush.to_vec());
+        }
+
+        // 协议转换（流式场景按事件逐条转换）
+        match converter.convert(event) {
+            Ok(bytes) => output.extend_from_slice(&bytes),
+            Err(e) => {
+                tracing::warn!("流式协议转换失败: {e}");
+                // 转换失败时透传原始事件，避免打断客户端流
+                output.extend_from_slice(event.serialize().as_bytes());
+            }
+        }
+    }
+
+    ChunkOutcome::Data(output)
+}
+
 /// 非流式响应聚合：收集所有 SSE 事件，聚合为单个 JSON 响应。
 ///
 /// 当客户端未请求流式时使用。网关强制上游走流式（transform_request 注入 stream:true），
@@ -444,9 +515,7 @@ async fn handle_sse_response(
 async fn handle_nonstreaming_aggregate(
     mut ctx: RequestContext,
     response: reqwest::Response,
-    _headers: axum::http::HeaderMap,
     provider: crate::models::Provider,
-    _config: &StreamConfig,
 ) -> Result<RequestContext, StageError> {
     let shared = Arc::new(RwLock::new(StreamSharedState::default()));
     let status = response.status();
@@ -455,113 +524,15 @@ async fn handle_nonstreaming_aggregate(
     let inbound = ctx.inbound_protocol.clone().unwrap_or_default();
     let outbound = ctx.outbound_protocol.clone().unwrap_or_default();
 
-    // 后台收集任务：读取所有 SSE 事件
-    let response_stream = response.bytes_stream();
-    let shared_for_task = shared.clone();
-    let stream_start = std::time::Instant::now();
-
+    // 后台收集任务：读取所有 SSE 事件并聚合为 JSON
     let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Bytes>();
-
-    let _read_task = tokio::spawn(async move {
-        let mut parser = SseParser::new();
-        let mut converter = SseConverter::new(&inbound, &outbound);
-        let mut collected_events: Vec<SseEvent> = Vec::new();
-        let mut pinned_stream = std::pin::pin!(response_stream);
-        let mut total_events: u64 = 0;
-
-        loop {
-            match pinned_stream.next().await {
-                Some(Ok(bytes)) => {
-                    {
-                        let mut state = shared_for_task.write().await;
-                        state.bytes_received += bytes.len() as u64;
-                    }
-
-                    let events = parser.feed(&bytes);
-                    for event in events {
-                        total_events += 1;
-
-                        // 提取 token 用量
-                        if let Some(ref data) = event.data {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                let mut state = shared_for_task.write().await;
-                                let usage = json.get("usage")
-                                    .or_else(|| json.get("message").and_then(|m| m.get("usage")));
-                                if let Some(u) = usage {
-                                    if state.exact_prompt_tokens.is_none() {
-                                        let inp = u.get("prompt_tokens")
-                                            .or_else(|| u.get("input_tokens"))
-                                            .and_then(|v| v.as_i64());
-                                        if inp.is_some() {
-                                            state.exact_prompt_tokens = inp;
-                                        }
-                                    }
-                                    let out = u.get("completion_tokens")
-                                        .or_else(|| u.get("output_tokens"))
-                                        .and_then(|v| v.as_i64());
-                                    if let Some(v) = out {
-                                        state.exact_completion_tokens = Some(v);
-                                    }
-                                }
-                            }
-                        }
-
-                        if event.is_end() {
-                            // 冲刷转换器收尾事件
-                            if let Ok(bytes) = converter.finish() {
-                                if !bytes.is_empty() {
-                                    // 解析 finish 输出的事件并加入收集列表
-                                    let finish_events = SseParser::new().feed(&bytes);
-                                    collected_events.extend(finish_events);
-                                }
-                            }
-                            let elapsed = stream_start.elapsed();
-                            tracing::info!(
-                                total_events,
-                                elapsed_ms = elapsed.as_millis(),
-                                "非流式 SSE 收集完成（[DONE]）"
-                            );
-                            let aggregated = stream_response::aggregate_sse_to_json(&collected_events);
-                            let _ = result_tx.send(aggregated);
-                            return;
-                        }
-
-                        // 转换事件并收集
-                        match converter.convert(&event) {
-                            Ok(converted) => {
-                                if !converted.is_empty() {
-                                    let converted_events = SseParser::new().feed(&converted);
-                                    collected_events.extend(converted_events);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("非流式协议转换失败: {e}");
-                                collected_events.push(event);
-                            }
-                        }
-                    }
-                }
-                Some(Err(err)) => {
-                    tracing::warn!(error = %err, "非流式 SSE 上游错误");
-                    // 出错时用已收集的事件聚合
-                    let aggregated = stream_response::aggregate_sse_to_json(&collected_events);
-                    let _ = result_tx.send(aggregated);
-                    return;
-                }
-                None => {
-                    let elapsed = stream_start.elapsed();
-                    tracing::info!(
-                        total_events,
-                        elapsed_ms = elapsed.as_millis(),
-                        "非流式 SSE 连接关闭"
-                    );
-                    let aggregated = stream_response::aggregate_sse_to_json(&collected_events);
-                    let _ = result_tx.send(aggregated);
-                    return;
-                }
-            }
-        }
-    });
+    tokio::spawn(collect_and_aggregate(
+        response.bytes_stream(),
+        shared.clone(),
+        inbound,
+        outbound,
+        result_tx,
+    ));
 
     // 等待聚合结果
     let aggregated_body = result_rx.await.unwrap_or_else(|_| {
@@ -585,6 +556,113 @@ async fn handle_nonstreaming_aggregate(
     ctx.response = None; // 让 finalize::success 从 upstream_body 构建
 
     Ok(ctx)
+}
+
+/// 后台收集任务：读完整个 SSE 流并聚合为单个 JSON 响应体
+///
+/// 无论正常结束、上游报错还是连接关闭，都会用已收集到的事件聚合后通过 `result_tx` 返回，
+/// 确保调用方一定能拿到响应体。
+async fn collect_and_aggregate(
+    response_stream: impl Stream<Item = reqwest::Result<Bytes>>,
+    shared: Arc<RwLock<StreamSharedState>>,
+    inbound: String,
+    outbound: String,
+    result_tx: tokio::sync::oneshot::Sender<Bytes>,
+) {
+    let mut parser = SseParser::new();
+    let mut converter = SseConverter::new(&inbound, &outbound);
+    let mut collected_events: Vec<SseEvent> = Vec::new();
+    let mut pinned_stream = std::pin::pin!(response_stream);
+    let mut total_events: u64 = 0;
+    let stream_start = std::time::Instant::now();
+
+    loop {
+        match pinned_stream.next().await {
+            Some(Ok(bytes)) => {
+                shared.write().await.bytes_received += bytes.len() as u64;
+
+                for event in parser.feed(&bytes) {
+                    total_events += 1;
+
+                    let ended = collect_sse_event(
+                        event,
+                        &mut converter,
+                        &shared,
+                        &mut collected_events,
+                    )
+                    .await;
+
+                    if ended {
+                        tracing::info!(
+                            total_events,
+                            elapsed_ms = stream_start.elapsed().as_millis(),
+                            "非流式 SSE 收集完成（[DONE]）"
+                        );
+                        let _ = result_tx.send(finish_aggregation(&collected_events));
+                        return;
+                    }
+                }
+            }
+            Some(Err(err)) => {
+                tracing::warn!(error = %err, "非流式 SSE 上游错误");
+                // 出错时用已收集的事件聚合，尽量保留已生成的内容
+                let _ = result_tx.send(finish_aggregation(&collected_events));
+                return;
+            }
+            None => {
+                tracing::info!(
+                    total_events,
+                    elapsed_ms = stream_start.elapsed().as_millis(),
+                    "非流式 SSE 连接关闭"
+                );
+                let _ = result_tx.send(finish_aggregation(&collected_events));
+                return;
+            }
+        }
+    }
+}
+
+/// 聚合已收集的 SSE 事件为完整 JSON 响应体
+fn finish_aggregation(collected_events: &[SseEvent]) -> Bytes {
+    stream_response::aggregate_sse_to_json(collected_events)
+}
+
+/// 处理单个 SSE 事件：记录 token 用量，并将转换后的事件收集进列表
+///
+/// 返回 true 表示已收到流结束标记（如 `[DONE]`），调用方应立即聚合返回。
+async fn collect_sse_event(
+    event: SseEvent,
+    converter: &mut SseConverter,
+    shared: &Arc<RwLock<StreamSharedState>>,
+    collected: &mut Vec<SseEvent>,
+) -> bool {
+    if let Some(usage) = event.parse_usage() {
+        shared.write().await.record_usage(&usage);
+    }
+
+    if event.is_end() {
+        // 冲刷转换器收尾事件（如 anthropic message_stop）
+        if let Ok(bytes) = converter.finish() {
+            if !bytes.is_empty() {
+                collected.extend(SseParser::new().feed(&bytes));
+            }
+        }
+        return true;
+    }
+
+    // 转换事件并收集
+    match converter.convert(&event) {
+        Ok(converted) if !converted.is_empty() => {
+            collected.extend(SseParser::new().feed(&converted));
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!("非流式协议转换失败: {e}");
+            collected.push(event);
+        }
+    }
+
+    false
 }
 
 /// 计算指数退避时间

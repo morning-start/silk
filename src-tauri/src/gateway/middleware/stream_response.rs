@@ -164,6 +164,12 @@ impl SseEvent {
         self.data.as_deref() == Some("[DONE]")
     }
 
+    /// 从事件的 data 中解析 token 用量（data 非 JSON 或不含 usage 时返回 None）
+    pub fn parse_usage(&self) -> Option<Usage> {
+        let json = serde_json::from_str::<serde_json::Value>(self.data.as_deref()?).ok()?;
+        self.extract_usage(&json)
+    }
+
     /// 推断事件类型
     pub fn infer_type(&self) -> StreamEventType {
         // 1. 检查是否为 [DONE] 标记
@@ -301,8 +307,8 @@ impl SseEvent {
         }
     }
 
-    /// 提取 usage 信息
-    fn extract_usage(&self, json: &serde_json::Value) -> Option<Usage> {
+    /// 从已解析的 JSON 中提取 usage 信息（兼容 OpenAI / Anthropic 字段名与嵌套位置）
+    pub fn extract_usage(&self, json: &serde_json::Value) -> Option<Usage> {
         // 直接在顶层查找 usage
         let usage_json = json.get("usage")
             // Anthropic: {"message":{"usage":{...}}}
@@ -896,9 +902,9 @@ mod tests {
     }
 
     #[test]
-    fn test_sse_converter_openai_chat_to_anthropic_incremental() {
-        // openai-chat 上游 → anthropic 下游：逐事件独立转换
-        let mut converter = SseConverter::new("claude_messages", "openai_chat");
+    fn test_sse_converter_openai_to_messages_incremental() {
+        // openai 上游 → messages 下游：逐事件独立转换
+        let mut converter = SseConverter::new("messages", "openai");
         let mut all = String::new();
 
         let ev1 = SseEvent {
@@ -936,9 +942,9 @@ mod tests {
     }
 
     #[test]
-    fn test_sse_converter_anthropic_to_openai_chat() {
-        // anthropic 上游 → openai-chat 下游：逐事件独立转换
-        let mut converter = SseConverter::new("openai_chat", "claude_messages");
+    fn test_sse_converter_messages_to_openai() {
+        // messages 上游 → openai 下游：逐事件独立转换
+        let mut converter = SseConverter::new("openai", "messages");
         let mut all = String::new();
 
         // message_start 作为上下文事件，转换后可能无可见输出
@@ -990,7 +996,7 @@ mod tests {
 
     #[test]
     fn test_sse_converter_same_protocol_passthrough() {
-        let mut converter = SseConverter::new("openai_chat", "openai_chat");
+        let mut converter = SseConverter::new("openai", "openai");
         let ev = SseEvent {
             event: None,
             data: Some(r#"{"choices":[{"delta":{"content":"x"}}]}"#.to_string()),

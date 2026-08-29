@@ -258,6 +258,20 @@ pub struct StreamSharedState {
     pub exact_completion_tokens: Option<i64>,
 }
 
+impl StreamSharedState {
+    /// 记录上游上报的 token 用量
+    ///
+    /// 用量通常出现在流的最后一个 chunk，后到的值覆盖先前的值（取最终值）。
+    pub fn record_usage(&mut self, usage: &crate::gateway::middleware::stream_response::Usage) {
+        if let Some(input) = usage.input_tokens {
+            self.exact_prompt_tokens = Some(input);
+        }
+        if let Some(output) = usage.output_tokens {
+            self.exact_completion_tokens = Some(output);
+        }
+    }
+}
+
 impl RequestContext {
     pub fn new(
         request_id: String,
@@ -331,6 +345,22 @@ impl RequestContext {
         self.request_body = bytes::Bytes::from(new_body);
         self.parsed_body = Some(json);
         Ok(())
+    }
+
+    /// 就地修改已解析的请求体，并同步序列化回 `request_body`
+    ///
+    /// 统一走这个方法可以保证 `parsed_body` 缓存始终与 `request_body` 一致
+    /// （直接改 `request_body` 会让缓存变成脏数据）。
+    /// 请求体为空或不是合法 JSON 时不执行任何修改。
+    pub fn edit_body<F>(&mut self, edit: F) -> Result<(), serde_json::Error>
+    where
+        F: FnOnce(&mut serde_json::Value),
+    {
+        let Some(mut json) = self.get_parsed_body().cloned() else {
+            return Ok(());
+        };
+        edit(&mut json);
+        self.update_body(json)
     }
 
     pub fn mark_error(

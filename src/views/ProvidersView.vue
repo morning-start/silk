@@ -20,6 +20,7 @@ import { SearchOutline } from "@vicons/ionicons5";
 import { storeToRefs } from "pinia";
 import { api, type Provider, type ProviderHeaderEntry } from "../api";
 import { copyWithFeedback } from "../utils/clipboard";
+import { healthStatusType } from "../utils/health";
 import AppFormModal from "../components/AppFormModal.vue";
 import AppPageShell from "../components/AppPageShell.vue";
 import { useProvidersStore } from "../stores/providers";
@@ -44,9 +45,10 @@ const testingStates = ref<Record<string, boolean>>({});
 const keyVisibility = ref<boolean[]>([]);
 
 const protocolOptions = [
-  { label: "OpenAI Chat", value: "openai_chat" },
-  { label: "Claude Messages", value: "claude_messages" },
-  { label: "OpenAI Response", value: "openai_response" },
+  { label: "OpenAI Chat", value: "openai" },
+  { label: "Claude Messages", value: "messages" },
+  { label: "OpenAI Response", value: "responses" },
+  { label: "Google Gemini", value: "gemini" },
 ];
 
 const keyStrategyOptions = [
@@ -212,14 +214,7 @@ function normalizeUrl() {
   formValue.value.api_base_url = url.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
 }
 
-function healthTagType(status: string | null): "success" | "error" | "warning" | "default" {
-  return status === "healthy"
-    ? "success"
-    : status === "unhealthy"
-      ? "error"
-      : "warning";
-}
-
+// 供应商整体状态：禁用优先于健康检测结果
 function healthLabel(item: Provider): string {
   if (item.status !== "enabled") return "禁用";
   return item.health_status === "healthy" ? "正常" : "异常";
@@ -366,7 +361,7 @@ onMounted(() => {
           <div class="pc-header">
             <div class="pc-title">
               <span class="pc-name">{{ item.name }}</span>
-              <NTag size="tiny" :type="healthTagType(item.health_status)">
+              <NTag size="tiny" :type="healthStatusType(item.health_status)">
                 {{ healthLabel(item) }}
               </NTag>
             </div>

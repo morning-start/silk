@@ -1,8 +1,6 @@
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
 
-use super::maybe_body_text;
-
 // ---------------------------------------------------------------------------
 // Token 估算（无需 tokenizer 的轻量化估计）
 // ---------------------------------------------------------------------------
@@ -52,6 +50,22 @@ pub fn estimate_tokens_from_bytes(bytes: i64) -> i64 {
 // 日志构建 + 发送
 // ---------------------------------------------------------------------------
 
+/// 从请求体 JSON 中提取 model 和 stream 字段
+fn extract_model_and_stream(body: &[u8]) -> (Option<String>, bool) {
+    let json: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(_) => return (None, false),
+    };
+
+    let model = json
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let stream = json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    (model, stream)
+}
+
 /// 从请求上下文构建日志条目（不发送）
 #[must_use]
 pub fn build_log(ctx: &RequestContext) -> crate::models::NewRequestLog {
@@ -61,41 +75,13 @@ pub fn build_log(ctx: &RequestContext) -> crate::models::NewRequestLog {
         .or(ctx.upstream_status)
         .map(|value| value.as_u16() as i64);
 
-    // 从请求体 JSON 提取 model 和 stream 字段
-    let (model_from_body, _stream_from_body) = ctx
-        .parsed_body
-        .as_ref()
-        .map(|json| {
-            let model = json
-                .get("model")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let stream = json
-                .get("stream")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            (model, stream)
-        })
-        .unwrap_or_else(|| {
-            let request_body_full = maybe_body_text(&ctx.request_body);
-            request_body_full
-                .as_deref()
-                .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
-                .map(|json| {
-                    let model = json
-                        .get("model")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    let stream = json
-                        .get("stream")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    (model, stream)
-                })
-                .unwrap_or((None, false))
-        });
+    // 优先使用已解析的 body，否则尝试从原始字节解析
+    let (model_from_body, _stream_from_body) = match &ctx.parsed_body {
+        Some(_) => extract_model_and_stream(&ctx.request_body),
+        None => extract_model_and_stream(&ctx.client_body),
+    };
 
-    // 模型 ID：remote_model_override > 请求体 model > Provider 模型列表
+    // 模型 ID 解析优先级：remote_model_override > 请求体 model > Provider 首个模型
     let model_id = ctx
         .remote_model_override
         .clone()

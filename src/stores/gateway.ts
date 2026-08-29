@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { api, type GatewaySettings, type GatewayStatus } from "../api";
+import { gatewayApi, type GatewaySettings, type GatewayStatus } from "../api";
 import { useAsyncOperation } from "../composables/useAsyncOperation";
 
 /** 延迟辅助函数 — 使用 Promise.withResolvers 保持控制流线性 */
@@ -15,7 +15,7 @@ export const useGatewayStore = defineStore("gateway", () => {
   const op = useAsyncOperation();
 
   async function fetchStatus() {
-    status.value = await api.gatewayStatus();
+    status.value = await gatewayApi.status();
   }
 
   /** 带自动重试的初始化（最多尝试 3 次，间隔 1s） */
@@ -33,28 +33,28 @@ export const useGatewayStore = defineStore("gateway", () => {
 
   async function start() {
     await op.runOrThrow(async () => {
-      await api.gatewayStart();
+      await gatewayApi.start();
       await fetchStatus();
     }, "启动失败");
   }
 
   async function stop() {
     await op.runOrThrow(async () => {
-      await api.gatewayStop();
+      await gatewayApi.stop();
       await fetchStatus();
     }, "停止失败");
   }
 
   async function restart() {
     await op.runOrThrow(async () => {
-      await api.gatewayRestart();
+      await gatewayApi.restart();
       await fetchStatus();
     }, "重启失败");
   }
 
   async function updateSettings(data: Partial<GatewaySettings>) {
     await op.runOrThrow(async () => {
-      await api.updateGatewaySettings(data);
+      await gatewayApi.updateSettings(data);
       await fetchStatus();
     }, "更新设置失败");
   }

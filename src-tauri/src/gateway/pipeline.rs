@@ -10,14 +10,22 @@ use crate::gateway::middleware::{
     select_channel, transform_request,
 };
 
+/// 管道阶段错误
+///
+/// `context` 装箱存放：RequestContext 有 1KB+，装箱后 Result 的 Err 变体
+/// 从 ~1.5KB 降到指针大小，中间件间传递 Result 的开销显著降低。
+/// 访问时通过 Deref / DerefMut 透明代理，调用方无需改动写法。
 pub struct StageError {
-    pub context: RequestContext,
+    pub context: Box<RequestContext>,
     pub error: GatewayError,
 }
 
 impl StageError {
     pub fn new(context: RequestContext, error: GatewayError) -> Self {
-        Self { context, error }
+        Self {
+            context: Box::new(context),
+            error,
+        }
     }
 }
 
@@ -179,9 +187,9 @@ impl GatewayPipeline {
                         }
                         return Ok(ctx);
                     }
-                    Err(stage_err) => {
+                        Err(stage_err) => {
                         // 记录失败的 Key
-                        ctx = stage_err.context;
+                        ctx = *stage_err.context;
                         ctx.total_retry_attempts += 1;
                         let failed_key = ctx.selected_api_key.clone();
                         if let Some(ref key) = failed_key {

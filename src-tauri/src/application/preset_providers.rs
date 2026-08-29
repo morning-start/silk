@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn test_preset_provider_content() {
         let provider = PresetProviderService::get_by_id("openai").unwrap();
-        assert!(provider.protocols.contains(&"openai_chat".to_string()));
+        assert!(provider.protocols.contains(&"openai".to_string()));
         assert!(!provider.models.is_empty());
         assert!(provider.api_key_placeholder.contains("sk-"));
     }

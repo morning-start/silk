@@ -336,23 +336,18 @@ fn prism() -> Result<MutexGuard<'static, PrismWasm>, String> {
 
 /// silk 协议名 → prism provider 名映射
 ///
-/// silk 使用下划线协议名（openai_chat/claude_messages/openai_response 等），
-/// prism 使用其 provider 主名（openai/messages/responses/gemini 等）。
+/// silk 与 prism 统一使用相同协议名：
+/// - openai    （OpenAI Chat Completions）
+/// - responses （OpenAI Responses API）
+/// - messages  （Anthropic Messages）
+/// - gemini    （Google Gemini）
 ///
-/// 完整映射（以 wasm_list_providers 实际导出为准）：
-/// - openai_chat     → openai      （OpenAI Chat Completions，别名 chat）
-/// - openai_response → responses   （OpenAI Responses API，别名 openai-responses）
-/// - claude_messages → messages    （Anthropic Messages，别名 claude-messages/anthropic）
-/// - gemini          → gemini      （Google Gemini，别名 google）
-/// - azure_openai    → azure-openai   （Azure OpenAI）
-/// - google_vertex   → google-vertex  （Google Vertex AI）
-/// - openai_codex    → openai-codex   （OpenAI Codex /agents）
-/// - openai_vllm     → openai-vllm    （vLLM /v1/completions）
+/// 其他协议（azure_openai/google_vertex/openai_codex/openai_vllm）保留旧名。
 pub fn map_provider(protocol: &str) -> Option<&'static str> {
     match protocol {
-        "openai_chat" => Some("openai"),
-        "claude_messages" => Some("messages"),
-        "openai_response" => Some("responses"),
+        "openai" => Some("openai"),
+        "messages" => Some("messages"),
+        "responses" => Some("responses"),
         "gemini" => Some("gemini"),
         "azure_openai" => Some("azure-openai"),
         "google_vertex" => Some("google-vertex"),
@@ -607,9 +602,9 @@ mod tests {
 
     #[test]
     fn test_map_provider() {
-        assert_eq!(map_provider("openai_chat"), Some("openai"));
-        assert_eq!(map_provider("claude_messages"), Some("messages"));
-        assert_eq!(map_provider("openai_response"), Some("responses"));
+        assert_eq!(map_provider("openai"), Some("openai"));
+        assert_eq!(map_provider("messages"), Some("messages"));
+        assert_eq!(map_provider("responses"), Some("responses"));
         assert_eq!(map_provider("gemini"), Some("gemini"));
         assert_eq!(map_provider("unknown"), None);
     }
@@ -628,13 +623,13 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_request_openai_chat_to_anthropic() {
+    fn test_convert_request_openai_to_messages() {
         let req = serde_json::json!({
             "model": "gpt-4",
             "messages": [{"role": "user", "content": "Hello"}],
             "stream": true
         });
-        let out = convert_request("openai_chat", &req.to_string(), "claude_messages")
+        let out = convert_request("openai", &req.to_string(), "messages")
             .expect("convert request");
         let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
         assert_eq!(v["model"], "gpt-4");
@@ -645,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_request_anthropic_to_openai_chat() {
+    fn test_convert_request_messages_to_openai() {
         // 使用标准 Anthropic 块数组形状（prism 解码器要求）
         let req = serde_json::json!({
             "model": "claude-3-opus-20240229",
@@ -653,7 +648,7 @@ mod tests {
             "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello"}]}],
             "stream": true
         });
-        let out = convert_request("claude_messages", &req.to_string(), "openai_chat")
+        let out = convert_request("messages", &req.to_string(), "openai")
             .expect("convert request");
         let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
         assert_eq!(v["messages"][0]["role"], "user");
@@ -661,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_response_openai_chat_to_anthropic() {
+    fn test_convert_response_openai_to_messages() {
         let resp = serde_json::json!({
             "id": "chatcmpl-1",
             "object": "chat.completion",
@@ -673,7 +668,7 @@ mod tests {
             }],
             "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
         });
-        let out = convert_response("openai_chat", &resp.to_string(), "claude_messages")
+        let out = convert_response("openai", &resp.to_string(), "messages")
             .expect("convert response");
         let v: serde_json::Value = serde_json::from_str(&out).expect("valid json");
         assert_eq!(v["type"], "message");
@@ -681,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_stream_openai_chat_to_anthropic() {
+    fn test_convert_stream_openai_to_messages() {
         let sse = [
             "data: {\"id\":\"1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}",
             "",
@@ -691,17 +686,17 @@ mod tests {
             "",
         ]
         .join("\n");
-        let out = convert_stream("openai_chat", &sse, "claude_messages").expect("convert stream");
+        let out = convert_stream("openai", &sse, "messages").expect("convert stream");
         assert!(out.contains("content_block_delta"));
         assert!(out.contains("Hello"));
     }
 
     #[test]
-    fn test_convert_usage_only_event_openai_response_to_chat() {
+    fn test_convert_usage_only_event_responses_to_openai() {
         // OpenAI Responses API 的 response.completed 事件需要 event: 行
         let usage_event = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\",\"object\":\"response\",\"model\":\"gpt-4\",\"status\":\"completed\",\"usage\":{\"input_tokens\":51080,\"output_tokens\":160,\"total_tokens\":51240}}}\n\n";
 
-        let out = convert_stream_event("openai_response", usage_event, "openai_chat")
+        let out = convert_stream_event("responses", usage_event, "openai")
             .expect("convert usage event");
 
         eprintln!("=== prism usage 转换结果 ===\n{out}\n========================");
@@ -717,8 +712,8 @@ mod tests {
     #[test]
     fn test_convert_unsupported_protocol() {
         let req = "{}";
-        assert!(convert_request("unknown_proto", req, "openai_chat").is_err());
-        assert!(convert_request("openai_chat", req, "unknown_proto").is_err());
+        assert!(convert_request("unknown_proto", req, "openai").is_err());
+        assert!(convert_request("openai", req, "unknown_proto").is_err());
     }
 
     #[test]
@@ -744,9 +739,9 @@ mod tests {
         // trace 函数可能在某些 prism.wasm 版本中不可用或行为不同，
         // 成功时验证结果正确，失败时验证错误信息合理
         match convert_request_trace(
-            "openai_chat",
+            "openai",
             &req.to_string(),
-            "claude_messages",
+            "messages",
             log_buf,
             8192,
         ) {

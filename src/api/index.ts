@@ -1,339 +1,118 @@
+// ---------------------------------------------------------------------------
+// 领域 API 模块
+// ---------------------------------------------------------------------------
+
 import { invoke } from "@tauri-apps/api/core";
+import { gatewayApi } from "./gateway";
+import { providersApi } from "./providers";
+import { logsApi } from "./logs";
+import { statsApi } from "./stats";
+import { modelMappingsApi } from "./model-mappings";
+import { profilesApi } from "./profiles";
+import { configApi } from "./config";
+import type { GatewaySettings } from "./types";
 
 // ---------------------------------------------------------------------------
-// Types
+// 类型重导出
 // ---------------------------------------------------------------------------
 
-export interface ProviderHeaderEntry {
-  name: string;
-  value: string;
-  enabled: boolean;
-}
-
-export interface Provider {
-  id: string;
-  name: string;
-  protocols: string[];
-  models: string[];
-  key_count: number;
-  keys: { name: string; value: string; enabled: boolean; weight: number }[];
-  key_strategy: string;
-  api_base_url: string;
-  proxy_url: string | null;
-  timeout_seconds: number;
-  max_retries: number;
-  status: string;
-  health_status: string | null;
-  custom_headers: ProviderHeaderEntry[];
-  models_passthrough: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface RequestLog {
-  id: string;
-  request_id: string;
-  timestamp: string;
-  method: string;
-  path: string;
-  inbound_protocol: string | null;
-  outbound_protocol: string | null;
-  response_status: number | null;
-  /** 响应时间（毫秒） */
-  resp_ms: number | null;
-  /** 总耗时（毫秒），流式场景末字节 */
-  total_duration_ms: number | null;
-  provider_id: string | null;
-  provider_name: string | null;
-  error_message: string | null;
-  error_code: string | null;
-  /** 实际使用的模型 ID */
-  model_id: string | null;
-  /** 模型池名称 */
-  model_name: string | null;
-  retry_count: number;
-  stream_enabled: boolean;
-  cache_hit: boolean;
-  request_size_bytes: number | null;
-  response_size_bytes: number | null;
-  tokens_input: number | null;
-  tokens_output: number | null;
-  tokens_sent: number | null;
-  auth_key_name: string | null;
-  channel_key_name: string | null;
-}
-
-export interface GatewaySettings {
-  bind_host: string;
-  bind_port: number;
-  allow_remote: boolean;
-  log_retention_days: number;
-  launch_at_startup: boolean;
-  minimize_to_tray: boolean;
-  close_to_tray: boolean;
-  auto_start_gateway: boolean;
-  default_provider_id: string | null;
-  rate_limit_enabled: boolean;
-  rate_limit_max_requests_per_minute: number;
-  rate_limit_max_tokens_per_minute: number;
-}
-
-export interface GatewayStatus {
-  running: boolean;
-  address: string;
-  settings: GatewaySettings;
-}
-
-export interface DashboardStats {
-  today_requests: number;
-  today_success: number;
-  today_avg_duration_ms: number;
-  today_tokens: number;
-  active_providers: number;
-  total_requests: number;
-  yesterday_requests: number;
-}
-
-export interface ProviderStats {
-  provider_name: string | null;
-  request_count: number;
-  avg_duration_ms: number;
-  total_tokens: number;
-}
-
-export interface HourlyStats {
-  hour: string;
-  request_count: number;
-  avg_duration_ms: number;
-  total_tokens: number;
-}
-
-/** 从上游 API 获取的模型元信息 */
-export interface ProviderModelInfo {
-  id: string;
-  object: string | null;
-  created: number | null;
-  owned_by: string | null;
-  supported_endpoint_types: string[];
-}
-
-export interface ProviderTestResponse {
-  status_code: number;
-  response_time_ms: number;
-  health_status: string;
-  error: string | null;
-}
-
-export interface MappingChannelInfo {
-  id: string;
-  mapping_id: string;
-  provider_id: string;
-  provider_name: string;
-  provider_protocols: string[];
-  provider_models: string[];
-  provider_models_count: number;
-  provider_health: string | null;
-  selected_models: string[];
-  enabled: boolean;
-}
-
-export interface NewMappingChannel {
-  provider_id: string;
-  selected_models?: string[];
-  enabled?: boolean;
-}
-
-export interface ModelMapping {
-  id: string;
-  model_name: string;
-  strategy: string;
-  max_input_tokens: number | null;
-  max_context_tokens: number | null;
-  max_output_tokens: number | null;
-  input_price_per_1m: number | null;
-  output_price_per_1m: number | null;
-  capabilities: string[];
-  description: string;
-  enabled: boolean;
-  channels: MappingChannelInfo[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface GatewayKey {
-  id: string;
-  name: string;
-  plain_key: string;
-  enabled: boolean;
-  expires_at: string | null;
-  max_concurrent: number;
-  is_expired: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface FileOperationResponse {
-  file_path: string;
-}
+export type {
+  GatewaySettings,
+  GatewayStatus,
+  Provider,
+  ProviderHeaderEntry,
+  ProviderTestResponse,
+  ProviderModelInfo,
+  RequestLog,
+  DashboardStats,
+  ProviderStats,
+  HourlyStats,
+  MappingChannelInfo,
+  NewMappingChannel,
+  ModelMapping,
+  GatewayKey,
+  Profile,
+  AgentType,
+  CreateProfilePayload,
+  UpdateProfilePayload,
+  SwitchResult,
+  ModelListingItem,
+  FileOperationResponse,
+} from "./types";
 
 // ---------------------------------------------------------------------------
-// Profile 类型
-// ---------------------------------------------------------------------------
-
-export type AgentType =
-  | 'claude_code'
-  | 'codex'
-  | 'gemini_cli'
-  | 'opencode'
-  | 'hermes';
-
-export interface Profile {
-  id: string;
-  name: string;
-  agent_type: AgentType;
-  config_json: string;
-  is_active: boolean;
-  sort_index?: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateProfilePayload {
-  agent_type: AgentType;
-  name: string;
-  config_json: string;
-  sort_index?: number;
-}
-
-export interface UpdateProfilePayload {
-  name?: string;
-  config_json?: string;
-  sort_index?: number;
-}
-
-export interface SwitchResult {
-  success: boolean;
-  warnings: string[];
-  requires_restart: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// 全量模型列表（与 /v1/models 一致）
-// ---------------------------------------------------------------------------
-
-export interface ModelListingItem {
-  id: string;
-  object: string;
-  created: number;
-  owned_by: string;
-  model_mapping_id: string | null;
-}
-
-// ---------------------------------------------------------------------------
-// API Client
+// 向后兼容的聚合 API（保持旧的方法名）
 // ---------------------------------------------------------------------------
 
 export const api = {
   // Gateway
-  gatewayStatus: () => invoke<GatewayStatus>("gateway_status"),
-  gatewayStart: () => invoke<{ success: boolean; address: string }>("gateway_start"),
-  gatewayStop: () => invoke<{ success: boolean; message: string }>("gateway_stop"),
-  gatewayRestart: () => invoke<{ success: boolean; address: string }>("gateway_restart"),
+  gatewayStatus: gatewayApi.status,
+  gatewayStart: gatewayApi.start,
+  gatewayStop: gatewayApi.stop,
+  gatewayRestart: gatewayApi.restart,
+  getGatewaySettings: () => invoke<GatewaySettings>("get_gateway_settings"),
+  updateGatewaySettings: gatewayApi.updateSettings,
 
   // Providers
-  listProviders: () => invoke<Provider[]>("list_providers"),
-  getProvider: (id: string) => invoke<Provider>("get_provider", { id }),
-  createProvider: (data: Partial<Provider> & { api_key: string }) =>
-    invoke<Provider>("create_provider", { payload: data }),
-  updateProvider: (id: string, data: Partial<Provider>) =>
-    invoke<Provider>("update_provider", { id, payload: data }),
-  deleteProvider: (id: string) => invoke<boolean>("delete_provider", { id }),
-  testProvider: (id: string) => invoke<ProviderTestResponse>("test_provider", { id }),
+  listProviders: providersApi.list,
+  getProvider: providersApi.get,
+  createProvider: providersApi.create,
+  updateProvider: providersApi.update,
+  deleteProvider: providersApi.remove,
+  testProvider: providersApi.test,
+  fetchProviderModels: providersApi.fetchModels,
 
   // Logs
   listLogs: (limit = 50, offset = 0) =>
-    invoke<{ logs: RequestLog[]; total: number; limit: number; offset: number }>(
-      "list_logs",
-      { payload: { limit, offset } }
-    ),
-  cleanupLogs: (beforeDays: number) => invoke<number>("cleanup_logs", { payload: { beforeDays } }),
-  clearAllLogs: () => invoke<number>("clear_all_logs"),
+    logsApi.list(limit, offset),
+  cleanupLogs: logsApi.cleanup,
+  clearAllLogs: logsApi.clearAll,
+  exportLogsCsv: logsApi.exportCsv,
 
-  // Dashboard Stats
-  dashboardStats: () => invoke<DashboardStats>("dashboard_stats"),
-  recentRequests: (limit = 20) => invoke<RequestLog[]>("recent_requests", { limit }),
-  statsByProvider: (limit = 10) => invoke<ProviderStats[]>("stats_by_provider", { limit }),
-  hourlyStats: (hours = 24) => invoke<HourlyStats[]>("hourly_stats", { hours }),
-
-  // Fetch Models from Provider API
-  fetchProviderModels: (data: { api_base_url: string; api_key: string; proxy_url?: string; timeout_seconds?: number }) =>
-    invoke<ProviderModelInfo[]>("fetch_provider_models", { payload: data }),
+  // Stats
+  dashboardStats: statsApi.dashboard,
+  recentRequests: statsApi.recentRequests,
+  statsByProvider: statsApi.byProvider,
+  hourlyStats: statsApi.hourly,
 
   // Model Mappings
-  listModelMappings: () => invoke<ModelMapping[]>("list_model_mappings"),
-  getModelMapping: (id: string) => invoke<ModelMapping>("get_model_mapping", { id }),
-  findModelMappingByName: (name: string) => invoke<ModelMapping | null>("find_model_mapping_by_name", { model_name: name }),
-  createModelMapping: (data: {
-    model_name: string;
-    strategy?: string;
-    max_input_tokens?: number | null;
-    max_context_tokens?: number | null;
-    max_output_tokens?: number | null;
-    input_price_per_1m?: number | null;
-    output_price_per_1m?: number | null;
-    capabilities?: string[];
-    description?: string;
-    enabled?: boolean;
-    channels?: NewMappingChannel[];
-  }) => invoke<ModelMapping>("create_model_mapping", { payload: data }),
-  updateModelMapping: (id: string, data: {
-    model_name?: string;
-    strategy?: string;
-    max_input_tokens?: number | null;
-    max_context_tokens?: number | null;
-    max_output_tokens?: number | null;
-    input_price_per_1m?: number | null;
-    output_price_per_1m?: number | null;
-    capabilities?: string[];
-    description?: string;
-    enabled?: boolean;
-    channels?: NewMappingChannel[];
-  }) => invoke<ModelMapping>("update_model_mapping", { id, payload: data }),
-  deleteModelMapping: (id: string) => invoke<boolean>("delete_model_mapping", { id }),
+  listModelMappings: modelMappingsApi.list,
+  getModelMapping: modelMappingsApi.get,
+  findModelMappingByName: modelMappingsApi.findByName,
+  createModelMapping: modelMappingsApi.create,
+  updateModelMapping: modelMappingsApi.update,
+  deleteModelMapping: modelMappingsApi.remove,
+  listAllModels: modelMappingsApi.listAllModels,
 
   // Gateway Keys
-  getBuiltinGatewayKey: () => invoke<GatewayKey>("get_builtin_gateway_key"),
-  resetBuiltinGatewayKey: () => invoke<GatewayKey>("reset_builtin_gateway_key"),
-
-  // Logs CSV Export
-  exportLogsCsv: (data: { provider_id?: string; limit?: number; file_path?: string }) =>
-    invoke<{ file_path: string; exported_count: number }>("export_logs_csv", { payload: data }),
+  getBuiltinGatewayKey: configApi.getBuiltinGatewayKey,
+  resetBuiltinGatewayKey: configApi.resetBuiltinGatewayKey,
 
   // Config & Data
-  exportAppConfig: (data?: { file_path?: string }) =>
-    invoke<FileOperationResponse>("export_app_config", { payload: data ?? {} }),
-  importAppConfig: (data: { file_path: string }) =>
-    invoke<FileOperationResponse>("import_app_config", { payload: data }),
-  backupDatabase: (data?: { file_path?: string }) =>
-    invoke<FileOperationResponse>("backup_database", { payload: data ?? {} }),
-  restoreDatabase: (data: { file_path: string }) =>
-    invoke<FileOperationResponse>("restore_database", { payload: data }),
-
-  // Settings
-  updateGatewaySettings: (data: Partial<GatewaySettings>) =>
-    invoke<GatewaySettings>("update_gateway_settings", { payload: data }),
+  exportAppConfig: configApi.exportConfig,
+  importAppConfig: configApi.importConfig,
+  backupDatabase: configApi.backupDatabase,
+  restoreDatabase: configApi.restoreDatabase,
 
   // Profiles
-  listAllModels: () => invoke<ModelListingItem[]>("list_all_models"),
-  listProfiles: (agentType: AgentType) => invoke<Profile[]>("list_profiles", { agentType }),
-  getProfile: (profileId: string) => invoke<Profile>("get_profile", { profileId }),
-  createProfile: (payload: CreateProfilePayload) => invoke<Profile>("create_profile", { payload }),
-  updateProfile: (profileId: string, payload: UpdateProfilePayload) =>
-    invoke<Profile>("update_profile", { profileId, payload }),
-  deleteProfile: (profileId: string) => invoke<boolean>("delete_profile", { profileId }),
-  switchProfile: (agentType: AgentType, profileId: string) =>
-    invoke<SwitchResult>("switch_profile", { agentType, profileId }),
-  getCommonSnippet: (agentType: AgentType) => invoke<string | null>("get_common_snippet", { agentType }),
-  setCommonSnippet: (agentType: AgentType, content: string) =>
-    invoke<void>("set_common_snippet", { agentType, content }),
-};
+  listProfiles: profilesApi.list,
+  getProfile: profilesApi.get,
+  createProfile: profilesApi.create,
+  updateProfile: profilesApi.update,
+  deleteProfile: profilesApi.remove,
+  switchProfile: profilesApi.switch,
+  getCommonSnippet: profilesApi.getCommonSnippet,
+  setCommonSnippet: profilesApi.setCommonSnippet,
+} as const;
+
+// ---------------------------------------------------------------------------
+// 领域 API 独立导出（新代码推荐按需导入）
+// ---------------------------------------------------------------------------
+
+export { gatewayApi } from "./gateway";
+export { providersApi } from "./providers";
+export { logsApi } from "./logs";
+export { statsApi } from "./stats";
+export { modelMappingsApi } from "./model-mappings";
+export { profilesApi } from "./profiles";
+export { configApi } from "./config";

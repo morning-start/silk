@@ -19,67 +19,96 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
         .clone()
         .unwrap_or_else(|| inbound.clone());
 
-    let target_protocol = &outbound;
+    inject_stream_options(&mut ctx)?;
+    inject_claude_default_max_tokens(&mut ctx, &outbound)?;
 
-    // 注入 stream:true，使所有请求走流式 SSE 路径
-    // 本项目网关以流式为核心处理方式，上游不支持非流式响应时（返回空 body），依赖此机制规避
-    if let Some(body) = ctx.get_parsed_body().cloned() {
-        let original_stream = body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
-        ctx.client_requested_stream = original_stream;
-        if !original_stream {
-            let mut json = body;
-            json["stream"] = serde_json::Value::Bool(true);
-            // 请求上游在流式最终 chunk 返回精确 token 用量
-            json["stream_options"] = serde_json::json!({"include_usage": true});
-            tracing::debug!("注入 stream:true + stream_options");
-            ctx.update_body(json).map_err(|e| {
-                StageError::new(
-                    ctx.clone(),
-                    GatewayError::BadRequest(format!("注入 stream 字段失败: {e}")),
-                )
-            })?;
-        }
+    let request_bytes = convert_to_outbound_protocol(&ctx, &inbound, &outbound)?;
+    apply_upstream_request(&mut ctx, &request_bytes, &outbound)?;
+
+    Ok(ctx)
+}
+
+/// 注入 stream:true，使所有请求走流式 SSE 路径
+///
+/// 本项目网关以流式为核心处理方式，上游不支持非流式响应时（返回空 body），依赖此机制规避。
+/// 客户端原始的 stream 取值记录在 `client_requested_stream`，
+/// 供 dispatch 阶段决定是下发 SSE 流还是聚合为单个 JSON。
+fn inject_stream_options(ctx: &mut RequestContext) -> Result<(), StageError> {
+    let original_stream = ctx
+        .get_parsed_body()
+        .and_then(|body| body.get("stream"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    ctx.client_requested_stream = original_stream;
+
+    if original_stream {
+        return Ok(());
     }
 
-    // 注入默认 max_tokens（Claude 协议必需字段）
-    // Anthropic API 要求请求中必须包含 max_tokens，当客户端未传入时设置默认值 1024
-    if target_protocol == "claude_messages" {
-        if let Some(body) = ctx.get_parsed_body() {
-            if body.get("max_tokens").is_none() {
-                let mut json = body.clone();
-                json["max_tokens"] = serde_json::Value::Number(1024.into());
-                tracing::debug!("注入默认 max_tokens:1024 (Claude 协议必需)");
-                ctx.update_body(json).map_err(|e| {
-                    StageError::new(
-                        ctx.clone(),
-                        GatewayError::BadRequest(format!("注入 max_tokens 字段失败: {e}")),
-                    )
-                })?;
-            }
-        }
+    edit_body_checked(ctx, "stream", |json| {
+        json["stream"] = serde_json::Value::Bool(true);
+        // 请求上游在流式最终 chunk 返回精确 token 用量
+        json["stream_options"] = serde_json::json!({"include_usage": true});
+    })?;
+
+    tracing::debug!("注入 stream:true + stream_options");
+    Ok(())
+}
+
+/// 注入默认 max_tokens（Claude 协议必需字段）
+///
+/// Anthropic API 要求请求中必须包含 max_tokens，当客户端未传入时设置默认值。
+fn inject_claude_default_max_tokens(
+    ctx: &mut RequestContext,
+    outbound: &str,
+) -> Result<(), StageError> {
+    if outbound != "claude_messages" {
+        return Ok(());
+    }
+    if ctx.get_parsed_body().is_some_and(|b| b.get("max_tokens").is_some()) {
+        return Ok(());
     }
 
-    // 使用 prism.wasm 进行跨协议转换
-    let request_bytes: Bytes = if inbound != outbound {
-        let body_str = String::from_utf8_lossy(&ctx.request_body).to_string();
-        let start = std::time::Instant::now();
-        let converted = prism_wasm::convert_request(&inbound, &body_str, &outbound)
-            .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e)))?;
-        let elapsed = start.elapsed();
-        tracing::info!(
-            inbound = %inbound,
-            outbound = %outbound,
-            input_bytes = body_str.len(),
-            output_bytes = converted.len(),
-            elapsed_ms = elapsed.as_millis(),
-            "请求体跨协议转换完成"
-        );
-        Bytes::from(converted)
-    } else {
-        Bytes::from(ctx.request_body.to_vec())
-    };
+    edit_body_checked(ctx, "max_tokens", |json| {
+        json["max_tokens"] = serde_json::Value::Number(1024.into());
+    })?;
 
-    // 构建上游请求（URL + Headers + Body）
+    tracing::debug!("注入默认 max_tokens:1024 (Claude 协议必需)");
+    Ok(())
+}
+
+/// 跨协议转换请求体（同协议时原样返回）
+fn convert_to_outbound_protocol(
+    ctx: &RequestContext,
+    inbound: &str,
+    outbound: &str,
+) -> Result<Bytes, StageError> {
+    if inbound == outbound {
+        return Ok(Bytes::from(ctx.request_body.to_vec()));
+    }
+
+    let body_str = String::from_utf8_lossy(&ctx.request_body).to_string();
+    let start = std::time::Instant::now();
+    let converted = prism_wasm::convert_request(inbound, &body_str, outbound)
+        .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e)))?;
+
+    tracing::info!(
+        inbound = %inbound,
+        outbound = %outbound,
+        input_bytes = body_str.len(),
+        output_bytes = converted.len(),
+        elapsed_ms = start.elapsed().as_millis(),
+        "请求体跨协议转换完成"
+    );
+    Ok(Bytes::from(converted))
+}
+
+/// 调用适配器构建上游请求，并把 URL / 方法 / 头 / 请求体写回 ctx
+fn apply_upstream_request(
+    ctx: &mut RequestContext,
+    request_bytes: &Bytes,
+    target_protocol: &str,
+) -> Result<(), StageError> {
     let provider = ctx.provider.as_ref().ok_or_else(|| {
         StageError::new(
             ctx.clone(),
@@ -95,7 +124,7 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
     })?;
 
     let upstream_req = adapters::build_upstream_request(
-        &request_bytes,
+        request_bytes,
         provider,
         selected_api_key,
         target_protocol,
@@ -110,7 +139,21 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
     ctx.upstream_url = Some(upstream_req.url);
     ctx.upstream_method = Some(upstream_req.method);
 
-    Ok(ctx)
+    Ok(())
+}
+
+/// 修改请求体，序列化失败时统一包装为 BadRequest 错误
+fn edit_body_checked(
+    ctx: &mut RequestContext,
+    field: &'static str,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> Result<(), StageError> {
+    ctx.edit_body(edit).map_err(|e| {
+        StageError::new(
+            ctx.clone(),
+            GatewayError::BadRequest(format!("注入 {field} 字段失败: {e}")),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -160,8 +203,8 @@ mod tests {
         ctx.parsed_body = Some(body);
         ctx.provider = Some(test_provider());
         ctx.selected_api_key = Some("sk-test".to_string());
-        ctx.inbound_protocol = Some("openai_chat".to_string());
-        ctx.outbound_protocol = Some("openai_chat".to_string());
+        ctx.inbound_protocol = Some("openai".to_string());
+        ctx.outbound_protocol = Some("openai".to_string());
         ctx
     }
 

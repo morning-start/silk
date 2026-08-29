@@ -5,7 +5,7 @@
       "id": "openai",
       "name": "OpenAI",
       "description": "访问GPT-4、GPT-3.5等模型",
-      "protocols": ["openai_chat"],
+      "protocols": ["openai"],
       "models": [
         {
           "id": "gpt-4",
@@ -32,7 +32,7 @@
       "id": "claude",
       "name": "Claude",
       "description": "访问Claude 3 Opus、Sonnet等模型",
-      "protocols": ["claude_messages"],
+      "protocols": ["messages"],
       "models": [
         {
           "id": "claude-3-opus-20240229",
@@ -59,7 +59,7 @@
       "id": "gemini",
       "name": "Google Gemini",
       "description": "访问Gemini Pro等模型",
-      "protocols": ["openai_chat"],
+      "protocols": ["gemini"],
       "models": [
         {
           "id": "gemini-pro",
@@ -81,7 +81,7 @@
       "id": "wenxin",
       "name": "文心一言",
       "description": "百度的AI大模型",
-      "protocols": ["openai_chat"],
+      "protocols": ["openai"],
       "models": [
         {
           "id": "ernie-bot-4",
@@ -103,7 +103,7 @@
       "id": "tongyi",
       "name": "通义千问",
       "description": "阿里巴巴的AI大模型",
-      "protocols": ["openai_chat"],
+      "protocols": ["openai"],
       "models": [
         {
           "id": "qwen-max",
@@ -125,7 +125,7 @@
       "id": "deepseek",
       "name": "DeepSeek",
       "description": "DeepSeek AI大模型",
-      "protocols": ["openai_chat"],
+      "protocols": ["openai"],
       "models": [
         {
           "id": "deepseek-chat",

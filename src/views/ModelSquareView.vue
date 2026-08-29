@@ -20,6 +20,8 @@ import {
   SearchOutline,
 } from "@vicons/ionicons5";
 import { api, type ModelMapping, type NewMappingChannel, type Provider } from "../api";
+import { formatPrice, formatTokens } from "../utils/format";
+import { healthStatusLabel, healthStatusType } from "../utils/health";
 import AppFormModal from "../components/AppFormModal.vue";
 import AppPageShell from "../components/AppPageShell.vue";
 
@@ -240,25 +242,6 @@ async function handleSubmit() {
   }
 }
 
-function formatPrice(val: number | null): string {
-  if (val == null) return "-";
-  return `$${val}/1M`;
-}
-
-function formatTokens(val: number | null): string {
-  if (val == null) return "-";
-  if (val >= 1000) return `${val / 1000}K`;
-  return `${val}`;
-}
-
-// 渠道健康状态显示
-function healthColor(status: string | null): "success" | "error" | "warning" | "default" {
-  return status === "healthy" ? "success" : status === "unhealthy" ? "error" : "warning";
-}
-function healthLabel(status: string | null): string {
-  return status === "healthy" ? "正常" : status === "unhealthy" ? "异常" : "未知";
-}
-
 // 卡片显示渠道的选中模型摘要
 function channelModelSummary(selected: string[]): string {
   if (!selected || selected.length === 0) return "";
@@ -424,8 +407,8 @@ onMounted(loadData);
                     </NTag>
                   </span>
                   <span class="channel-models">{{ (p.models || []).length }} 模型</span>
-                  <NTag size="tiny" :type="healthColor(p.health_status)" round>
-                    {{ healthLabel(p.health_status) }}
+                  <NTag size="tiny" :type="healthStatusType(p.health_status)" round>
+                    {{ healthStatusLabel(p.health_status) }}
                   </NTag>
                 </div>
               </label>

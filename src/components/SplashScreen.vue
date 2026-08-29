@@ -52,7 +52,7 @@ interface LoadingStep {
   current: boolean;
 }
 
-const props = withDefaults(defineProps<{
+withDefaults(defineProps<{
   visible: boolean;
   version?: string;
 }>(), {

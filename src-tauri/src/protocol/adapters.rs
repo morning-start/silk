@@ -37,16 +37,17 @@ struct ProtocolConfig {
 
 static CONFIGS: Lazy<HashMap<&'static str, ProtocolConfig>> = Lazy::new(|| {
     let mut m = HashMap::new();
-    // OpenAI 系协议（Bearer Token 认证）
+    // OpenAI Chat Completions（Bearer Token 认证）
     m.insert(
-        "openai_chat",
+        "openai",
         ProtocolConfig {
             path: "v1/chat/completions",
             build_headers: build_bearer_headers,
         },
     );
+    // OpenAI Responses API（Bearer Token 认证）
     m.insert(
-        "openai_response",
+        "responses",
         ProtocolConfig {
             path: "v1/responses",
             build_headers: build_bearer_headers,
@@ -54,7 +55,7 @@ static CONFIGS: Lazy<HashMap<&'static str, ProtocolConfig>> = Lazy::new(|| {
     );
     // Anthropic Messages（x-api-key 认证）
     m.insert(
-        "claude_messages",
+        "messages",
         ProtocolConfig {
             path: "v1/messages",
             build_headers: build_anthropic_headers,
@@ -213,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_upstream_request_openai_chat() {
+    fn test_build_upstream_request_openai() {
         let provider = test_provider();
         let req_body = serde_json::json!({
             "model": "gpt-4",
@@ -221,7 +222,7 @@ mod tests {
         });
         let req_bytes = serde_json::to_vec(&req_body).unwrap();
 
-        let result = build_upstream_request(&req_bytes, &provider, "sk-test", "openai_chat").unwrap();
+        let result = build_upstream_request(&req_bytes, &provider, "sk-test", "openai").unwrap();
         assert_eq!(result.url, "https://api.openai.com/v1/chat/completions");
         assert_eq!(result.method, "POST");
         assert!(result.headers.contains_key(axum::http::header::AUTHORIZATION));
@@ -229,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_upstream_request_claude() {
+    fn test_build_upstream_request_messages() {
         let provider = test_provider();
         let req_body = serde_json::json!({
             "model": "claude-3-opus",
@@ -238,7 +239,7 @@ mod tests {
         });
         let req_bytes = serde_json::to_vec(&req_body).unwrap();
 
-        let result = build_upstream_request(&req_bytes, &provider, "sk-test", "claude_messages").unwrap();
+        let result = build_upstream_request(&req_bytes, &provider, "sk-test", "messages").unwrap();
         assert_eq!(result.url, "https://api.openai.com/v1/messages");
         assert!(result.headers.contains_key("x-api-key"));
         assert!(result.headers.contains_key("anthropic-version"));
@@ -253,9 +254,9 @@ mod tests {
 
     #[test]
     fn test_is_supported() {
-        assert!(is_supported("openai_chat"));
-        assert!(is_supported("claude_messages"));
-        assert!(is_supported("openai_response"));
+        assert!(is_supported("openai"));
+        assert!(is_supported("messages"));
+        assert!(is_supported("responses"));
         assert!(!is_supported("unknown"));
     }
 }
