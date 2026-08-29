@@ -299,9 +299,9 @@ static PRISM: LazyLock<Result<Mutex<PrismWasm>, String>> = LazyLock::new(|| {
             Ok(raw) => {
                 if let Ok(providers) = serde_json::from_str::<Vec<String>>(&raw) {
                     let all_mapped: &[(&str, &str)] = &[
-                        ("openai_chat", "openai-chat"),
-                        ("claude_messages", "anthropic"),
-                        ("openai_response", "openai"),
+                        ("openai", "openai"),
+                        ("messages", "messages"),
+                        ("responses", "responses"),
                         ("gemini", "gemini"),
                         ("azure_openai", "azure-openai"),
                         ("google_vertex", "google-vertex"),
