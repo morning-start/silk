@@ -1,5 +1,6 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use crate::application::change_events::emit_data_changed;
 use crate::application::provider_service::{
     self, CreateProviderPayload, ProviderModelInfo, ProviderResponse,
     ProviderTestResponse, UpdateProviderPayload,
@@ -18,19 +19,29 @@ pub async fn get_provider(id: String) -> Result<ProviderResponse, String> {
 
 #[tauri::command]
 pub async fn create_provider(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     payload: CreateProviderPayload,
 ) -> Result<ProviderResponse, String> {
-    provider_service::create(state.inner(), payload).await.map_err(|e| e.to_string())
+    let result = provider_service::create(state.inner(), payload)
+        .await
+        .map_err(|e| e.to_string())?;
+    emit_data_changed(&app_handle, "providers");
+    Ok(result)
 }
 
 #[tauri::command]
 pub async fn update_provider(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     id: String,
     payload: UpdateProviderPayload,
 ) -> Result<ProviderResponse, String> {
-    provider_service::update(state.inner(), id, payload).await.map_err(|e| e.to_string())
+    let result = provider_service::update(state.inner(), id, payload)
+        .await
+        .map_err(|e| e.to_string())?;
+    emit_data_changed(&app_handle, "providers");
+    Ok(result)
 }
 
 #[tauri::command]
@@ -42,8 +53,12 @@ pub async fn test_provider(
 }
 
 #[tauri::command]
-pub async fn delete_provider(state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    provider_service::delete(state.inner(), id).await.map_err(|e| e.to_string())
+pub async fn delete_provider(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> Result<bool, String> {
+    let result = provider_service::delete(state.inner(), id)
+        .await
+        .map_err(|e| e.to_string())?;
+    emit_data_changed(&app_handle, "providers");
+    Ok(result)
 }
 
 #[tauri::command]

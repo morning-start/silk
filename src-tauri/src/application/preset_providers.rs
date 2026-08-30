@@ -57,18 +57,6 @@ impl PresetProviderService {
     }
 }
 
-/// Tauri命令：获取所有预置配置
-#[tauri::command]
-pub async fn get_preset_providers() -> Result<Vec<PresetProvider>, String> {
-    Ok(PresetProviderService::get_all())
-}
-
-/// Tauri命令：根据ID获取预置配置
-#[tauri::command]
-pub async fn get_preset_provider_by_id(id: String) -> Result<Option<PresetProvider>, String> {
-    Ok(PresetProviderService::get_by_id(&id))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from "vue";
 import { darkTheme, NConfigProvider, NMessageProvider, NDialogProvider, GlobalThemeOverrides } from "naive-ui";
 import AppContent from "./AppContent.vue";
 import SplashScreen from "./components/SplashScreen.vue";
+import { initBackendEvents } from "./composables/useBackendEvents";
 
 const THEME_STORAGE_KEY = "silk-theme";
 const isDark = ref(false);
@@ -46,6 +47,8 @@ onMounted(() => {
   const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
   isDark.value = savedTheme === "dark";
   applyThemeClass(isDark.value);
+  // 订阅后端 data-changed 事件，桥接为前端跨 Store 失效信号
+  initBackendEvents();
 });
 
 watch(isDark, (enabled) => {

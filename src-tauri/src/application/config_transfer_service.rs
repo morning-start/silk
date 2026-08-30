@@ -1,15 +1,11 @@
-use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 
 use crate::application::gateway_service;
-use crate::crypto::encrypt;
 use crate::error::{bad_request, require_db, ServiceError};
-use crate::models::{
-    GatewaySettings, ModelMapping, ModelMappingChannel, Provider, ProviderKeyEntry,
-};
+use crate::models::GatewaySettings;
+use crate::persistence::config_transfer_repo::{ConfigExportBundle, ConfigTransferRepo, PortableProvider};
 use crate::persistence::{ModelMappingRepo, ProviderRepo};
 use crate::AppState;
 
@@ -33,39 +29,9 @@ pub struct RestoreDatabasePayload {
     pub file_path: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileOperationResponse {
     pub file_path: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ConfigExportBundle {
-    schema_version: i64,
-    exported_at: String,
-    gateway_settings: GatewaySettings,
-    providers: Vec<PortableProvider>,
-    model_mappings: Vec<ModelMapping>,
-    model_mapping_channels: Vec<ModelMappingChannel>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PortableProvider {
-    id: String,
-    name: String,
-    protocols: String,
-    models: String,
-    keys: String,
-    key_strategy: String,
-    api_base_url: String,
-    proxy_url: Option<String>,
-    timeout_seconds: i64,
-    max_retries: i64,
-    status: String,
-    health_status: Option<String>,
-    last_health_check_at: Option<chrono::NaiveDateTime>,
-    metadata_json: Option<String>,
-    created_at: chrono::NaiveDateTime,
-    updated_at: chrono::NaiveDateTime,
 }
 
 pub async fn export_config(payload: ExportConfigPayload) -> Result<FileOperationResponse, ServiceError> {
@@ -85,11 +51,7 @@ pub async fn export_config(payload: ExportConfigPayload) -> Result<FileOperation
             .map(PortableProvider::from_provider)
             .collect::<Result<Vec<_>, _>>()?,
         model_mappings: ModelMappingRepo::find_all(pool).await?,
-        model_mapping_channels: sqlx::query_as::<_, ModelMappingChannel>(
-            r#"SELECT * FROM model_mapping_channels ORDER BY created_at ASC"#,
-        )
-        .fetch_all(pool)
-        .await?,
+        model_mapping_channels: ConfigTransferRepo::find_all_model_mapping_channels(pool).await?,
     };
 
     let path = resolve_output_path(
@@ -158,7 +120,7 @@ pub async fn import_config(
     // 全量替换：清空三张配置表后按导入包重建，整个过程在同一事务内完成
     with_gateway_stop_guard(state, || async {
         let mut tx = pool.begin().await?;
-        replace_all_with_bundle(&mut tx, &bundle).await?;
+        ConfigTransferRepo::replace_all_with_bundle(&mut tx, &bundle).await?;
         tx.commit().await?;
         Ok(())
     })
@@ -169,136 +131,6 @@ pub async fn import_config(
     Ok(FileOperationResponse {
         file_path: import_path.display().to_string(),
     })
-}
-
-/// 在同一个事务内全量替换导入包中的三类配置
-///
-/// 先清空 model_mapping_channels / model_mappings / providers，再按导入包重建，
-/// 保证导入要么完整生效，要么整体回滚。
-async fn replace_all_with_bundle(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    bundle: &ConfigExportBundle,
-) -> Result<(), ServiceError> {
-    sqlx::query("DELETE FROM model_mapping_channels")
-        .execute(&mut **tx)
-        .await?;
-    sqlx::query("DELETE FROM model_mappings")
-        .execute(&mut **tx)
-        .await?;
-    sqlx::query("DELETE FROM providers").execute(&mut **tx).await?;
-
-    insert_providers(&mut *tx, &bundle.providers).await?;
-    insert_model_mappings(&mut *tx, &bundle.model_mappings).await?;
-    insert_model_mapping_channels(&mut *tx, &bundle.model_mapping_channels).await?;
-
-    Ok(())
-}
-
-/// 批量写入 providers（API Key 在写入前重新加密）
-async fn insert_providers(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    providers: &[PortableProvider],
-) -> Result<(), ServiceError> {
-    for provider in providers {
-        sqlx::query(
-            r#"
-            INSERT INTO providers (
-                id, name, protocols, models, keys, key_strategy, api_base_url,
-                proxy_url, timeout_seconds, max_retries, status, health_status,
-                last_health_check_at, metadata_json, created_at, updated_at
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-            "#,
-        )
-        .bind(&provider.id)
-        .bind(&provider.name)
-        .bind(&provider.protocols)
-        .bind(&provider.models)
-        .bind(provider.encrypted_keys_json()?)
-        .bind(&provider.key_strategy)
-        .bind(&provider.api_base_url)
-        .bind(&provider.proxy_url)
-        .bind(provider.timeout_seconds)
-        .bind(provider.max_retries)
-        .bind(&provider.status)
-        .bind(&provider.health_status)
-        .bind(provider.last_health_check_at)
-        .bind(&provider.metadata_json)
-        .bind(provider.created_at)
-        .bind(provider.updated_at)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
-}
-
-/// 批量写入 model_mappings
-async fn insert_model_mappings(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    mappings: &[ModelMapping],
-) -> Result<(), ServiceError> {
-    for mapping in mappings {
-        sqlx::query(
-            r#"
-            INSERT INTO model_mappings (
-                id, model_name, max_input_tokens, max_context_tokens, max_output_tokens,
-                input_price_per_1m, output_price_per_1m, capabilities, description,
-                vendor, knowledge_cutoff, model_family, reference_url,
-                strategy, enabled, created_at, updated_at
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
-            "#,
-        )
-        .bind(&mapping.id)
-        .bind(&mapping.model_name)
-        .bind(mapping.max_input_tokens)
-        .bind(mapping.max_context_tokens)
-        .bind(mapping.max_output_tokens)
-        .bind(mapping.input_price_per_1m)
-        .bind(mapping.output_price_per_1m)
-        .bind(&mapping.capabilities)
-        .bind(&mapping.description)
-        .bind(&mapping.vendor)
-        .bind(&mapping.knowledge_cutoff)
-        .bind(&mapping.model_family)
-        .bind(&mapping.reference_url)
-        .bind(&mapping.strategy)
-        .bind(mapping.enabled)
-        .bind(mapping.created_at)
-        .bind(mapping.updated_at)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
-}
-
-/// 批量写入 model_mapping_channels
-async fn insert_model_mapping_channels(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    channels: &[ModelMappingChannel],
-) -> Result<(), ServiceError> {
-    for channel in channels {
-        sqlx::query(
-            r#"
-            INSERT INTO model_mapping_channels (
-                id, mapping_id, provider_id, selected_models, enabled, created_at
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            "#,
-        )
-        .bind(&channel.id)
-        .bind(&channel.mapping_id)
-        .bind(&channel.provider_id)
-        .bind(&channel.selected_models)
-        .bind(channel.enabled)
-        .bind(channel.created_at)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
 }
 
 pub async fn backup_database(
@@ -317,9 +149,7 @@ pub async fn backup_database(
         db_path.parent(),
     )?;
 
-    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-        .execute(pool)
-        .await?;
+    ConfigTransferRepo::wal_checkpoint(pool).await?;
 
     std::fs::copy(db_path, &target).map_err(|e| ServiceError::Internal {
         message: "备份数据库失败".to_string(),
@@ -349,38 +179,8 @@ pub async fn restore_database(
 
     with_gateway_stop_guard(state, || async {
         let mut tx = pool.begin().await?;
-
-        sqlx::query("PRAGMA foreign_keys = OFF").execute(&mut *tx).await?;
-        sqlx::query("ATTACH DATABASE ?1 AS restore_db")
-            .bind(backup_path_clone.to_string_lossy().to_string())
-            .execute(&mut *tx)
-            .await?;
-
-        // gateway_settings 已迁移为 JSON 文件存储，不再存在于 DB 中
-        const TABLES: &[&str] = &[
-            "request_log_extra_token",
-            "request_logs",
-            "model_mapping_channels",
-            "model_mappings",
-            "providers",
-        ];
-
-        for table in TABLES {
-            let delete_sql = format!("DELETE FROM {table}");
-            sqlx::query(&delete_sql).execute(&mut *tx).await?;
-        }
-
-        for table in TABLES.iter().rev() {
-            let copy_sql = format!("INSERT INTO main.{0} SELECT * FROM restore_db.{0}", table);
-            sqlx::query(&copy_sql).execute(&mut *tx).await?;
-        }
-
-        sqlx::query("DETACH DATABASE restore_db")
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *tx).await?;
+        ConfigTransferRepo::restore_from_backup(&mut tx, &backup_path_clone).await?;
         tx.commit().await?;
-
         Ok(())
     })
     .await?;
@@ -406,7 +206,7 @@ async fn with_gateway_stop_guard<F, Fut, T>(
 ) -> Result<T, ServiceError>
 where
     F: FnOnce() -> Fut,
-    Fut: Future<Output = Result<T, ServiceError>>,
+    Fut: std::future::Future<Output = Result<T, ServiceError>>,
 {
     let was_running = state.gateway_server.read().await.is_some();
     if was_running {
@@ -433,7 +233,7 @@ async fn restore_settings_from_backup_db(
     })?;
 
     // 旧备份才有 gateway_settings 表，新备份已迁移为 JSON 文件存储
-    let Some(settings) = load_settings_from_backup_db(backup_path).await? else {
+    let Some(settings) = ConfigTransferRepo::load_settings_from_backup_db(backup_path).await? else {
         return Ok(());
     };
 
@@ -446,90 +246,6 @@ async fn restore_settings_from_backup_db(
 
     apply_gateway_settings(state, settings).await;
     Ok(())
-}
-
-/// 从备份数据库读取 gateway_settings
-///
-/// 表不存在（新备份）或没有数据行时返回 `Ok(None)`。
-async fn load_settings_from_backup_db(
-    backup_path: &Path,
-) -> Result<Option<GatewaySettings>, ServiceError> {
-    // 使用独立连接打开备份数据库
-    let backup_url = format!("sqlite://{}", backup_path.display());
-    let backup_pool = sqlx::SqlitePool::connect(&backup_url).await.map_err(|e| {
-        ServiceError::Internal {
-            message: "无法连接备份数据库".to_string(),
-            detail: Some(e.to_string()),
-        }
-    })?;
-
-    let restored = read_gateway_settings_row(&backup_pool).await;
-    backup_pool.close().await;
-    restored
-}
-
-/// 读取 gateway_settings 表首行并映射为 GatewaySettings
-async fn read_gateway_settings_row(
-    backup_pool: &sqlx::SqlitePool,
-) -> Result<Option<GatewaySettings>, ServiceError> {
-    let table_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='gateway_settings'",
-    )
-    .fetch_one(backup_pool)
-    .await
-    .unwrap_or(false);
-
-    if !table_exists {
-        return Ok(None);
-    }
-
-    let row = sqlx::query(
-        r#"SELECT bind_host, bind_port, allow_remote, log_retention_days,
-           launch_at_startup, minimize_to_tray, close_to_tray, auto_start_gateway,
-           default_provider_id,
-           rate_limit_enabled, rate_limit_max_requests_per_minute, rate_limit_max_tokens_per_minute
-           FROM gateway_settings LIMIT 1"#,
-    )
-    .fetch_optional(backup_pool)
-    .await
-    .map_err(|e| ServiceError::Internal {
-        message: "读取备份中的网关设置失败".to_string(),
-        detail: Some(e.to_string()),
-    })?;
-
-    let Some(row) = row else {
-        return Ok(None);
-    };
-
-    Ok(Some(GatewaySettings {
-        bind_host: row.get::<String, _>("bind_host"),
-        bind_port: row.get::<i64, _>("bind_port"),
-        allow_remote: row.get::<bool, _>("allow_remote"),
-        log_retention_days: row.get::<i64, _>("log_retention_days"),
-        launch_at_startup: row.get::<bool, _>("launch_at_startup"),
-        minimize_to_tray: row.get::<bool, _>("minimize_to_tray"),
-        close_to_tray: row.get::<bool, _>("close_to_tray"),
-        auto_start_gateway: row.get::<bool, _>("auto_start_gateway"),
-        default_provider_id: row.get::<Option<String>, _>("default_provider_id"),
-        rate_limit_enabled: row.get::<bool, _>("rate_limit_enabled"),
-        rate_limit_max_requests_per_minute: row.get::<i64, _>(
-            "rate_limit_max_requests_per_minute",
-        ),
-        rate_limit_max_tokens_per_minute: row.get::<i64, _>(
-            "rate_limit_max_tokens_per_minute",
-        ),
-        // 以下字段为后加列，旧备份里没有，缺失时取默认值
-        trace_enabled: row.get::<Option<bool>, _>("trace_enabled").unwrap_or(false),
-        log_level: row
-            .get::<Option<String>, _>("log_level")
-            .unwrap_or_else(|| "info".to_string()),
-        file_level: row
-            .get::<Option<String>, _>("file_level")
-            .unwrap_or_else(|| "debug".to_string()),
-        log_modules: std::collections::HashMap::new(),
-        // 后加字段，旧备份里没有，缺失时取默认值
-        proxy_url: None,
-    }))
 }
 
 /// 将设置应用到运行时内存：刷新共享设置、限流配置与字典缓存
@@ -551,7 +267,6 @@ async fn apply_gateway_settings(state: &AppState, settings: GatewaySettings) {
     }
     state.refresh_lookup().await;
 }
-
 
 fn resolve_output_path(
     custom: Option<String>,
@@ -590,75 +305,11 @@ fn ensure_parent_dir(path: &Path) -> Result<(), ServiceError> {
     Ok(())
 }
 
-impl PortableProvider {
-    fn from_provider(provider: Provider) -> Result<Self, ServiceError> {
-        let keys = provider
-            .keys_vec()
-            .into_iter()
-            .map(|mut entry| {
-                if !entry.value.is_empty() {
-                    entry.value = crate::crypto::decrypt(&entry.value).map_err(|e| {
-                        ServiceError::Internal {
-                            message: format!("导出渠道 Key 解密失败: {e}"),
-                            detail: None,
-                        }
-                    })?;
-                }
-                Ok(entry)
-            })
-            .collect::<Result<Vec<_>, ServiceError>>()?;
-
-        Ok(Self {
-            id: provider.id,
-            name: provider.name,
-            protocols: provider.protocols,
-            models: provider.models,
-            keys: serde_json::to_string(&keys).map_err(|e| ServiceError::Internal {
-                message: "导出渠道 Key 序列化失败".to_string(),
-                detail: Some(e.to_string()),
-            })?,
-            key_strategy: provider.key_strategy,
-            api_base_url: provider.api_base_url,
-            proxy_url: provider.proxy_url,
-            timeout_seconds: provider.timeout_seconds,
-            max_retries: provider.max_retries,
-            status: provider.status,
-            health_status: provider.health_status,
-            last_health_check_at: provider.last_health_check_at,
-            metadata_json: provider.metadata_json,
-            created_at: provider.created_at,
-            updated_at: provider.updated_at,
-        })
-    }
-
-    fn encrypted_keys_json(&self) -> Result<String, ServiceError> {
-        let mut keys: Vec<ProviderKeyEntry> =
-            serde_json::from_str(&self.keys).map_err(|e| ServiceError::BadRequest {
-                message: "导入文件中的渠道 Key 格式无效".to_string(),
-                code: Some(e.to_string()),
-            })?;
-
-        for entry in &mut keys {
-            if !entry.value.is_empty() {
-                entry.value = encrypt(&entry.value).map_err(|e| ServiceError::Internal {
-                    message: format!("导入渠道 Key 加密失败: {e}"),
-                    detail: None,
-                })?;
-            }
-        }
-
-        serde_json::to_string(&keys).map_err(|e| ServiceError::Internal {
-            message: "导入渠道 Key 序列化失败".to_string(),
-            detail: Some(e.to_string()),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::PortableProvider;
     use crate::crypto::decrypt;
     use crate::models::{Provider, ProviderKeyEntry};
+    use crate::persistence::config_transfer_repo::PortableProvider;
 
     #[test]
     fn portable_provider_reencrypts_plain_keys_on_import() {

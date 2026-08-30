@@ -1,5 +1,6 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
+use crate::application::change_events::emit_data_changed;
 use crate::application::model_mapping_service as mms;
 use crate::application::model_mapping_service::{
     CreateModelMappingPayload, ModelMappingResponse, UpdateModelMappingPayload,
@@ -31,22 +32,30 @@ pub async fn find_model_mapping_by_name(
 
 #[tauri::command]
 pub async fn create_model_mapping(
+    app_handle: AppHandle,
     _state: State<'_, AppState>,
     payload: CreateModelMappingPayload,
 ) -> Result<ModelMappingResponse, String> {
-    mms::create(payload).await.map_err(|e| e.to_string())
+    let result = mms::create(payload).await.map_err(|e| e.to_string())?;
+    emit_data_changed(&app_handle, "groups");
+    Ok(result)
 }
 
 #[tauri::command]
 pub async fn update_model_mapping(
+    app_handle: AppHandle,
     _state: State<'_, AppState>,
     id: String,
     payload: UpdateModelMappingPayload,
 ) -> Result<ModelMappingResponse, String> {
-    mms::update(id, payload).await.map_err(|e| e.to_string())
+    let result = mms::update(id, payload).await.map_err(|e| e.to_string())?;
+    emit_data_changed(&app_handle, "groups");
+    Ok(result)
 }
 
 #[tauri::command]
-pub async fn delete_model_mapping(_state: State<'_, AppState>, id: String) -> Result<bool, String> {
-    mms::delete(id).await.map_err(|e| e.to_string())
+pub async fn delete_model_mapping(app_handle: AppHandle, _state: State<'_, AppState>, id: String) -> Result<bool, String> {
+    let result = mms::delete(id).await.map_err(|e| e.to_string())?;
+    emit_data_changed(&app_handle, "groups");
+    Ok(result)
 }

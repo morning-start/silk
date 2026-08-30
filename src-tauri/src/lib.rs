@@ -71,32 +71,7 @@ impl AppState {
 
 /// 从 DB 一次性加载所有字典表到 LookupCache
 pub async fn load_lookup_cache(pool: &SqlitePool) -> LookupCache {
-    use sqlx::Row;
-
-    let provider_names = sqlx::query("SELECT id, name FROM providers")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| {
-            (r.get::<String, _>("id"), r.get::<String, _>("name"))
-        })
-        .collect();
-
-    let model_mapping_names = sqlx::query("SELECT id, model_name FROM model_mappings")
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| {
-            (r.get::<String, _>("id"), r.get::<String, _>("model_name"))
-        })
-        .collect();
-
-    LookupCache {
-        provider_names,
-        model_mapping_names,
-    }
+    crate::persistence::LookupCacheRepo::load(pool).await
 }
 
 /// 初始化数据库连接池并运行迁移
@@ -365,10 +340,10 @@ pub fn run() {
             commands::profiles::set_common_snippet,
             commands::profiles::list_all_models,
             // 自动检测
-            application::auto_detect::detect_installed_ai_apps,
+            commands::discovery::detect_installed_ai_apps,
             // 预置配置
-            application::preset_providers::get_preset_providers,
-            application::preset_providers::get_preset_provider_by_id,
+            commands::discovery::get_preset_providers,
+            commands::discovery::get_preset_provider_by_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

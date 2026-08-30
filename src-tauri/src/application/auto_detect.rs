@@ -120,12 +120,6 @@ impl AiAppDetector {
     }
 }
 
-/// Tauri命令：检测已安装的AI应用
-#[tauri::command]
-pub async fn detect_installed_ai_apps() -> Result<Vec<InstalledAiApp>, String> {
-    Ok(AiAppDetector::detect_all())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

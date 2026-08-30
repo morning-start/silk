@@ -30,9 +30,8 @@ export function useCrudStore<T extends { id: string }>(
   async function create(data: Partial<T>) {
     const result = await crudOp.runOrThrow(() => api.create(data), "创建失败");
     if (result) {
-      const list = cache.data.value ?? [];
-      list.unshift(result);
-      cache.data.value = list;
+      // 不从返回值本地修补列表：后端是唯一真相源，失效缓存后从后端重拉（Pull）
+      await cache.refresh(() => api.list());
       notifyDataChanged(id);
     }
     return result;
@@ -41,11 +40,7 @@ export function useCrudStore<T extends { id: string }>(
   async function update(uid: string, data: Partial<T>) {
     const result = await crudOp.runOrThrow(() => api.update(uid, data), "更新失败");
     if (result) {
-      const list = cache.data.value;
-      if (list) {
-        const idx = list.findIndex((p) => p.id === uid);
-        if (idx >= 0) list[idx] = result;
-      }
+      await cache.refresh(() => api.list());
       notifyDataChanged(id);
     }
     return result;
@@ -53,11 +48,9 @@ export function useCrudStore<T extends { id: string }>(
 
   async function remove(uid: string) {
     await crudOp.runOrThrow(() => api.delete(uid), "删除失败");
-    const list = cache.data.value;
-    if (list) {
-      cache.data.value = list.filter((p) => p.id !== uid);
-      notifyDataChanged(id);
-    }
+    // 删除后同样失效缓存并重拉，而非本地过滤
+    await cache.refresh(() => api.list());
+    notifyDataChanged(id);
   }
 
   /** 强制刷新（忽略缓存） */

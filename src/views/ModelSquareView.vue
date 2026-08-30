@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
+import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
 import {
   NCard,
   NButton,
@@ -250,6 +251,15 @@ function channelModelSummary(selected: string[]): string {
 }
 
 onMounted(loadData);
+
+// 数据流：后端写操作后 emit "groups"/"providers" → 桥接为前端信号 → 此处失效重拉
+const groupsSignal = useDataChangeSignal("groups");
+const providersSignal = useDataChangeSignal("providers");
+watch(
+  [groupsSignal, providersSignal],
+  () => loadData(),
+  { flush: "post" },
+);
 </script>
 
 <template>

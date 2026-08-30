@@ -1,4 +1,5 @@
 pub mod config_transfer;
+pub mod discovery;
 pub mod gateway;
 pub mod gateway_keys;
 pub mod logs;

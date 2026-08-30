@@ -1,5 +1,6 @@
 use tauri::{AppHandle, State};
 
+use crate::application::change_events::emit_data_changed;
 use crate::application::settings_service::{self, GatewaySettingsResponse, UpdateSettingsPayload};
 use crate::AppState;
 
@@ -14,7 +15,9 @@ pub async fn update_gateway_settings(
     state: State<'_, AppState>,
     payload: UpdateSettingsPayload,
 ) -> Result<GatewaySettingsResponse, String> {
-    settings_service::update(&app_handle, state.inner(), payload)
+    let result = settings_service::update(&app_handle, state.inner(), payload)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    emit_data_changed(&app_handle, "gatewaySettings");
+    Ok(result)
 }
