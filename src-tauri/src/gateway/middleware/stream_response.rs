@@ -205,7 +205,9 @@ impl SseEvent {
                 "response.completed" | "message_stop" => return StreamEventType::ResponseStop,
                 "response.created" | "message_start" => return StreamEventType::ResponseStart,
                 "response.output_text.delta" | "content_block_delta" => return StreamEventType::ContentDelta,
-                "response.output_text.done" | "content_block_stop" => return StreamEventType::ResponseStop,
+                // content_block_stop / response.output_text.done 是块边界事件，不是流结束；
+                // 归类为 ContentDelta 以避免 is_end() 误判导致流提前关闭。
+                "response.output_text.done" | "content_block_stop" => return StreamEventType::ContentDelta,
                 _ => {}
             }
         }
@@ -236,18 +238,22 @@ impl SseEvent {
                         "message_start" => return StreamEventType::ResponseStart,
                         "content_block_start" => return StreamEventType::ResponseStart,
                         "content_block_delta" => return StreamEventType::ContentDelta,
-                        "content_block_stop" => return StreamEventType::ResponseStop,
+                        // content_block_stop 是块边界事件，不是流结束；
+                        // 归类为 ContentDelta 以避免 is_end() 误判导致流提前关闭。
+                        "content_block_stop" => return StreamEventType::ContentDelta,
                         "message_stop" => return StreamEventType::ResponseStop,
                         // Responses
                         "response.created" => return StreamEventType::ResponseStart,
                         "response.output_item.added" => return StreamEventType::ResponseStart,
                         "response.content_part.added" => return StreamEventType::ResponseStart,
                         "response.output_text.delta" => return StreamEventType::ContentDelta,
-                        "response.output_text.done" => return StreamEventType::ResponseStop,
+                        // response.output_text.done / reasoning_summary_text.done /
+                        // function_call_arguments.done 都是块边界事件，不是流结束。
+                        "response.output_text.done" => return StreamEventType::ContentDelta,
                         "response.reasoning_summary_text.delta" => return StreamEventType::ContentDelta,
-                        "response.reasoning_summary_text.done" => return StreamEventType::ResponseStop,
+                        "response.reasoning_summary_text.done" => return StreamEventType::ContentDelta,
                         "response.function_call_arguments.delta" => return StreamEventType::ContentDelta,
-                        "response.function_call_arguments.done" => return StreamEventType::ResponseStop,
+                        "response.function_call_arguments.done" => return StreamEventType::ContentDelta,
                         "response.completed" => return StreamEventType::ResponseStop,
                         _ => {}
                     }
@@ -656,6 +662,10 @@ pub struct SseConverter {
     event_count: u64,
     /// 转换失败计数
     error_count: u64,
+    /// 原始 SSE 文本累积缓冲（用于批量转换）
+    accumulated: String,
+    /// 已发送的 output_item.added output_index 集合（去重用）
+    seen_output_items: std::collections::HashSet<String>,
 }
 
 impl SseConverter {
@@ -690,6 +700,8 @@ impl SseConverter {
             target: inbound.to_string(),
             event_count: 0,
             error_count: 0,
+            accumulated: String::new(),
+            seen_output_items: std::collections::HashSet::new(),
         }
     }
 
@@ -706,39 +718,31 @@ impl SseConverter {
     }
 
     /// 逐事件转换：将单个 SSE 事件转换为目标协议格式
+    ///
+    /// 策略：累积原始 SSE 文本，在流结束时批量转换。
+    /// 逐事件转换会导致 prism 无状态调用，Responses 格式的 BlockStart 每次都被重新生成，
+    /// 产生重复的 response.output_item.added。
+    /// 批量转换让解码器保持状态（text_block_open / thinking_block_open），
+    /// 确保 BlockStart 只在首次出现时生成。
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
         if !self.enabled {
             return Ok(Bytes::from(event.serialize()));
         }
-        let sse_text = event.serialize();
-        match prism_wasm::convert_stream_event(&self.source, &sse_text, &self.target) {
-            Ok(converted) => {
-                self.event_count += 1;
-                let filtered = filter_empty_events(&converted);
-                Ok(Bytes::from(filtered))
-            }
-            Err(e) => {
-                self.error_count += 1;
-                tracing::warn!(
-                    source = %self.source,
-                    target = %self.target,
-                    error = %e,
-                    input_preview = %sse_text.chars().take(100).collect::<String>(),
-                    event_count = self.event_count,
-                    "SSE 事件转换失败"
-                );
-                Err(e)
-            }
-        }
+        self.accumulated.push_str(&event.serialize());
+        self.event_count += 1;
+        // 中间不输出，全部累积到 finish() 批量转换
+        Ok(Bytes::new())
     }
 
-    /// 流结束冲刷：发送 `[DONE]` 使 prism 输出收尾事件（如 anthropic message_stop）。
+    /// 流结束冲刷：为目标协议生成正确的收尾事件。
     ///
-    /// 上游 openai-chat 的 `[DONE]` 由 dispatch 拦截并发送流结束标记，不会
-    /// 经过 convert()；但 prism 需要看到 `[DONE]` 才会输出 message_stop 等
-    /// 收尾事件，故在流结束时显式调用本方法冲刷。
+    /// 不同协议的流结束信号不同：
+    /// - Anthropic Messages: `message_delta`(stop_reason) + `message_stop`
+    /// - OpenAI Chat: `finish_reason:stop` chunk + `[DONE]`
+    /// - OpenAI Responses: `response.completed`
     ///
-    /// responses 格式不使用 `[DONE]`，跳过冲刷。
+    /// 直接生成目标协议的收尾事件，不依赖 prism 转换（prism 可能无法正确处理
+    /// 跨协议的结束信号，如 responses→messages 的 response.completed）。
     pub fn finish(&mut self) -> Result<Bytes, String> {
         if !self.enabled {
             return Ok(Bytes::new());
@@ -750,14 +754,83 @@ impl SseConverter {
             errors = self.error_count,
             "SSE 流式转换完成"
         );
-        // responses 格式以 response.completed 结束，不使用 [DONE]
-        if self.source == "responses" {
+
+        // 直接为目标协议生成收尾事件（不经过 prism）
+        let closing = match self.target.as_str() {
+            "messages" => {
+                // Anthropic Messages 需要 message_delta + message_stop
+                // message_delta 携带 stop_reason 和 usage，是客户端判断流结束的关键信号
+                concat!(
+                    "event: message_delta\n",
+                    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":0}}\n\n",
+                    "event: message_stop\n",
+                    "data: {\"type\":\"message_stop\"}\n\n",
+                )
+            }
+            "openai" => {
+                // OpenAI Chat 需要 finish_reason:stop chunk + [DONE]
+                // 使用 prism 生成 OpenAI 格式的收尾 chunk
+                let done_event = "data: [DONE]\n\n";
+                match prism_wasm::convert_stream_event(&self.source, done_event, &self.target) {
+                    Ok(converted) => {
+                        let filtered = filter_empty_events(&converted);
+                        if !filtered.is_empty() {
+                            return Ok(Bytes::from(filtered));
+                        }
+                        // prism 无输出时用硬编码兜底
+                        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                    }
+                    Err(_) => {
+                        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                    }
+                }
+            }
+            "responses" => {
+                // 批量转换累积的全部事件，让解码器保持状态
+                if self.accumulated.is_empty() {
+                    return Ok(Bytes::new());
+                }
+                match prism_wasm::convert_stream(&self.source, &self.accumulated, &self.target) {
+                    Ok(converted) => {
+                        let filtered = filter_empty_events(&converted);
+                        if !filtered.is_empty() {
+                            return Ok(Bytes::from(filtered));
+                        }
+                        return Ok(Bytes::new());
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            source = %self.source,
+                            target = %self.target,
+                            error = %e,
+                            "Responses 批量转换失败"
+                        );
+                        return Ok(Bytes::new());
+                    }
+                }
+            }
+            _ => {
+                // 未知协议：尝试用 prism 冲刷
+                let done_event = "data: [DONE]\n\n";
+                match prism_wasm::convert_stream_event(&self.source, done_event, &self.target) {
+                    Ok(converted) => {
+                        let filtered = filter_empty_events(&converted);
+                        return Ok(Bytes::from(filtered));
+                    }
+                    Err(_) => ""
+                }
+            }
+        };
+
+        if closing.is_empty() {
             return Ok(Bytes::new());
         }
-        let done_event = "data: [DONE]\n\n";
-        let converted = prism_wasm::convert_stream_event(&self.source, done_event, &self.target)?;
-        let filtered = filter_empty_events(&converted);
-        Ok(Bytes::from(filtered))
+        tracing::debug!(
+            target = %self.target,
+            closing_preview = %closing.chars().take(300).collect::<String>(),
+            "生成目标协议收尾事件"
+        );
+        Ok(Bytes::from(closing))
     }
 }
 
@@ -765,6 +838,42 @@ impl SseConverter {
 ///
 /// prism 对 content_block_start 等事件会输出空占位（`\n\n`），需过滤；
 /// `[DONE]` 由 dispatch 统一发送流结束标记，避免重复。
+/// 去重 response.output_item.added 事件
+///
+/// prism 的逐事件转换是无状态的，每次 BlockStart 都会重新生成 output_item.added。
+/// 批量转换时解码器保持状态，但 output_item.added 可能因 block 索引复用而重复。
+/// 此函数按 output_index 去重，只保留首次出现的 output_item.added。
+fn dedup_output_item_added(sse: &str, seen: &mut std::collections::HashSet<String>) -> String {
+    let mut result = String::new();
+    for block in sse.split("\n\n") {
+        if block.trim().is_empty() {
+            continue;
+        }
+        // 检查是否为 output_item.added 事件
+        if block.contains("response.output_item.added") {
+            // 提取 output_index 作为去重 key
+            if let Some(idx_start) = block.find("\"output_index\":") {
+                let idx_str = &block[idx_start + 15..];
+                let key: String = idx_str.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if !key.is_empty() {
+                    if seen.contains(&key) {
+                        continue; // 跳过重复
+                    }
+                    seen.insert(key);
+                }
+            }
+        }
+        if !result.is_empty() {
+            result.push_str("\n\n");
+        }
+        result.push_str(block);
+    }
+    if !result.is_empty() {
+        result.push_str("\n\n");
+    }
+    result
+}
+
 fn filter_empty_events(sse: &str) -> String {
     let blocks: Vec<&str> = sse
         .split("\n\n")
@@ -1050,6 +1159,32 @@ mod tests {
     }
 
     #[test]
+    fn test_sse_converter_responses_to_messages_finish() {
+        // responses 上游 → messages 下游：finish 应直接生成 message_delta + message_stop
+        let mut converter = SseConverter::new("messages", "responses");
+
+        // 模拟一个内容事件
+        let ev = SseEvent {
+            event: Some("response.output_text.delta".to_string()),
+            data: Some(r#"{"type":"response.output_text.delta","output_index":1,"content_index":0,"delta":"Hello"}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        let out = converter.convert(&ev).expect("convert");
+        assert!(String::from_utf8_lossy(&out).contains("Hello"));
+
+        // finish 应生成 message_delta + message_stop
+        let finish_out = converter.finish().expect("finish");
+        let finish_str = String::from_utf8_lossy(&finish_out);
+        assert!(finish_str.contains("message_delta"), "缺少 message_delta: {finish_str}");
+        assert!(finish_str.contains("message_stop"), "缺少 message_stop: {finish_str}");
+        assert!(finish_str.contains("stop_reason"), "缺少 stop_reason: {finish_str}");
+        // 不应包含 [DONE]（Messages 客户端不识别）
+        assert!(!finish_str.contains("[DONE]"), "不应包含 [DONE]: {finish_str}");
+    }
+
+    #[test]
     fn test_sse_converter_same_protocol_passthrough() {
         let mut converter = SseConverter::new("openai", "openai");
         let ev = SseEvent {
@@ -1169,6 +1304,16 @@ mod tests {
         let event = SseEvent {
             event: Some("content_block_delta".to_string()),
             data: Some(r#"{"type":"content_block_delta","delta":{"text":"Hello"}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        };
+        assert_eq!(event.infer_type(), StreamEventType::ContentDelta);
+
+        // content_block_stop 是块边界事件，不应归类为 ResponseStop
+        let event = SseEvent {
+            event: Some("content_block_stop".to_string()),
+            data: Some(r#"{"type":"content_block_stop","index":0}"#.to_string()),
             id: None,
             retry: None,
             comment: None,

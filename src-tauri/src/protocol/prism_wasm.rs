@@ -733,6 +733,59 @@ mod tests {
     }
 
     #[test]
+    fn test_convert_stream_openai_to_responses_ai_sdk_fields() {
+        // AI SDK (opencode 内置) 的 openaiResponsesChunkSchema 要求：
+        // - response.created 必须含 id/created_at/model
+        // - output_item.added 的 item 必须含 id
+        // - output_text.delta 必须含 item_id
+        // 缺少任一字段都会 zod 校验失败，导致 OpenCode 中止流。
+        let sse = [
+            "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"agnes-2.5-flash\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}]}",
+            "",
+            "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"agnes-2.5-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}",
+            "",
+            "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"agnes-2.5-flash\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}",
+            "",
+            "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"agnes-2.5-flash\",\"choices\":[{\"index\":0,\"delta\":{}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}",
+            "",
+            "data: [DONE]",
+            "",
+        ]
+        .join("\n");
+        let out = convert_stream("openai", &sse, "responses").expect("convert stream");
+
+        eprintln!("=== openai→responses 转换结果 ===\n{out}\n================================");
+
+        // response.created 必须含 id/created_at/model
+        assert!(
+            out.contains("\"type\":\"response.created\"")
+                && out.contains("\"id\":\"")
+                && out.contains("\"created_at\":")
+                && out.contains("\"model\":\""),
+            "response.created 缺少 id/created_at/model: {out}"
+        );
+        // output_item.added 的 item 必须含 id
+        assert!(
+            out.contains("\"type\":\"response.output_item.added\"")
+                && out.contains("\"item\":{\"id\":\""),
+            "output_item.added 的 item 缺少 id: {out}"
+        );
+        // output_text.delta 必须含 item_id
+        assert!(
+            out.contains("\"type\":\"response.output_text.delta\"")
+                && out.contains("\"item_id\":\""),
+            "output_text.delta 缺少 item_id: {out}"
+        );
+        // response.completed 含 status 与 usage
+        assert!(
+            out.contains("\"type\":\"response.completed\"")
+                && out.contains("\"status\":\"completed\"")
+                && out.contains("\"usage\""),
+            "response.completed 缺少 status/usage: {out}"
+        );
+    }
+
+    #[test]
     fn test_convert_unsupported_protocol() {
         let req = "{}";
         assert!(convert_request("unknown_proto", req, "openai").is_err());

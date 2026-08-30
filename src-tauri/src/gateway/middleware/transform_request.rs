@@ -88,6 +88,86 @@ fn convert_to_outbound_protocol(
     }
 
     let body_str = String::from_utf8_lossy(&ctx.request_body).to_string();
+
+    // 检测 Responses API 的各种模式
+    if inbound == "responses" && outbound == "openai" {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body_str) {
+            let has_input = v.get("input").is_some();
+            let has_prev_id = v.get("previous_response_id").is_some();
+
+            // 记录请求的顶层字段和 input item 类型（帮助调试）
+            if let Some(obj) = v.as_object() {
+                let top_keys: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
+                let input_info = match v.get("input") {
+                    Some(serde_json::Value::Array(a)) => {
+                        let item_summaries: Vec<serde_json::Value> = a.iter().map(|item| {
+                            // 只保留 type、role 和 content 的类型（避免日志过大）
+                            let mut summary = serde_json::Map::new();
+                            if let Some(t) = item.get("type") { summary.insert("type".to_string(), t.clone()); }
+                            if let Some(r) = item.get("role") { summary.insert("role".to_string(), r.clone()); }
+                            if let Some(c) = item.get("content") {
+                                match c {
+                                    serde_json::Value::Array(arr) => {
+                                        let content_types: Vec<&str> = arr.iter()
+                                            .map(|p| p.get("type").and_then(|t| t.as_str()).unwrap_or("?"))
+                                            .collect();
+                                        summary.insert("content_types".to_string(), serde_json::Value::Array(
+                                            content_types.into_iter().map(|s| serde_json::Value::String(s.to_string())).collect()
+                                        ));
+                                    }
+                                    serde_json::Value::String(s) => {
+                                        summary.insert("content_str_len".to_string(), serde_json::json!(s.len()));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            serde_json::Value::Object(summary)
+                        }).collect();
+                        format!("array({}) items={}", a.len(), serde_json::Value::Array(item_summaries))
+                    }
+                    Some(serde_json::Value::String(s)) => format!("string({})", s.len()),
+                    Some(other) => format!("{:?}", other),
+                    None => "missing".to_string(),
+                };
+                tracing::info!(
+                    inbound = %inbound,
+                    outbound = %outbound,
+                    top_keys = ?top_keys,
+                    input_info = %input_info,
+                    has_prev_id = has_prev_id,
+                    "Responses 请求结构分析"
+                );
+            }
+
+            if !has_input && has_prev_id {
+                tracing::warn!(
+                    inbound = %inbound,
+                    outbound = %outbound,
+                    "Responses 请求使用 previous_response_id（无 input），无法转换为 Chat Completions"
+                );
+                return Err(StageError::new(
+                    ctx.clone(),
+                    GatewayError::BadRequest(
+                        "Responses API 的 previous_response_id 模式不支持转换为 Chat Completions 格式。请在客户端配置中将此 provider 的协议设为 responses（直通模式）而非 openai。".to_string()
+                    ),
+                ));
+            }
+            if !has_input && !has_prev_id {
+                tracing::warn!(
+                    inbound = %inbound,
+                    outbound = %outbound,
+                    "Responses 请求缺少 input 和 previous_response_id，无法转换为 Chat Completions"
+                );
+                return Err(StageError::new(
+                    ctx.clone(),
+                    GatewayError::BadRequest(
+                        "Responses API 请求缺少 input 字段，无法转换为 Chat Completions 格式。请确保请求包含 input 字段（消息数组或字符串）。".to_string()
+                    ),
+                ));
+            }
+        }
+    }
+
     let start = std::time::Instant::now();
     let converted = prism_wasm::convert_request(inbound, &body_str, outbound)
         .map_err(|e| StageError::new(ctx.clone(), GatewayError::Transform(e)))?;
@@ -97,6 +177,7 @@ fn convert_to_outbound_protocol(
         outbound = %outbound,
         input_bytes = body_str.len(),
         output_bytes = converted.len(),
+        output_preview = %converted.chars().take(200).collect::<String>(),
         elapsed_ms = start.elapsed().as_millis(),
         "请求体跨协议转换完成"
     );

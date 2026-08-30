@@ -418,7 +418,7 @@ onMounted(() => {
                 @update:value="(value: boolean) => { formValue.status = value ? 'enabled' : 'disabled'; }"
               />
             </NFormItem>
-            <NFormItem label="模型穿透" style="flex: 0 0 160px">
+            <NFormItem label="模型穿透" style="flex: 0 0 auto">
               <NSwitch v-model:value="formValue.models_passthrough" />
               <span class="form-hint">显示在 /v1/models</span>
             </NFormItem>

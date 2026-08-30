@@ -157,17 +157,78 @@ impl GatewayPipeline {
     }
 
     /// 带三级回退的核心处理逻辑
+    ///
+    /// 总超时15秒，最多尝试10次，防止无限重试。
     async fn run_with_failover(
         &self,
         mut ctx: RequestContext,
     ) -> Result<RequestContext, StageError> {
+        let failover_start = std::time::Instant::now();
+        let total_timeout = std::time::Duration::from_secs(15);
+        let max_total_attempts: u32 = 10;
+
         // 外层循环：换渠道（Level 3）
         loop {
+            // 总超时检查
+            if failover_start.elapsed() > total_timeout {
+                tracing::warn!(
+                    elapsed_ms = failover_start.elapsed().as_millis(),
+                    attempts = ctx.total_retry_attempts,
+                    "失败回退总超时"
+                );
+                return Err(StageError::new(
+                    ctx,
+                    GatewayError::Internal(format!(
+                        "请求超时：失败回退超过{}秒",
+                        total_timeout.as_secs()
+                    )),
+                ));
+            }
+
+            // 总尝试次数检查
+            if ctx.total_retry_attempts >= max_total_attempts {
+                let attempts = ctx.total_retry_attempts;
+                tracing::warn!(
+                    attempts = attempts,
+                    "失败回退达到最大尝试次数"
+                );
+                return Err(StageError::new(
+                    ctx,
+                    GatewayError::Internal(format!(
+                        "请求失败：已尝试{}次仍不成功",
+                        attempts
+                    )),
+                ));
+            }
+
             // 清理上次渠道的 Key 失败记录
             ctx.failed_keys.clear();
 
             // 中层循环：换 Key（Level 2）
             loop {
+                // 总超时检查
+                if failover_start.elapsed() > total_timeout {
+                    return Err(StageError::new(
+                        ctx,
+                        GatewayError::Internal(format!(
+                            "请求超时：失败回退超过{}秒",
+                            total_timeout.as_secs()
+                        )),
+                    ));
+                }
+
+                // 总尝试次数检查
+                if ctx.total_retry_attempts >= max_total_attempts {
+                    let attempts = ctx.total_retry_attempts;
+                    return Err(StageError::new(
+                        ctx,
+                        GatewayError::Internal(format!(
+                            "请求失败：已尝试{}次仍不成功",
+                            attempts
+                        )),
+                    ));
+                }
+
                 ctx = select_channel::run(ctx).await?;
                 ctx = transform_request::run(ctx).await?;
 
@@ -194,6 +255,7 @@ impl GatewayPipeline {
                         return Ok(ctx);
                     }
                         Err(stage_err) => {
+                        let error = stage_err.error;
                         // 记录失败的 Key
                         ctx = *stage_err.context;
                         ctx.total_retry_attempts += 1;
@@ -202,6 +264,40 @@ impl GatewayPipeline {
                             ctx.failed_keys.push(key.clone());
                         }
                         ctx.selected_api_key = None; // 避免复用
+
+                        // 429/401/403/503 等明确错误不应换 Key 重试
+                        let should_retry = match &error {
+                            GatewayError::UpstreamError { status, body } => {
+                                // 429 限流、401/403 认证失败、503 服务不可用：换 Key 无意义
+                                if *status == 429 || *status == 401 || *status == 403 || *status == 503 {
+                                    let err_msg = body.get("error")
+                                        .and_then(|e| e.get("message"))
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("未知错误");
+                                    tracing::warn!(
+                                        status = *status,
+                                        error = %err_msg,
+                                        "上游返回不可重试错误，直接失败"
+                                    );
+                                    return Err(StageError::new(ctx, GatewayError::UpstreamError {
+                                        status: *status,
+                                        body: body.clone(),
+                                    }));
+                                }
+                                true
+                            }
+                            _ => true,
+                        };
+
+                        tracing::info!(
+                            attempt = ctx.total_retry_attempts,
+                            elapsed_ms = failover_start.elapsed().as_millis(),
+                            "尝试失败，准备换 Key"
+                        );
+
+                        if !should_retry {
+                            return Err(StageError::new(ctx, error));
+                        }
 
                         // 检查是否还有可用的 Key
                         let has_available_keys = ctx

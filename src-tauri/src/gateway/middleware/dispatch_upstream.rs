@@ -324,7 +324,7 @@ async fn handle_sse_response(
         shared.clone(),
         config.clone(),
         inbound,
-        outbound,
+        outbound.clone(),
     ));
 
     // 构建流式响应
@@ -367,6 +367,11 @@ async fn run_sse_read_task(
     inbound: String,
     outbound: String,
 ) {
+    // Anthropic Messages 客户端不识别 [DONE]，用 message_stop 结束流。
+    // Responses 客户端使用 response.completed 结束流。
+    // 只有 OpenAI Chat 客户端识别 [DONE] 作为标准 SSE 终止符。
+    // 用 inbound（客户端协议）判断，而非 outbound（上游协议）。
+    let send_done_marker = inbound == "openai";
     let mut parser = SseParser::new();
     let mut pinned_stream = std::pin::pin!(response_stream);
     let mut heartbeat = tokio::time::interval(config.heartbeat_interval);
@@ -384,9 +389,9 @@ async fn run_sse_read_task(
                     tracing::info!(
                         total_events,
                         elapsed_ms = stream_start.elapsed().as_millis(),
-                        "SSE 流连接关闭（无 [DONE] 标记）"
+                        "SSE 流连接关闭（无结束标记）"
                     );
-                    if !stream_state.ended {
+                    if !stream_state.ended && send_done_marker {
                         let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
                     }
                     // tx 在此被 drop，ReceiverStream 结束，HTTP 响应完成
@@ -428,6 +433,11 @@ async fn run_sse_read_task(
                             }
                             ChunkOutcome::End(flush) => {
                                 stream_state.ended = true;
+                                tracing::info!(
+                                    end_output_bytes = flush.len(),
+                                    end_output_preview = %String::from_utf8_lossy(&flush).chars().take(300).collect::<String>(),
+                                    "发送流结束输出到客户端"
+                                );
                                 if !flush.is_empty() {
                                     let _ = tx.send(Ok(Bytes::from(flush))).await;
                                 }
@@ -439,9 +449,13 @@ async fn run_sse_read_task(
                                     elapsed_ms = stream_start.elapsed().as_millis(),
                                     prompt_tokens = state.exact_prompt_tokens.unwrap_or(0),
                                     completion_tokens = state.exact_completion_tokens.unwrap_or(0),
+                                    send_done_marker,
                                     "SSE 流正常结束"
                                 );
-                                let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
+                                // 仅对识别 [DONE] 的协议发送流结束标记
+                                if send_done_marker {
+                                    let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
+                                }
                                 // tx 在此被 drop，ReceiverStream 结束，HTTP 响应完成
                                 let _ = complete_tx.send(());
                                 return;
@@ -500,9 +514,10 @@ async fn process_sse_events(
         stream_state.record_event();
         *total_events += 1;
 
-        tracing::debug!(
+        tracing::info!(
             event_type = ?event.event,
-            data_preview = %event.data.as_deref().unwrap_or("").chars().take(120).collect::<String>(),
+            data_len = event.data.as_deref().map(|d| d.len()).unwrap_or(0),
+            data_preview = %event.data.as_deref().unwrap_or("").chars().take(200).collect::<String>(),
             is_end = event.is_end(),
             "收到 SSE 事件"
         );
@@ -517,11 +532,26 @@ async fn process_sse_events(
         if event.is_end() {
             // 先转换结束事件本身（message_stop → finish_reason:stop）
             let mut end_output = Vec::new();
-            if let Ok(bytes) = converter.convert(event) {
-                end_output.extend_from_slice(&bytes);
+            match converter.convert(event) {
+                Ok(bytes) => {
+                    tracing::info!(
+                        end_event_bytes = bytes.len(),
+                        end_event_preview = %String::from_utf8_lossy(&bytes).chars().take(200).collect::<String>(),
+                        "结束事件转换输出"
+                    );
+                    end_output.extend_from_slice(&bytes);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "结束事件转换失败");
+                }
             }
-            // 冲刷转换器收尾事件
+            // 冲刷转换器收尾事件（如 anthropic message_stop）
             let flush = converter.finish().unwrap_or_default();
+            tracing::info!(
+                flush_bytes = flush.len(),
+                flush_preview = %String::from_utf8_lossy(&flush).chars().take(200).collect::<String>(),
+                "转换器冲刷输出"
+            );
             end_output.extend_from_slice(&flush);
             return ChunkOutcome::End(end_output);
         }
