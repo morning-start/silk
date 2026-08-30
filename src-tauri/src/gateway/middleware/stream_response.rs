@@ -192,6 +192,29 @@ impl SseEvent {
         self.extract_usage(&json)
     }
 
+    /// 是否为 OpenAI 系流结束信号帧（choices[0].finish_reason 非空）。
+    ///
+    /// 用于增量转换：检测到 finish_reason 后流进入收尾阶段（随后是 usage 帧、
+    /// [DONE]），停止增量 flush，避免 prism 对相同前缀输出不一致的
+    /// response.completed（其内容依赖向后查找 Usage）破坏前缀 diff。
+    pub fn has_finish_reason(&self) -> bool {
+        let data = match self.data.as_deref() {
+            Some(d) => d,
+            None => return false,
+        };
+        let json: serde_json::Value = match serde_json::from_str(data) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        json.get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|ch| ch.get("finish_reason"))
+            .and_then(|fr| fr.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+    }
+
     /// 推断事件类型
     pub fn infer_type(&self) -> StreamEventType {
         // 1. 检查是否为 [DONE] 标记
@@ -666,7 +689,22 @@ pub struct SseConverter {
     accumulated: String,
     /// 已发送的 output_item.added output_index 集合（去重用）
     seen_output_items: std::collections::HashSet<String>,
+    /// 上次增量转换时已下发的输出字节数（前缀 diff 游标）
+    last_output_len: usize,
+    /// 上次增量转换时的输入累积字节数（阈值判断游标）
+    last_flushed_input_len: usize,
+    /// 上游已发送 finish_reason（流进入收尾阶段）：此后停止增量 flush，
+    /// 剩余事件（usage/[DONE]）累积到 finish() 一次性转换。
+    /// 原因：prism 的 response.completed 依赖向后查找 Usage，若在 usage 帧到达前
+    /// 增量转换，会对相同前缀输入输出不同的 completed（无 usage → 带 usage），
+    /// 破坏前缀 diff 的确定性，客户端会收到从 "usage" 中间切断的乱码事件，
+    /// AI SDK 校验失败中止流，OpenCode 自动重试（表现为"思考两遍、回答两遍"）。
+    ending_seen: bool,
 }
+
+/// 增量转换的输入累积阈值：原始 SSE 累积超过该字节数即触发一次全量转换并下发新增部分。
+/// 数值越大实时性越差（客户端等更久才看到内容），越小转换越频繁（CPU 开销略增）。
+const INCREMENTAL_FLUSH_THRESHOLD: usize = 1024;
 
 impl SseConverter {
     pub fn new(inbound: &str, outbound: &str) -> Self {
@@ -702,6 +740,9 @@ impl SseConverter {
             error_count: 0,
             accumulated: String::new(),
             seen_output_items: std::collections::HashSet::new(),
+            last_output_len: 0,
+            last_flushed_input_len: 0,
+            ending_seen: false,
         }
     }
 
@@ -717,31 +758,82 @@ impl SseConverter {
         Err("marshal() 方法尚未实现".to_string())
     }
 
-    /// 逐事件转换：将单个 SSE 事件转换为目标协议格式
+    /// 逐事件转换：累积原始 SSE 文本，达到阈值时增量转换并下发新增部分。
     ///
-    /// 策略：累积原始 SSE 文本，在流结束时批量转换。
-    /// 逐事件转换会导致 prism 无状态调用，Responses 格式的 BlockStart 每次都被重新生成，
-    /// 产生重复的 response.output_item.added。
-    /// 批量转换让解码器保持状态（text_block_open / thinking_block_open），
-    /// 确保 BlockStart 只在首次出现时生成。
+    /// 背景：prism 的逐事件转换（convert_stream_event）是无状态的，Responses 格式的
+    /// BlockStart 每次都被重新生成，产生重复的 response.output_item.added；因此改为
+    /// 累积原始 SSE、用有状态的 convert_stream 批量转换。
+    ///
+    /// 实时性：convert_stream 是确定性纯函数（相同输入 → 相同输出），输入按前缀累积，
+    /// 输出也按前缀增长。利用这一性质，每累积满阈值就全量转换一次，用前缀 diff
+    /// （过滤后输出中 last_output_len 之后的部分）只下发新增事件，实现流式实时下发，
+    /// 而不是等到流结束才一次性全量输出。
     pub fn convert(&mut self, event: &SseEvent) -> Result<Bytes, String> {
         if !self.enabled {
             return Ok(Bytes::from(event.serialize()));
         }
+        // 结束事件（如 [DONE]）不累积：收尾事件由 finish() 统一生成，
+        // 避免 prism 将其转换为重复的 message_stop / [DONE]。
+        if event.is_end() {
+            return Ok(Bytes::new());
+        }
         self.accumulated.push_str(&event.serialize());
         self.event_count += 1;
-        // 中间不输出，全部累积到 finish() 批量转换
-        Ok(Bytes::new())
+
+        // 检测上游 finish_reason（OpenAI 系流结束信号），标记进入收尾阶段。
+        // 此后（usage / 收尾帧）不再增量 flush，统一由 finish() 一次性转换：
+        // prism 的 response.completed 会向后查找 Usage，若在此前增量转换，
+        // 相同前缀输入会输出不同的 completed，破坏前缀 diff 确定性。
+        if !self.ending_seen && event.has_finish_reason() {
+            self.ending_seen = true;
+            tracing::debug!("检测到上游 finish_reason，停止增量转换，收尾交给 finish()");
+        }
+
+        // 累积超过阈值且未进入收尾阶段：全量转换，前缀 diff 只返回新增部分
+        if !self.ending_seen
+            && self.accumulated.len() - self.last_flushed_input_len >= INCREMENTAL_FLUSH_THRESHOLD
+        {
+            self.flush_incremental()
+        } else {
+            Ok(Bytes::new())
+        }
     }
 
-    /// 流结束冲刷：为目标协议生成正确的收尾事件。
+    /// 增量转换：对全部累积 SSE 做一次确定性全量转换，只返回上次未下发的新增部分。
+    ///
+    /// 因为 prism 转换是纯函数，输入前缀 → 输出前缀，所以本次输出是上次输出的
+    /// 前缀扩展，`last_output_len` 之后的字节就是新事件，可直接下发。
+    fn flush_incremental(&mut self) -> Result<Bytes, String> {
+        if !self.enabled || self.accumulated.is_empty() {
+            return Ok(Bytes::new());
+        }
+        let input_len = self.accumulated.len();
+        let full = prism_wasm::convert_stream(&self.source, &self.accumulated, &self.target)?;
+        let filtered = filter_empty_events(&full);
+        let new_output = if filtered.len() > self.last_output_len {
+            filtered[self.last_output_len..].to_string()
+        } else {
+            String::new()
+        };
+        self.last_output_len = filtered.len();
+        self.last_flushed_input_len = input_len;
+        tracing::debug!(
+            new_bytes = new_output.len(),
+            total_output = filtered.len(),
+            input_bytes = input_len,
+            "增量转换下发"
+        );
+        Ok(Bytes::from(new_output))
+    }
+
+    /// 流结束冲刷：先下发累积的增量内容，再为目标协议生成正确的收尾事件。
     ///
     /// 不同协议的流结束信号不同：
     /// - Anthropic Messages: `message_delta`(stop_reason) + `message_stop`
     /// - OpenAI Chat: `finish_reason:stop` chunk + `[DONE]`
     /// - OpenAI Responses: `response.completed`
     ///
-    /// 直接生成目标协议的收尾事件，不依赖 prism 转换（prism 可能无法正确处理
+    /// 收尾事件直接生成，不依赖 prism 转换（prism 可能无法正确处理
     /// 跨协议的结束信号，如 responses→messages 的 response.completed）。
     pub fn finish(&mut self) -> Result<Bytes, String> {
         if !self.enabled {
@@ -755,59 +847,57 @@ impl SseConverter {
             "SSE 流式转换完成"
         );
 
-        // 直接为目标协议生成收尾事件（不经过 prism）
-        let closing = match self.target.as_str() {
+        // 先冲刷累积的增量内容（正文事件），确保消息内容已下发
+        let mut output: Vec<u8> = Vec::new();
+        if !self.accumulated.is_empty() {
+            match self.flush_incremental() {
+                Ok(bytes) => output.extend_from_slice(&bytes),
+                Err(e) => tracing::warn!(error = %e, "增量转换冲刷失败"),
+            }
+        }
+
+        // 为目标协议生成收尾事件（不经过 prism）
+        match self.target.as_str() {
             "messages" => {
                 // Anthropic Messages 需要 message_delta + message_stop
                 // message_delta 携带 stop_reason 和 usage，是客户端判断流结束的关键信号
-                concat!(
-                    "event: message_delta\n",
-                    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":0}}\n\n",
-                    "event: message_stop\n",
-                    "data: {\"type\":\"message_stop\"}\n\n",
-                )
+                output.extend_from_slice(
+                    concat!(
+                        "event: message_delta\n",
+                        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":0}}\n\n",
+                        "event: message_stop\n",
+                        "data: {\"type\":\"message_stop\"}\n\n",
+                    )
+                    .as_bytes(),
+                );
             }
             "openai" => {
-                // OpenAI Chat 需要 finish_reason:stop chunk + [DONE]
-                // 使用 prism 生成 OpenAI 格式的收尾 chunk
+                // OpenAI Chat 需要 finish_reason:stop chunk（[DONE] 由 dispatch 统一发送）
                 let done_event = "data: [DONE]\n\n";
                 match prism_wasm::convert_stream_event(&self.source, done_event, &self.target) {
                     Ok(converted) => {
                         let filtered = filter_empty_events(&converted);
                         if !filtered.is_empty() {
-                            return Ok(Bytes::from(filtered));
+                            output.extend_from_slice(filtered.as_bytes());
+                        } else {
+                            // prism 无输出时用硬编码兜底
+                            output.extend_from_slice(
+                                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                                    .as_bytes(),
+                            );
                         }
-                        // prism 无输出时用硬编码兜底
-                        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
                     }
                     Err(_) => {
-                        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                        output.extend_from_slice(
+                            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+                                .as_bytes(),
+                        );
                     }
                 }
             }
             "responses" => {
-                // 批量转换累积的全部事件，让解码器保持状态
-                if self.accumulated.is_empty() {
-                    return Ok(Bytes::new());
-                }
-                match prism_wasm::convert_stream(&self.source, &self.accumulated, &self.target) {
-                    Ok(converted) => {
-                        let filtered = filter_empty_events(&converted);
-                        if !filtered.is_empty() {
-                            return Ok(Bytes::from(filtered));
-                        }
-                        return Ok(Bytes::new());
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            source = %self.source,
-                            target = %self.target,
-                            error = %e,
-                            "Responses 批量转换失败"
-                        );
-                        return Ok(Bytes::new());
-                    }
-                }
+                // 增量模式：累积内容（含 finish_reason → response.completed）已在
+                // 上方 flush_incremental 中下发，无需额外收尾事件
             }
             _ => {
                 // 未知协议：尝试用 prism 冲刷
@@ -815,22 +905,24 @@ impl SseConverter {
                 match prism_wasm::convert_stream_event(&self.source, done_event, &self.target) {
                     Ok(converted) => {
                         let filtered = filter_empty_events(&converted);
-                        return Ok(Bytes::from(filtered));
+                        if !filtered.is_empty() {
+                            output.extend_from_slice(filtered.as_bytes());
+                        }
                     }
-                    Err(_) => ""
+                    Err(_) => {}
                 }
             }
         };
 
-        if closing.is_empty() {
+        if output.is_empty() {
             return Ok(Bytes::new());
         }
         tracing::debug!(
             target = %self.target,
-            closing_preview = %closing.chars().take(300).collect::<String>(),
+            closing_preview = %String::from_utf8_lossy(&output).chars().take(300).collect::<String>(),
             "生成目标协议收尾事件"
         );
-        Ok(Bytes::from(closing))
+        Ok(Bytes::from(output))
     }
 }
 
@@ -1067,7 +1159,7 @@ mod tests {
 
     #[test]
     fn test_sse_converter_openai_to_messages_incremental() {
-        // openai 上游 → messages 下游：逐事件独立转换
+        // openai 上游 → messages 下游：增量模式（小数据累积到 finish() 才统一输出）
         let mut converter = SseConverter::new("messages", "openai");
         let mut all = String::new();
 
@@ -1078,10 +1170,9 @@ mod tests {
             retry: None,
             comment: None,
         };
+        // 单条小事件不触发增量阈值，convert 返回空（累积）
         let out1 = converter.convert(&ev1).expect("convert 1");
-        let s1 = String::from_utf8(out1.to_vec()).unwrap();
-        assert!(s1.contains("Hello"), "s1: {s1}");
-        all.push_str(&s1);
+        all.push_str(&String::from_utf8(out1.to_vec()).unwrap());
 
         let ev2 = SseEvent {
             event: None,
@@ -1107,7 +1198,7 @@ mod tests {
 
     #[test]
     fn test_sse_converter_messages_to_openai() {
-        // messages 上游 → openai 下游：逐事件独立转换
+        // messages 上游 → openai 下游：增量模式（小数据累积到 finish() 才统一输出）
         let mut converter = SseConverter::new("openai", "messages");
         let mut all = String::new();
 
@@ -1139,9 +1230,7 @@ mod tests {
             comment: None,
         };
         let out2 = converter.convert(&ev2).expect("convert 2");
-        let s2 = String::from_utf8(out2.to_vec()).unwrap();
-        all.push_str(&s2);
-        assert!(s2.contains("Hello"), "s2: {s2}");
+        all.push_str(&String::from_utf8(out2.to_vec()).unwrap());
 
         let ev3 = SseEvent {
             event: Some("message_stop".to_string()),
@@ -1153,6 +1242,10 @@ mod tests {
         let out3 = converter.convert(&ev3).expect("convert 3");
         all.push_str(&String::from_utf8(out3.to_vec()).unwrap());
 
+        // 小数据在 finish() 统一输出，断言最终内容而非中间过程
+        let finish_out = converter.finish().expect("finish");
+        all.push_str(&String::from_utf8_lossy(&finish_out));
+
         assert!(all.contains("Hello"), "all: {all}");
         // [DONE] 由 dispatch 统一发送，转换器输出不应包含
         assert!(!all.contains("[DONE]"), "all: {all}");
@@ -1162,7 +1255,6 @@ mod tests {
     fn test_sse_converter_responses_to_messages_finish() {
         // responses 上游 → messages 下游：finish 应直接生成 message_delta + message_stop
         let mut converter = SseConverter::new("messages", "responses");
-
         // 模拟一个内容事件
         let ev = SseEvent {
             event: Some("response.output_text.delta".to_string()),
@@ -1171,8 +1263,8 @@ mod tests {
             retry: None,
             comment: None,
         };
-        let out = converter.convert(&ev).expect("convert");
-        assert!(String::from_utf8_lossy(&out).contains("Hello"));
+        // 单条小事件不触发增量阈值，convert 返回空（累积）
+        let _ = converter.convert(&ev).expect("convert");
 
         // finish 应生成 message_delta + message_stop
         let finish_out = converter.finish().expect("finish");
@@ -1182,6 +1274,135 @@ mod tests {
         assert!(finish_str.contains("stop_reason"), "缺少 stop_reason: {finish_str}");
         // 不应包含 [DONE]（Messages 客户端不识别）
         assert!(!finish_str.contains("[DONE]"), "不应包含 [DONE]: {finish_str}");
+    }
+
+    /// 构造一条 openai chat completion SSE 事件（与上游 Agnes 格式一致）
+    fn openai_chunk(delta: &str, finish_reason: Option<&str>) -> SseEvent {
+        let delta_json = if let Some(fr) = finish_reason {
+            format!(r#"{{"index":0,"delta":{{}},"finish_reason":"{fr}"}}"#)
+        } else if delta.contains("reasoning_content") {
+            format!(r#"{{"index":0,"delta":{delta},"finish_reason":null}}"#)
+        } else {
+            format!(r#"{{"index":0,"delta":{delta},"finish_reason":null}}"#)
+        };
+        SseEvent {
+            event: None,
+            data: Some(format!(
+                r#"{{"id":"chunk-1","object":"chat.completion.chunk","created":1700000000,"model":"agnes-2.5-flash","choices":[{delta_json}]}}"#
+            )),
+            id: None,
+            retry: None,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn test_sse_converter_incremental_prefix_consistency() {
+        // 增量转换的核心假设：多次 convert + finish 的拼接输出
+        // 必须与一次性全量 convert_stream 输出完全一致（前缀 diff 确定性）。
+        // 回归场景：真实日志中 finish() 时 flush_bytes=0，客户端在文本中途截断。
+        let mut events: Vec<SseEvent> = vec![];
+        // role 引导
+        events.push(openai_chunk(r#"{"role":"assistant","content":""}"#, None));
+        // 大量 reasoning_content（超过 INCREMENTAL_FLUSH_THRESHOLD=1024，触发多次增量 flush）
+        for i in 0..20 {
+            events.push(openai_chunk(&format!(r#"{{"reasoning_content":"思考片段{i}内容内容内容"}}"#), None));
+        }
+        // 文本内容
+        for i in 0..10 {
+            events.push(openai_chunk(&format!(r#"{{"content":"正文文本片段{i}内容"}}"#), None));
+        }
+        // 收尾
+        events.push(openai_chunk(r#"{}"#, Some("stop")));
+        events.push(SseEvent {
+            event: None,
+            data: Some(r#"{"id":"chunk-1","object":"chat.completion.chunk","created":1700000000,"model":"agnes-2.5-flash","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":30,"total_tokens":40}}"#.to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        });
+        events.push(SseEvent {
+            event: None,
+            data: Some("[DONE]".to_string()),
+            id: None,
+            retry: None,
+            comment: None,
+        });
+
+        // 一次性全量转换（基准）
+        let full_sse: String = events
+            .iter()
+            .map(|e| e.serialize())
+            .collect::<Vec<_>>()
+            .join("");
+        let baseline_raw =
+            prism_wasm::convert_stream("openai", &full_sse, "responses").expect("baseline");
+        eprintln!("=== prism 原始输出 ===\n{baseline_raw}\n=============================");
+        let baseline = filter_empty_events(&baseline_raw);
+        assert!(baseline.contains("response.completed"), "基准应含 completed");
+
+        // 增量转换：逐个事件 convert + finish
+        let mut converter = SseConverter::new("responses", "openai");
+        let mut incremental = String::new();
+        for ev in &events {
+            if let Ok(bytes) = converter.convert(ev) {
+                incremental.push_str(&String::from_utf8_lossy(&bytes));
+            }
+        }
+        let finish = converter.finish().expect("finish");
+        incremental.push_str(&String::from_utf8_lossy(&finish));
+
+        eprintln!("=== 增量拼接输出 ===\n{incremental}\n====================");
+        eprintln!(
+            "incremental len={} baseline len={}",
+            incremental.len(),
+            baseline.len()
+        );
+        // 打印首个差异位置及前后文
+        let inc_bytes = incremental.as_bytes();
+        let base_bytes = baseline.as_bytes();
+        let diff_len = inc_bytes.len().min(base_bytes.len());
+        let mut diff_at = None;
+        for i in 0..diff_len {
+            if inc_bytes[i] != base_bytes[i] {
+                diff_at = Some(i);
+                break;
+            }
+        }
+        if let Some(i) = diff_at {
+            let start = i.saturating_sub(30);
+            eprintln!(
+                "首个差异 @字节 {i}\n  增量: {:?}\n  基准: {:?}",
+                String::from_utf8_lossy(&inc_bytes[start..(i + 30).min(inc_bytes.len())]),
+                String::from_utf8_lossy(&base_bytes[start..(i + 30).min(base_bytes.len())]),
+            );
+        } else if inc_bytes.len() != base_bytes.len() {
+            eprintln!(
+                "前缀相同但长度不同：增量 {} vs 基准 {}（差异在尾部）",
+                inc_bytes.len(),
+                base_bytes.len()
+            );
+            eprintln!(
+                "  增量尾部: {:?}",
+                String::from_utf8_lossy(&inc_bytes[inc_bytes.len().saturating_sub(60)..])
+            );
+            eprintln!(
+                "  基准尾部: {:?}",
+                String::from_utf8_lossy(&base_bytes[base_bytes.len().saturating_sub(60)..])
+            );
+        }
+
+        // 增量拼接必须与基准完全一致（前缀 diff 确定性）
+        assert_eq!(
+            incremental, baseline,
+            "增量拼接与全量基准不一致：增量输出可能丢失/重复内容"
+        );
+        // 文本内容必须完整
+        for i in 0..10 {
+            let frag = format!("正文文本片段{i}内容");
+            assert!(incremental.contains(&frag), "缺少文本片段 {frag}");
+        }
+        assert!(incremental.contains("response.completed"), "增量输出缺少 completed");
     }
 
     #[test]

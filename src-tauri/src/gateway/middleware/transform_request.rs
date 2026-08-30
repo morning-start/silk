@@ -9,6 +9,11 @@ use crate::protocol::{adapters, prism_wasm};
 ///
 /// 选择出站协议对应的适配器，处理跨协议请求体格式转换，
 /// 将原始请求体（JSON）转为上游请求格式，更新 ctx.request_body。
+///
+/// 幂等性：failover 换 Key 重试时 pipeline 会再次调用本中间件，此时
+/// `request_body` 已是转换后的上游格式（如 responses → openai 的 messages 结构），
+/// 若再次按客户端协议解析会报"缺少 input"等错误。因此首次转换成功后设置
+/// `request_transformed = true`，后续调用直接跳过协议转换、仅重建上游请求。
 pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> {
     let inbound = ctx
         .inbound_protocol
@@ -22,8 +27,16 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
     inject_stream_options(&mut ctx)?;
     inject_claude_default_max_tokens(&mut ctx, &outbound)?;
 
+    if ctx.request_transformed {
+        // 已转换过：跳过协议转换，仅按当前选中的 Key/渠道重建上游请求
+        let request_bytes = Bytes::from(ctx.request_body.to_vec());
+        apply_upstream_request(&mut ctx, &request_bytes, &outbound)?;
+        return Ok(ctx);
+    }
+
     let request_bytes = convert_to_outbound_protocol(&ctx, &inbound, &outbound)?;
     apply_upstream_request(&mut ctx, &request_bytes, &outbound)?;
+    ctx.request_transformed = true;
 
     Ok(ctx)
 }

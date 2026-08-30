@@ -217,6 +217,13 @@ async fn dispatch_with_retries(
                 .await;
             }
             Err(err) => {
+                tracing::warn!(
+                    attempt,
+                    error = %err,
+                    error_debug = ?err,
+                    url = %req_url,
+                    "上游请求发送失败（send 返回错误）"
+                );
                 last_error = Some(err);
             }
         }

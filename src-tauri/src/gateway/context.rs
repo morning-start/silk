@@ -42,15 +42,8 @@ impl GatewayContext {
     ) -> Result<Self, String> {
         // 创建共享的 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
         // 流式客户端基于非流式客户端 clone 后修改超时，避免重复构建连接配置
-        let http_client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
-
-        let http_client_streaming = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|e| format!("创建流式 HTTP 客户端失败: {e}"))?;
+        let http_client = build_http_client()?;
+        let http_client_streaming = build_http_client()?;
 
         let rate_limit_state = {
             let settings_guard = settings.read().await;
@@ -73,6 +66,84 @@ impl GatewayContext {
             rate_limit_state,
         })
     }
+}
+
+// ---------------------------------------------------------------------------
+// HTTP 客户端构建（含系统代理支持）
+// ---------------------------------------------------------------------------
+
+/// 构建共享 HTTP 客户端：自动继承 Windows 系统代理设置。
+///
+/// 背景：用户环境常通过 Clash 等工具配置系统代理（注册表
+/// `Internet Settings` → ProxyEnable/ProxyServer，如 `socks=127.0.0.1:9000`），
+/// 且 DNS 返回 fake-ip 段（如 198.18.x.x）。若 reqwest 不走代理直连，
+/// 会因 DNS 解析到 fake-ip 而连接失败（"dns error 11001 不知道这样的主机"）。
+/// 因此构建客户端时读取注册表系统代理并注入。
+fn build_http_client() -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(proxy) = windows_system_proxy() {
+            builder = builder.proxy(proxy);
+            tracing::info!(proxy = %windows_system_proxy_str().unwrap_or_default(), "HTTP 客户端已启用系统代理");
+        } else {
+            tracing::debug!("未检测到系统代理，HTTP 客户端直连");
+        }
+    }
+    builder
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
+}
+
+/// 读取 Windows 注册表系统代理设置并构建 reqwest Proxy
+#[cfg(target_os = "windows")]
+fn windows_system_proxy() -> Option<reqwest::Proxy> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let settings = hkcu
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+        .ok()?;
+    let proxy_enable: u32 = settings.get_value("ProxyEnable").ok()?;
+    if proxy_enable == 0 {
+        return None;
+    }
+    let proxy_server: String = settings.get_value("ProxyServer").ok()?;
+    if proxy_server.trim().is_empty() {
+        return None;
+    }
+    // 常见格式：`socks=127.0.0.1:9000`、`http=127.0.0.1:7890;https=127.0.0.1:7890`
+    // 或纯 `127.0.0.1:7890`。优先取 socks，其次 http/https。
+    let normalized = if let Some(addr) = proxy_server.split(';').find_map(|part| {
+        let part = part.trim();
+        part.strip_prefix("socks=").map(|a| format!("socks5://{a}"))
+    }) {
+        addr
+    } else if let Some(addr) = proxy_server.split(';').find_map(|part| {
+        let part = part.trim();
+        part.strip_prefix("http=").map(|a| format!("http://{a}"))
+    }) {
+        addr
+    } else if proxy_server.contains("://") {
+        proxy_server.clone()
+    } else {
+        format!("http://{proxy_server}")
+    };
+    reqwest::Proxy::all(&normalized).ok()
+}
+
+/// 读取系统代理字符串（仅用于日志展示）
+#[cfg(target_os = "windows")]
+fn windows_system_proxy_str() -> Option<String> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let settings = hkcu
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
+        .ok()?;
+    let proxy_server: String = settings.get_value("ProxyServer").ok()?;
+    Some(proxy_server)
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +272,8 @@ pub struct RequestContextInner {
     pub total_retry_attempts: u32,
     /// 客户端原始请求是否指定了 stream: true
     pub client_requested_stream: bool,
+    /// 请求体是否已执行过跨协议转换（failover 换 Key 重试时避免重复转换导致 400）
+    pub request_transformed: bool,
 }
 
 /// 请求上下文 — 整个网关管道的核心数据结构
@@ -324,6 +397,7 @@ impl RequestContext {
                 channels_available: Vec::new(),
                 total_retry_attempts: 0,
                 client_requested_stream: false,
+                request_transformed: false,
             },
             response: None,
             stream_complete_rx: None,
