@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::http::{HeaderMap, Method, Uri};
@@ -24,6 +24,8 @@ pub struct GatewayContext {
     pub http_client: reqwest::Client,
     /// 共享的 HTTP 客户端（流式，无超时）
     pub http_client_streaming: reqwest::Client,
+    /// 按 proxy_url 缓存的流式客户端（用户可在设置页为渠道配置代理）
+    pub proxy_clients: Arc<Mutex<HashMap<String, reqwest::Client>>>,
     /// Header 转发配置
     pub header_config: HeaderConfig,
     /// 网关插件列表
@@ -42,8 +44,15 @@ impl GatewayContext {
     ) -> Result<Self, String> {
         // 创建共享的 HTTP 客户端（连接池复用，避免每请求创建新 TLS 连接）
         // 流式客户端基于非流式客户端 clone 后修改超时，避免重复构建连接配置
-        let http_client = build_http_client()?;
-        let http_client_streaming = build_http_client()?;
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+
+        let http_client_streaming = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("创建流式 HTTP 客户端失败: {e}"))?;
 
         let rate_limit_state = {
             let settings_guard = settings.read().await;
@@ -61,89 +70,56 @@ impl GatewayContext {
             log_sender,
             http_client,
             http_client_streaming,
+            proxy_clients: Arc::new(Mutex::new(HashMap::new())),
             header_config: HeaderConfig::default(),
             plugins,
             rate_limit_state,
         })
     }
-}
 
-// ---------------------------------------------------------------------------
-// HTTP 客户端构建（含系统代理支持）
-// ---------------------------------------------------------------------------
-
-/// 构建共享 HTTP 客户端：自动继承 Windows 系统代理设置。
-///
-/// 背景：用户环境常通过 Clash 等工具配置系统代理（注册表
-/// `Internet Settings` → ProxyEnable/ProxyServer，如 `socks=127.0.0.1:9000`），
-/// 且 DNS 返回 fake-ip 段（如 198.18.x.x）。若 reqwest 不走代理直连，
-/// 会因 DNS 解析到 fake-ip 而连接失败（"dns error 11001 不知道这样的主机"）。
-/// 因此构建客户端时读取注册表系统代理并注入。
-fn build_http_client() -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(proxy) = windows_system_proxy() {
-            builder = builder.proxy(proxy);
-            tracing::info!(proxy = %windows_system_proxy_str().unwrap_or_default(), "HTTP 客户端已启用系统代理");
-        } else {
-            tracing::debug!("未检测到系统代理，HTTP 客户端直连");
+    /// 获取流式 HTTP 客户端：渠道配置了代理（provider.proxy_url）时优先使用
+    /// 渠道代理；渠道未配置时回退到全局设置（settings.proxy_url）；都未配置
+    /// 则返回默认直连客户端。
+    ///
+    /// 代理地址由用户在设置页面手动输入（如 `http://127.0.0.1:7890`、
+    /// `socks5://127.0.0.1:9000`），网关不自动注入系统代理。proxy_url 缓存
+    /// 按字符串精确匹配，渠道/全局配置变更后由 lib.rs 重启网关刷新。
+    pub async fn streaming_client_for(
+        &self,
+        provider_proxy: Option<&str>,
+    ) -> Result<reqwest::Client, String> {
+        let proxy_url = match provider_proxy {
+            Some(p) if !p.trim().is_empty() => p.trim().to_string(),
+            _ => {
+                let settings = self.settings.read().await;
+                match settings.proxy_url.as_deref() {
+                    Some(p) if !p.trim().is_empty() => p.trim().to_string(),
+                    _ => return Ok(self.http_client_streaming.clone()),
+                }
+            }
+        };
+        if let Some(client) = self
+            .proxy_clients
+            .lock()
+            .map_err(|e| format!("代理客户端缓存锁失败: {e}"))?
+            .get(&proxy_url)
+        {
+            return Ok(client.clone());
         }
+        let proxy = reqwest::Proxy::all(&proxy_url)
+            .map_err(|e| format!("无效的代理地址 {proxy_url}: {e}"))?;
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .proxy(proxy)
+            .build()
+            .map_err(|e| format!("创建代理 HTTP 客户端失败: {e}"))?;
+        tracing::info!(proxy_url, "为渠道创建代理 HTTP 客户端");
+        self.proxy_clients
+            .lock()
+            .map_err(|e| format!("代理客户端缓存锁失败: {e}"))?
+            .insert(proxy_url, client.clone());
+        Ok(client)
     }
-    builder
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
-}
-
-/// 读取 Windows 注册表系统代理设置并构建 reqwest Proxy
-#[cfg(target_os = "windows")]
-fn windows_system_proxy() -> Option<reqwest::Proxy> {
-    use winreg::enums::HKEY_CURRENT_USER;
-    use winreg::RegKey;
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let settings = hkcu
-        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
-        .ok()?;
-    let proxy_enable: u32 = settings.get_value("ProxyEnable").ok()?;
-    if proxy_enable == 0 {
-        return None;
-    }
-    let proxy_server: String = settings.get_value("ProxyServer").ok()?;
-    if proxy_server.trim().is_empty() {
-        return None;
-    }
-    // 常见格式：`socks=127.0.0.1:9000`、`http=127.0.0.1:7890;https=127.0.0.1:7890`
-    // 或纯 `127.0.0.1:7890`。优先取 socks，其次 http/https。
-    let normalized = if let Some(addr) = proxy_server.split(';').find_map(|part| {
-        let part = part.trim();
-        part.strip_prefix("socks=").map(|a| format!("socks5://{a}"))
-    }) {
-        addr
-    } else if let Some(addr) = proxy_server.split(';').find_map(|part| {
-        let part = part.trim();
-        part.strip_prefix("http=").map(|a| format!("http://{a}"))
-    }) {
-        addr
-    } else if proxy_server.contains("://") {
-        proxy_server.clone()
-    } else {
-        format!("http://{proxy_server}")
-    };
-    reqwest::Proxy::all(&normalized).ok()
-}
-
-/// 读取系统代理字符串（仅用于日志展示）
-#[cfg(target_os = "windows")]
-fn windows_system_proxy_str() -> Option<String> {
-    use winreg::enums::HKEY_CURRENT_USER;
-    use winreg::RegKey;
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let settings = hkcu
-        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings")
-        .ok()?;
-    let proxy_server: String = settings.get_value("ProxyServer").ok()?;
-    Some(proxy_server)
 }
 
 // ---------------------------------------------------------------------------

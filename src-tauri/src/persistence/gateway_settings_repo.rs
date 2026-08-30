@@ -56,6 +56,9 @@ impl GatewaySettingsRepo {
         if let Some(v) = update.rate_limit_max_tokens_per_minute {
             settings.rate_limit_max_tokens_per_minute = v;
         }
+        if let Some(v) = &update.proxy_url {
+            settings.proxy_url = Some(v.clone());
+        }
         if let Some(v) = update.trace_enabled {
             settings.trace_enabled = v;
         }

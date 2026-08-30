@@ -49,8 +49,6 @@ dirs = "5"
 
 # HTTP 客户端（网关转发用，Phase 2 需要）
 reqwest = { version = "0.12", features = ["rustls-tls", "stream", "socks"] }
-[target.'cfg(windows)'.dependencies]
-winreg = "0.52"
 
 # HTTP 服务端（Phase 2 需要）
 axum = { version = "0.7", features = ["macros"] }

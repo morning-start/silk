@@ -64,6 +64,10 @@ pub struct GatewaySettings {
     pub rate_limit_enabled: bool,
     pub rate_limit_max_requests_per_minute: i64,
     pub rate_limit_max_tokens_per_minute: i64,
+    /// 全局默认代理地址（如 `http://127.0.0.1:7890`、`socks5://127.0.0.1:9000`）；
+    /// 渠道未配置自己的代理（provider.proxy_url）时使用。留空表示直连。
+    #[serde(default)]
+    pub proxy_url: Option<String>,
     /// 是否启用 prism 日志追踪（调试用）
     #[serde(default)]
     pub trace_enabled: bool,
@@ -93,6 +97,7 @@ impl Default for GatewaySettings {
             rate_limit_enabled: false,
             rate_limit_max_requests_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_REQUESTS,
             rate_limit_max_tokens_per_minute: defaults::DEFAULT_RATE_LIMIT_MAX_TOKENS,
+            proxy_url: None,
             trace_enabled: false,
             log_level: defaults::default_log_level(),
             file_level: defaults::default_file_log_level(),
@@ -182,6 +187,8 @@ pub struct UpdateGatewaySettings {
     pub rate_limit_enabled: Option<bool>,
     pub rate_limit_max_requests_per_minute: Option<i64>,
     pub rate_limit_max_tokens_per_minute: Option<i64>,
+    /// 全局默认代理地址（渠道未配置代理时使用）
+    pub proxy_url: Option<String>,
     /// 是否启用 prism 日志追踪（调试用）
     pub trace_enabled: Option<bool>,
     /// 全局日志级别

@@ -66,6 +66,7 @@ const formValue = ref({
   close_to_tray: true,
   auto_start_gateway: true,
   default_provider_id: "",
+  proxy_url: "",
 });
 
 async function handleSave() {
@@ -80,6 +81,7 @@ async function handleSave() {
     const payload = {
       ...formValue.value,
       default_provider_id: formValue.value.default_provider_id || null,
+      proxy_url: formValue.value.proxy_url.trim() || null,
     };
     await gatewayStore.updateSettings(payload);
     message.success("设置已保存");
@@ -186,6 +188,7 @@ watch(
         close_to_tray: s.close_to_tray,
         auto_start_gateway: s.auto_start_gateway,
         default_provider_id: s.default_provider_id || "",
+        proxy_url: s.proxy_url || "",
       };
     }
   },
@@ -231,6 +234,14 @@ onMounted(() => {
             <NInputNumber v-model:value="formValue.log_retention_days" :min="1" :max="3650" style="width: 100%" />
           </NFormItem>
         </div>
+        <div class="form-row">
+          <NFormItem label="全局代理" style="flex: 1">
+            <NInput v-model:value="formValue.proxy_url" placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:9000，留空表示直连" />
+          </NFormItem>
+        </div>
+        <NText depth="3" class="settings-help">
+          为所有未单独配置代理的渠道设置默认代理地址；在「渠道管理」中可为单个渠道覆盖此设置。
+        </NText>
       </NForm>
     </NCard>
 

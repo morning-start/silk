@@ -687,8 +687,6 @@ pub struct SseConverter {
     error_count: u64,
     /// 原始 SSE 文本累积缓冲（用于批量转换）
     accumulated: String,
-    /// 已发送的 output_item.added output_index 集合（去重用）
-    seen_output_items: std::collections::HashSet<String>,
     /// 上次增量转换时已下发的输出字节数（前缀 diff 游标）
     last_output_len: usize,
     /// 上次增量转换时的输入累积字节数（阈值判断游标）
@@ -739,7 +737,6 @@ impl SseConverter {
             event_count: 0,
             error_count: 0,
             accumulated: String::new(),
-            seen_output_items: std::collections::HashSet::new(),
             last_output_len: 0,
             last_flushed_input_len: 0,
             ending_seen: false,
@@ -930,41 +927,6 @@ impl SseConverter {
 ///
 /// prism 对 content_block_start 等事件会输出空占位（`\n\n`），需过滤；
 /// `[DONE]` 由 dispatch 统一发送流结束标记，避免重复。
-/// 去重 response.output_item.added 事件
-///
-/// prism 的逐事件转换是无状态的，每次 BlockStart 都会重新生成 output_item.added。
-/// 批量转换时解码器保持状态，但 output_item.added 可能因 block 索引复用而重复。
-/// 此函数按 output_index 去重，只保留首次出现的 output_item.added。
-fn dedup_output_item_added(sse: &str, seen: &mut std::collections::HashSet<String>) -> String {
-    let mut result = String::new();
-    for block in sse.split("\n\n") {
-        if block.trim().is_empty() {
-            continue;
-        }
-        // 检查是否为 output_item.added 事件
-        if block.contains("response.output_item.added") {
-            // 提取 output_index 作为去重 key
-            if let Some(idx_start) = block.find("\"output_index\":") {
-                let idx_str = &block[idx_start + 15..];
-                let key: String = idx_str.chars().take_while(|c| c.is_ascii_digit()).collect();
-                if !key.is_empty() {
-                    if seen.contains(&key) {
-                        continue; // 跳过重复
-                    }
-                    seen.insert(key);
-                }
-            }
-        }
-        if !result.is_empty() {
-            result.push_str("\n\n");
-        }
-        result.push_str(block);
-    }
-    if !result.is_empty() {
-        result.push_str("\n\n");
-    }
-    result
-}
 
 fn filter_empty_events(sse: &str) -> String {
     let blocks: Vec<&str> = sse

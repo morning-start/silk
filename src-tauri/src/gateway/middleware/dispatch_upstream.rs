@@ -28,7 +28,12 @@ pub async fn run(
 
     let upstream_url = build_upstream_url_checked(&ctx, &provider)?;
     let reqwest_method = build_upstream_method(&ctx)?;
-    let upstream_request = build_upstream_request(runtime, &ctx, upstream_url, reqwest_method, &provider)?;
+    // 渠道配置了代理（proxy_url）时使用带代理的客户端，否则默认直连客户端
+    let client = runtime
+        .streaming_client_for(provider.proxy_url.as_deref())
+        .await
+        .map_err(|e| StageError::new(ctx.clone(), GatewayError::Internal(e)))?;
+    let upstream_request = build_upstream_request(&client, &ctx, upstream_url, reqwest_method, &provider)?;
 
     let max_retries = provider.max_retries as u32;
     let client_requested_stream = ctx.client_requested_stream;
@@ -89,13 +94,12 @@ fn build_upstream_method(ctx: &RequestContext) -> Result<reqwest::Method, StageE
 
 /// 构建上游请求（URL + 方法 + Headers）
 fn build_upstream_request(
-    runtime: &GatewayContext,
+    client: &reqwest::Client,
     ctx: &RequestContext,
     upstream_url: reqwest::Url,
     reqwest_method: reqwest::Method,
     provider: &crate::models::Provider,
 ) -> Result<reqwest::RequestBuilder, StageError> {
-    let client = &runtime.http_client_streaming;
     let mut request = client.request(reqwest_method, upstream_url);
 
     // 1. 应用适配器生成的上游请求头（API Key、Content-Type 等）
@@ -439,7 +443,6 @@ async fn run_sse_read_task(
                                 }
                             }
                             ChunkOutcome::End(flush) => {
-                                stream_state.ended = true;
                                 tracing::info!(
                                     end_output_bytes = flush.len(),
                                     end_output_preview = %String::from_utf8_lossy(&flush).chars().take(300).collect::<String>(),

@@ -21,6 +21,8 @@ pub struct GatewaySettingsResponse {
     pub rate_limit_enabled: bool,
     pub rate_limit_max_requests_per_minute: i64,
     pub rate_limit_max_tokens_per_minute: i64,
+    /// 全局默认代理地址（渠道未配置代理时使用）
+    pub proxy_url: Option<String>,
     /// 是否启用 prism 日志追踪（调试用）
     pub trace_enabled: bool,
     /// 全局日志级别
@@ -45,6 +47,8 @@ pub struct UpdateSettingsPayload {
     pub rate_limit_enabled: Option<bool>,
     pub rate_limit_max_requests_per_minute: Option<i64>,
     pub rate_limit_max_tokens_per_minute: Option<i64>,
+    /// 全局默认代理地址（渠道未配置代理时使用）
+    pub proxy_url: Option<String>,
     /// 是否启用 prism 日志追踪（调试用）
     pub trace_enabled: Option<bool>,
     /// 全局日志级别
@@ -97,6 +101,7 @@ pub async fn update(
         rate_limit_enabled: payload.rate_limit_enabled,
         rate_limit_max_requests_per_minute: payload.rate_limit_max_requests_per_minute,
         rate_limit_max_tokens_per_minute: payload.rate_limit_max_tokens_per_minute,
+        proxy_url: payload.proxy_url,
         trace_enabled: payload.trace_enabled,
         log_level: payload.log_level,
         file_level: payload.file_level,
@@ -153,6 +158,7 @@ impl From<GatewaySettings> for GatewaySettingsResponse {
             rate_limit_enabled: s.rate_limit_enabled,
             rate_limit_max_requests_per_minute: s.rate_limit_max_requests_per_minute,
             rate_limit_max_tokens_per_minute: s.rate_limit_max_tokens_per_minute,
+            proxy_url: s.proxy_url,
             trace_enabled: s.trace_enabled,
             log_level: s.log_level,
             file_level: s.file_level,

@@ -527,6 +527,8 @@ async fn read_gateway_settings_row(
             .get::<Option<String>, _>("file_level")
             .unwrap_or_else(|| "debug".to_string()),
         log_modules: std::collections::HashMap::new(),
+        // 后加字段，旧备份里没有，缺失时取默认值
+        proxy_url: None,
     }))
 }
 

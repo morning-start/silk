@@ -28,6 +28,8 @@ pub struct GatewaySettingsInfo {
     pub close_to_tray: bool,
     pub auto_start_gateway: bool,
     pub default_provider_id: Option<String>,
+    /// 全局默认代理地址（渠道未配置代理时使用）
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -204,6 +206,7 @@ impl From<&crate::models::GatewaySettings> for GatewaySettingsInfo {
             close_to_tray: settings.close_to_tray,
             auto_start_gateway: settings.auto_start_gateway,
             default_provider_id: settings.default_provider_id.clone(),
+            proxy_url: settings.proxy_url.clone(),
         }
     }
 }

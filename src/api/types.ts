@@ -15,6 +15,8 @@ export interface GatewaySettings {
   rate_limit_enabled: boolean;
   rate_limit_max_requests_per_minute: number;
   rate_limit_max_tokens_per_minute: number;
+  /** 全局默认代理地址（渠道未配置代理时使用），null 表示直连 */
+  proxy_url: string | null;
 }
 
 export interface GatewayStatus {
