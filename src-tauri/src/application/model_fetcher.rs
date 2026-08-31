@@ -26,19 +26,12 @@ pub struct ProviderModelInfo {
 /// 从远程 Provider 获取模型列表
 ///
 /// 发送 GET /v1/models 请求并解析响应，支持代理和自定义超时。
-/// 内部处理了多种 API 响应格式（OpenAI, SillyTavern 等）。
-/// 端点指向本机网关时直接读本地模型池（不走 HTTP）。
+/// 统一通过 /v1/models 接口处理（本机网关也走 HTTP，不直接读数据库），
+/// 内部处理了多种 API 响应格式（OpenAI, SillyTavern, Gemini, Ollama 等）。
 pub async fn fetch_models(
     payload: FetchModelsPayload,
 ) -> Result<Vec<ProviderModelInfo>, ServiceError> {
     let base_url = normalize_api_base_url(&payload.api_base_url);
-
-    // 端点指向本机网关（默认预设值）→ 本地直查模型池，避免 HTTP 往返
-    if is_local_gateway(&base_url) {
-        tracing::info!("[fetch_provider_models] 端点是本机网关，直接读本地模型池");
-        return list_local_pool_models().await;
-    }
-
     let test_url = format!("{}/v1/models", base_url);
     let timeout_secs = payload.timeout_seconds.unwrap_or(10).clamp(1, 30) as u64;
 
@@ -105,87 +98,6 @@ pub async fn fetch_models(
     }
 
     parse_models_response(&json)
-}
-
-/// 判断端点是否指向本机网关（预设默认值场景：表单端点 = silk 网关地址）
-fn is_local_gateway(base_url: &str) -> bool {
-    let Ok(settings) = crate::models::GatewaySettings::load(
-        crate::get_settings_path().unwrap_or(std::path::Path::new("")),
-    ) else {
-        return false;
-    };
-    let expected = format!("http://{}:{}", settings.bind_host, settings.bind_port);
-    // 兼容 host 归一化：127.0.0.1 / localhost / [::1]
-    let norm = |h: &str| h.replace("127.0.0.1", "localhost").replace("[::1]", "localhost");
-    let base_norm = norm(base_url.trim_end_matches('/'));
-    let expect_norm = norm(&expected);
-    base_norm == expect_norm
-}
-
-/// 直接读本地模型池：`/v1/models` 内容（模型池 + 穿透渠道）+ 补充全部启用
-/// 渠道的 models 列（含非穿透渠道——预设选模型选的是自己渠道的模型），按 id 去重。
-/// 与 `/v1/models` 接口的语义区分：接口只暴露可路由清单（穿透渠道），
-/// 预设表单「获取模型」需要看到用户配置过的全部模型。
-async fn list_local_pool_models() -> Result<Vec<ProviderModelInfo>, ServiceError> {
-    let pool = match crate::error::require_db() {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::error!("[fetch_provider_models] 本地模型池查询失败（数据库未就绪）: {e}");
-            return Err(e);
-        }
-    };
-
-    // ① /v1/models 内容：模型池 + 穿透渠道
-    let items = crate::application::models_listing::list_all_models().await?;
-    let mut result: Vec<ProviderModelInfo> = items
-        .iter()
-        .map(|item| ProviderModelInfo {
-            id: item.id.clone(),
-            object: Some(item.object.clone()),
-            created: Some(item.created),
-            owned_by: Some(item.owned_by.clone()),
-            supported_endpoint_types: Vec::new(),
-        })
-        .collect();
-
-    // ② 补充全部启用渠道的 models 列（含非穿透渠道），按 id 去重
-    let mut seen: std::collections::HashSet<String> =
-        result.iter().map(|m| m.id.clone()).collect();
-    match crate::persistence::ProviderRepo::find_enabled(pool).await {
-        Ok(providers) => {
-            for provider in providers {
-                for model_id in provider.models_vec() {
-                    if seen.insert(model_id.clone()) {
-                        result.push(ProviderModelInfo {
-                            id: model_id,
-                            object: Some("model".to_string()),
-                            created: None,
-                            owned_by: Some(provider.name.clone()),
-                            supported_endpoint_types: Vec::new(),
-                        });
-                    }
-                }
-            }
-        }
-        Err(e) => {
-            tracing::warn!("[fetch_provider_models] 查询渠道模型失败: {e}");
-        }
-    }
-
-    if result.is_empty() {
-        tracing::warn!("[fetch_provider_models] 本地模型池为空：无模型映射、穿透渠道或启用渠道模型");
-        return Err(ServiceError::BadRequest {
-            message: "本机模型池为空：请先在「渠道 / 模型」页添加渠道并拉取模型，或创建模型映射".to_string(),
-            code: None,
-        });
-    }
-    result.sort_by(|a, b| a.id.cmp(&b.id));
-    tracing::info!(
-        "[fetch_provider_models] 本地模型池共 {} 个模型（含 {} 个渠道模型）",
-        result.len(),
-        result.len() - items.len()
-    );
-    Ok(result)
 }
 
 /// 从响应 JSON 解析模型列表（纯函数，便于单测）。
@@ -330,35 +242,5 @@ mod tests {
     fn missing_container_reports_missing_field() {
         let err = parse(r#"{"error":"unauthorized"}"#).unwrap_err();
         assert!(err.to_string().contains("data/models"), "错误应指出缺少模型列表字段: {err}");
-    }
-
-    // ---- 本机网关判定（纯 host/port 匹配逻辑）----
-
-    #[test]
-    fn local_gateway_matches_default_endpoint() {
-        // 与 fetch_models 的 normalize 一致：127.0.0.1:1877/v1 → http://127.0.0.1:1877
-        let normalized = crate::application::provider_service::normalize_api_base_url(
-            "http://127.0.0.1:1877/v1",
-        );
-        assert_eq!(normalized, "http://127.0.0.1:1877");
-        // host 归一化后与网关设置（127.0.0.1:1877）一致
-        assert_eq!(
-            normalize_host(&normalized),
-            normalize_host("http://localhost:1877")
-        );
-    }
-
-    #[test]
-    fn remote_endpoint_is_not_local_gateway() {
-        assert_ne!(
-            normalize_host("http://api.example.com:443"),
-            normalize_host("http://localhost:1877")
-        );
-    }
-
-    fn normalize_host(h: &str) -> String {
-        h.trim_end_matches('/')
-            .replace("127.0.0.1", "localhost")
-            .replace("[::1]", "localhost")
     }
 }
