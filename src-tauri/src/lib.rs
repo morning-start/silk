@@ -326,19 +326,10 @@ pub fn run() {
             commands::model_mappings::create_model_mapping,
             commands::model_mappings::update_model_mapping,
             commands::model_mappings::delete_model_mapping,
+            commands::model_mappings::list_all_models,
             // 网关 Key 管理
             commands::gateway_keys::get_builtin_gateway_key,
             commands::gateway_keys::reset_builtin_gateway_key,
-            // Profile 管理
-            commands::profiles::list_profiles,
-            commands::profiles::get_profile,
-            commands::profiles::create_profile,
-            commands::profiles::update_profile,
-            commands::profiles::delete_profile,
-            commands::profiles::switch_profile,
-            commands::profiles::get_common_snippet,
-            commands::profiles::set_common_snippet,
-            commands::profiles::list_all_models,
             // 自动检测
             commands::discovery::detect_installed_ai_apps,
             // 预置配置

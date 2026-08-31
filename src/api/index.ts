@@ -8,7 +8,6 @@ import { providersApi } from "./providers";
 import { logsApi } from "./logs";
 import { statsApi } from "./stats";
 import { modelMappingsApi } from "./model-mappings";
-import { profilesApi } from "./profiles";
 import { configApi } from "./config";
 import type { GatewaySettings } from "./types";
 
@@ -31,11 +30,6 @@ export type {
   NewMappingChannel,
   ModelMapping,
   GatewayKey,
-  Profile,
-  AgentType,
-  CreateProfilePayload,
-  UpdateProfilePayload,
-  SwitchResult,
   ModelListingItem,
   FileOperationResponse,
 } from "./types";
@@ -93,16 +87,6 @@ export const api = {
   importAppConfig: configApi.importConfig,
   backupDatabase: configApi.backupDatabase,
   restoreDatabase: configApi.restoreDatabase,
-
-  // Profiles
-  listProfiles: profilesApi.list,
-  getProfile: profilesApi.get,
-  createProfile: profilesApi.create,
-  updateProfile: profilesApi.update,
-  deleteProfile: profilesApi.remove,
-  switchProfile: profilesApi.switch,
-  getCommonSnippet: profilesApi.getCommonSnippet,
-  setCommonSnippet: profilesApi.setCommonSnippet,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -114,5 +98,4 @@ export { providersApi } from "./providers";
 export { logsApi } from "./logs";
 export { statsApi } from "./stats";
 export { modelMappingsApi } from "./model-mappings";
-export { profilesApi } from "./profiles";
 export { configApi } from "./config";

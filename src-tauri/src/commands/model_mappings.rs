@@ -5,7 +5,16 @@ use crate::application::model_mapping_service as mms;
 use crate::application::model_mapping_service::{
     CreateModelMappingPayload, ModelMappingResponse, UpdateModelMappingPayload,
 };
+use crate::application::models_listing::ModelListingItem;
 use crate::AppState;
+
+/// 全量模型列表（模型池 + 渠道模型，供前端下拉使用）
+#[tauri::command]
+pub async fn list_all_models() -> Result<Vec<ModelListingItem>, String> {
+    crate::application::models_listing::list_all_models()
+        .await
+        .map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 pub async fn list_model_mappings(

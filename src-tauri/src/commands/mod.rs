@@ -4,7 +4,6 @@ pub mod gateway;
 pub mod gateway_keys;
 pub mod logs;
 pub mod model_mappings;
-pub mod profiles;
 pub mod providers;
 pub mod settings;
 pub mod stats;
@@ -26,9 +25,6 @@ pub use crate::application::model_mapping_service::{
     CreateModelMappingPayload, ModelMappingResponse, UpdateModelMappingPayload,
 };
 pub use crate::application::models_listing::ModelListingItem;
-pub use crate::application::profile_service::{
-    CreateProfilePayload, ProfileResponse, SwitchResult, UpdateProfilePayload,
-};
 pub use crate::application::stats_service::{
     DashboardStatsResponse, HourlyStatsResponse, ProviderStatsResponse,
 };

@@ -1,4 +1,3 @@
-pub mod common_config_snippet_repo;
 pub mod config_transfer_repo;
 pub mod defaults;
 pub mod gateway_settings_repo;
@@ -6,17 +5,14 @@ pub mod log_extra_token_repo;
 pub mod log_repo;
 pub mod lookup_cache_repo;
 pub mod model_mapping_repo;
-pub mod profile_repo;
 pub mod provider_repo;
 pub mod stats_repo;
 
-pub use common_config_snippet_repo::{CommonConfigSnippet, CommonConfigSnippetRepo};
 pub use config_transfer_repo::ConfigTransferRepo;
 pub use gateway_settings_repo::GatewaySettingsRepo;
 pub use log_extra_token_repo::LogExtraTokenRepo;
 pub use log_repo::LogRepo;
 pub use lookup_cache_repo::LookupCacheRepo;
 pub use model_mapping_repo::ModelMappingRepo;
-pub use profile_repo::ProfileRepo;
 pub use provider_repo::ProviderRepo;
 pub use stats_repo::StatsRepo;

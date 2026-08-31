@@ -189,30 +189,10 @@ export interface GatewayKey {
 }
 
 // ---------------------------------------------------------------------------
-// Profile 类型
+// 模型列表
 // ---------------------------------------------------------------------------
 
-export type AgentType = "claude_code" | "codex" | "gemini_cli" | "opencode" | "hermes";
-
-export interface Profile {
-  id: string;
-  name: string;
-  agent_type: AgentType;
-  config_json: string;
-  is_active: boolean;
-  sort_index?: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateProfilePayload {
-  agent_type: AgentType;
-  name: string;
-  config_json: string;
-  sort_index?: number;
-}
-
-export interface UpdateProfilePayload {
+export interface ModelListingItem {
   name?: string;
   config_json?: string;
   sort_index?: number;
