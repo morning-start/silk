@@ -824,3 +824,132 @@ pub struct SwitchResult {
     pub warnings: Vec<String>,
     pub requires_restart: bool,
 }
+
+// ---------------------------------------------------------------------------
+// 测试
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn temp_home(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("silk-profile-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // ---- validate_agent_schema ----
+
+    #[test]
+    fn schema_codex_requires_model_and_wire_api() {
+        // 缺 model
+        let err = validate_agent_schema("codex", "wire_api = \"responses\"\n", ConfigFormat::Toml).unwrap_err();
+        assert!(err.to_string().contains("model"));
+
+        // 缺 wire_api
+        let err = validate_agent_schema("codex", "model = \"gpt-5\"\n", ConfigFormat::Toml).unwrap_err();
+        assert!(err.to_string().contains("wire_api"));
+
+        // 合法
+        validate_agent_schema(
+            "codex",
+            "model = \"gpt-5\"\nmodel_provider = \"custom\"\nwire_api = \"responses\"\n",
+            ConfigFormat::Toml,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn schema_gemini_requires_env_key() {
+        let err = validate_agent_schema("gemini_cli", "{}", ConfigFormat::Json).unwrap_err();
+        assert!(err.to_string().contains("env 键"));
+
+        validate_agent_schema("gemini_cli", "{\"GEMINI_MODEL\": \"gemini-2.5-pro\"}", ConfigFormat::Json).unwrap();
+    }
+
+    #[test]
+    fn schema_opencode_hermes_require_provider_id() {
+        let err = validate_agent_schema("opencode", "{}", ConfigFormat::Json).unwrap_err();
+        assert!(err.to_string().contains("_silk_provider_id"));
+
+        let err = validate_agent_schema(
+            "hermes",
+            "base_url: http://127.0.0.1:1877/v1\n",
+            ConfigFormat::Yaml,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("_silk_provider_id"));
+
+        validate_agent_schema(
+            "opencode",
+            "{\"_silk_provider_id\": \"daily\", \"enabled_models\": {}}",
+            ConfigFormat::Json,
+        )
+        .unwrap();
+    }
+
+    // ---- CodexWriter::write_live ----
+
+    #[tokio::test]
+    async fn codex_writer_builds_model_providers_table() {
+        let home = temp_home("codex-table");
+        let writer = CodexWriter::new();
+        let cfg = json!({
+            "model": "gpt-5",
+            "model_provider": "silk",
+            "wire_api": "responses",
+            "base_url": "http://127.0.0.1:1877/v1",
+            "api_key": "sk-silk-test"
+        });
+        writer.write_live(&home, &cfg).await.unwrap();
+
+        let text = std::fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+        let doc: serde_json::Value = toml::from_str(&text).unwrap();
+        let entry = &doc["model_providers"]["silk"];
+        assert_eq!(entry["name"].as_str(), Some("silk"));
+        assert_eq!(entry["base_url"].as_str(), Some("http://127.0.0.1:1877/v1"));
+        assert_eq!(entry["wire_api"].as_str(), Some("responses"));
+        assert_eq!(doc["model"].as_str(), Some("gpt-5"));
+        assert_eq!(doc["model_provider"].as_str(), Some("silk"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn codex_writer_openai_uses_openai_base_url() {
+        let home = temp_home("codex-openai");
+        let writer = CodexWriter::new();
+        let cfg = json!({
+            "model": "gpt-5",
+            "model_provider": "openai",
+            "wire_api": "responses",
+            "base_url": "http://127.0.0.1:1877/v1"
+        });
+        writer.write_live(&home, &cfg).await.unwrap();
+
+        let text = std::fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+        let doc: serde_json::Value = toml::from_str(&text).unwrap();
+        assert_eq!(doc["openai_base_url"].as_str(), Some("http://127.0.0.1:1877/v1"));
+        assert!(doc.get("model_providers").is_none(), "内置 openai 不应建 model_providers 表");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test]
+    async fn codex_writer_rejects_reserved_ollama() {
+        let home = temp_home("codex-ollama");
+        let writer = CodexWriter::new();
+        let cfg = json!({
+            "model": "llama3",
+            "model_provider": "ollama",
+            "wire_api": "chat",
+            "base_url": "http://127.0.0.1:1877/v1"
+        });
+        let err = writer.write_live(&home, &cfg).await.unwrap_err();
+        assert!(err.contains("ollama"));
+        // 不应写入任何文件
+        assert!(!home.join(".codex/config.toml").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+}
