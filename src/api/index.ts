@@ -8,6 +8,7 @@ import { providersApi } from "./providers";
 import { logsApi } from "./logs";
 import { statsApi } from "./stats";
 import { modelMappingsApi } from "./model-mappings";
+import { presetsApi } from "./presets";
 import { configApi } from "./config";
 import type { GatewaySettings } from "./types";
 
@@ -31,6 +32,11 @@ export type {
   ModelMapping,
   GatewayKey,
   ModelListingItem,
+  AgentTypeInfo,
+  Preset,
+  NewPresetPayload,
+  UpdatePresetPayload,
+  PresetSwitchResult,
   FileOperationResponse,
 } from "./types";
 
@@ -87,6 +93,15 @@ export const api = {
   importAppConfig: configApi.importConfig,
   backupDatabase: configApi.backupDatabase,
   restoreDatabase: configApi.restoreDatabase,
+
+  // Presets（cc-switch 复刻）
+  listPresets: presetsApi.list,
+  getPreset: presetsApi.get,
+  createPreset: presetsApi.create,
+  updatePreset: presetsApi.update,
+  deletePreset: presetsApi.remove,
+  switchPreset: presetsApi.switch,
+  listAgentTypes: presetsApi.listAgentTypes,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -98,4 +113,5 @@ export { providersApi } from "./providers";
 export { logsApi } from "./logs";
 export { statsApi } from "./stats";
 export { modelMappingsApi } from "./model-mappings";
+export { presetsApi } from "./presets";
 export { configApi } from "./config";

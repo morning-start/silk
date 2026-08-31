@@ -21,6 +21,12 @@ const routes = [
     meta: { title: "模型" },
   },
   {
+    path: "/presets",
+    name: "presets",
+    component: () => import("../views/PresetsView.vue"),
+    meta: { title: "预设" },
+  },
+  {
     path: "/logs",
     name: "logs",
     component: () => import("../views/LogsView.vue"),

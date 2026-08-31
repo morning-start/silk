@@ -189,6 +189,51 @@ export interface GatewayKey {
 }
 
 // ---------------------------------------------------------------------------
+// 预设管理（cc-switch 复刻）
+// ---------------------------------------------------------------------------
+
+export interface AgentTypeInfo {
+  id: string;
+  name: string;
+}
+
+export interface Preset {
+  id: string;
+  name: string;
+  agent_type: string;
+  settings_config: Record<string, unknown>;
+  category?: string | null;
+  notes?: string | null;
+  sort_index?: number | null;
+  is_active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface NewPresetPayload {
+  name: string;
+  agent_type: string;
+  settings_config: Record<string, unknown>;
+  category?: string | null;
+  notes?: string | null;
+  sort_index?: number | null;
+}
+
+export interface UpdatePresetPayload {
+  name?: string;
+  settings_config?: Record<string, unknown>;
+  category?: string | null;
+  notes?: string | null;
+  sort_index?: number | null;
+}
+
+export interface PresetSwitchResult {
+  success: boolean;
+  warnings: string[];
+  requires_restart: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // 模型列表
 // ---------------------------------------------------------------------------
 

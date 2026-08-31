@@ -335,6 +335,14 @@ pub fn run() {
             // 预置配置
             commands::discovery::get_preset_providers,
             commands::discovery::get_preset_provider_by_id,
+            // 预设管理（cc-switch 复刻）
+            commands::presets::list_presets,
+            commands::presets::get_preset,
+            commands::presets::create_preset,
+            commands::presets::update_preset,
+            commands::presets::delete_preset,
+            commands::presets::switch_preset,
+            commands::presets::list_agent_types,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
