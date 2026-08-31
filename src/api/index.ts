@@ -37,6 +37,8 @@ export type {
   UpdateProfilePayload,
   SwitchResult,
   ModelListingItem,
+  AgentLiveStatus,
+  ImportableProvider,
   FileOperationResponse,
 } from "./types";
 
@@ -104,6 +106,7 @@ export const api = {
   getCommonSnippet: profilesApi.getCommonSnippet,
   setCommonSnippet: profilesApi.setCommonSnippet,
   importLiveConfig: profilesApi.importLiveConfig,
+  listImportableProviders: profilesApi.listImportableProviders,
   getAgentLiveStatus: profilesApi.getAgentLiveStatus,
 } as const;
 

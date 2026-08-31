@@ -9,8 +9,16 @@ import {
   useDialog,
   NModal,
 } from "naive-ui";
-import { api, type Profile, type AgentType, type SwitchResult, type ModelListingItem } from "../api";
+import {
+  api,
+  type Profile,
+  type AgentType,
+  type SwitchResult,
+  type ModelListingItem,
+  type ImportableProvider,
+} from "../api";
 import McpEditor from "../components/McpEditor.vue";
+import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
 
 // 从 config_json 解析 mcpServers（编辑回显用）
 function parseMcp(configJson: string): Record<string, { url: string }> {
@@ -95,16 +103,52 @@ async function loadLiveStatus(agentType: AgentType) {
   }
 }
 
-// 从现有 live 配置导入为 Profile
+// 从现有 live 配置导入为 Profile（多 provider 时弹窗选择）
+const importModal = ref(false);
+const importCandidates = ref<ImportableProvider[]>([]);
+const importSelectedKey = ref<string | null>(null);
+
 async function importFromLive() {
+  const agentType = activeTab.value;
+  // 先列出可导入候选：仅 opencode/hermes 可能是多个
+  let candidates: ImportableProvider[] = [];
   try {
-    const profile = await api.importLiveConfig(activeTab.value);
+    candidates = await api.listImportableProviders(agentType);
+  } catch {
+    candidates = [];
+  }
+  if (candidates.length > 1) {
+    importCandidates.value = candidates;
+    importSelectedKey.value = candidates[0].key;
+    importModal.value = true;
+    return;
+  }
+  await doImport(agentType, candidates.length === 1 ? candidates[0].key : null);
+}
+
+async function doImport(agentType: AgentType, providerKey: string | null) {
+  try {
+    const profile = await api.importLiveConfig(agentType, providerKey);
     message.success(`已从 live 配置导入「${profile.name}」`);
-    await loadProfiles(activeTab.value);
+    await loadProfiles(agentType);
   } catch (e: any) {
     message.error(e?.message || "导入失败");
   }
 }
+
+async function confirmImport() {
+  importModal.value = false;
+  await doImport(activeTab.value, importSelectedKey.value);
+}
+
+// 模型池/渠道变更联动：providers（渠道）与 groups（模型池）数据变更时
+// 刷新模型列表与 Profile 状态，使已激活 profile 的模型引用提示自动更新
+watch(
+  [useDataChangeSignal("providers"), useDataChangeSignal("groups")],
+  () => {
+    loadData();
+  }
+);
 
 onMounted(loadData);
 
@@ -497,6 +541,15 @@ async function saveCodexConfig() {
   }
   if (!codexForm.value.model.trim()) {
     message.warning("请选择模型");
+    return;
+  }
+  // Codex 保留 id 拦截：覆盖内置 provider 会导致整份配置拒载（0.148 起）
+  const reserved = ["ollama", "lmstudio"];
+  const provider = codexForm.value.model_provider.trim();
+  if (reserved.includes(provider)) {
+    message.error(
+      `Codex 禁止覆盖内置 provider \`${provider}\`（0.148 起会拒绝加载整份配置）；请改用自定义 provider id`
+    );
     return;
   }
   const configJson = buildCodexToml(codexForm.value, codexFormMcp.value);
@@ -1400,10 +1453,82 @@ function deleteHermes(profile: Profile) {
         </div>
       </div>
     </NModal>
+
+    <!-- ================================================================ -->
+    <!-- 导入选择弹窗（opencode/hermes 多 provider 时选择导入哪个）        -->
+    <!-- ================================================================ -->
+    <NModal v-model:show="importModal" preset="card" title="选择要导入的 Provider" style="width: 480px">
+      <div class="import-candidate-list">
+        <div
+          v-for="c in importCandidates"
+          :key="c.key"
+          class="import-candidate"
+          :class="{ selected: importSelectedKey === c.key }"
+          @click="importSelectedKey = c.key"
+        >
+          <span class="import-candidate-key">{{ c.key }}</span>
+          <span class="import-candidate-summary">{{ c.summary }}</span>
+        </div>
+      </div>
+      <template #footer>
+        <div class="import-modal-actions">
+          <NButton size="small" @click="importModal = false">取消</NButton>
+          <NButton size="small" type="primary" :disabled="!importSelectedKey" @click="confirmImport">
+            导入
+          </NButton>
+        </div>
+      </template>
+    </NModal>
   </div>
 </template>
 
 <style scoped>
+/* ===== 导入选择弹窗 ===== */
+.import-candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.import-candidate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.import-candidate:hover {
+  background: var(--hover-bg, #f1f5f9);
+}
+
+.import-candidate.selected {
+  border-color: #18a058;
+  background: rgba(24, 160, 88, 0.06);
+}
+
+.import-candidate-key {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.import-candidate-summary {
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .profiles-page {
   width: 100%;
 }
