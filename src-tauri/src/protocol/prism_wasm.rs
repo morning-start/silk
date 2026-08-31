@@ -585,6 +585,18 @@ pub fn convert_stream_trace(
 mod tests {
     use super::*;
 
+    /// 串行锁：PRISM 为进程级单例（LazyLock + Mutex），日志缓冲被多个测试共享。
+    /// init_log/log_pos 相关测试必须互斥执行，否则并行的 init_log 会重置
+    /// 同一实例的日志位置，导致 log position should advance 断言偶发失败（TD-001）。
+    static LOG_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+    fn log_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        LOG_TEST_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn test_map_provider() {
         assert_eq!(map_provider("openai"), Some("openai"));
@@ -794,6 +806,7 @@ mod tests {
 
     #[test]
     fn test_init_log_and_log_pos() {
+        let _guard = log_test_guard();
         let log_buf = init_log(8192).expect("init_log");
         assert!(log_buf > 0, "log buffer address should be non-zero");
 
@@ -803,6 +816,7 @@ mod tests {
 
     #[test]
     fn test_convert_request_trace() {
+        let _guard = log_test_guard();
         let log_buf = init_log(8192).expect("init_log");
         let pos_before = log_pos(log_buf).expect("log_pos before");
 
