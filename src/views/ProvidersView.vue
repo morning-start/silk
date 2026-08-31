@@ -308,8 +308,9 @@ async function handleSubmit() {
     }
 
     closeModal();
-  } catch {
-    // error handled by store
+  } catch (e: any) {
+    // 保存失败必须可见——否则用户以为已保存（如「模型穿透」开关未真正生效）
+    message.error(e?.message || "保存失败，请重试");
   }
 }
 
