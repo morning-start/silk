@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from "vue";
 import { NButton, NInput, NTag, NModal, useMessage, useDialog } from "naive-ui";
 import { api, type Preset, type AgentTypeInfo } from "../api";
+import { formSpecFor, type HarnessFormSpec } from "../config/harnessForms";
 
 const message = useMessage();
 const dialog = useDialog();
@@ -18,7 +19,7 @@ const loading = ref(false);
 const showModal = ref(false);
 const editingId = ref<string | null>(null);
 const formName = ref("");
-const formSettings = ref("");
+const formValues = ref<Record<string, unknown>>({});
 
 // 初始化：加载 agent 类型，默认选第一个
 async function loadAgentTypes() {
@@ -45,20 +46,23 @@ async function loadPresets() {
 
 const currentPreset = computed(() => presets.value.find((p) => p.is_active) || null);
 
-const tabLabel = (id: string) =>
-  agentTypes.value.find((t) => t.id === id)?.name || id;
+const tabLabel = (id: string) => agentTypes.value.find((t) => t.id === id)?.name || id;
+
+// 当前 agent 的表单规格（结构化字段）
+const spec = computed<HarnessFormSpec | undefined>(() => formSpecFor(activeTab.value));
 
 function openAdd() {
   editingId.value = null;
   formName.value = "";
-  formSettings.value = "";
+  formValues.value = {};
   showModal.value = true;
 }
 
 function openEdit(preset: Preset) {
   editingId.value = preset.id;
   formName.value = preset.name;
-  formSettings.value = JSON.stringify(preset.settings_config, null, 2);
+  const s = formSpecFor(preset.agent_type);
+  formValues.value = s ? s.fromSettings(preset.settings_config) : {};
   showModal.value = true;
 }
 
@@ -67,13 +71,12 @@ async function save() {
     message.warning("请输入预设名称");
     return;
   }
-  let settings: Record<string, unknown>;
-  try {
-    settings = JSON.parse(formSettings.value || "{}");
-  } catch {
-    message.error("配置 JSON 格式错误");
+  const s = spec.value;
+  if (!s) {
+    message.error("该 Agent 类型不支持结构化表单");
     return;
   }
+  const settings = s.toSettings(formValues.value);
   try {
     if (editingId.value) {
       await api.updatePreset(editingId.value, {
@@ -193,16 +196,52 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- 新建/编辑弹窗 -->
+    <!-- 新建/编辑弹窗（结构化表单，替代手填 JSON） -->
     <NModal v-model:show="showModal" preset="card" :title="editingId ? '编辑预设' : '新建预设'" style="width: 560px">
       <div class="form-item">
         <label>名称</label>
         <NInput v-model:value="formName" placeholder="预设名称" />
       </div>
-      <div class="form-item">
-        <label>配置（JSON，切换时注入网关信息后写入 live）</label>
-        <NInput v-model:value="formSettings" type="textarea" :rows="12" placeholder='{"model": "gpt-5.6-sol"}' />
-      </div>
+
+      <!-- 结构化字段（按 harness 规格渲染） -->
+      <template v-if="spec">
+        <div
+          v-for="f in spec.fields"
+          :key="f.key"
+          class="form-item"
+        >
+          <label>{{ f.label }}</label>
+
+          <!-- 角色模型组（claude_code：sonnet/opus/fable/haiku） -->
+          <template v-if="f.type === 'model-roles'">
+            <div class="role-row" v-for="role in f.roles || []" :key="role">
+              <span class="role-label">{{ role }}</span>
+              <NInput
+                v-model:value="((formValues[f.key] as Record<string, string>) || {})[role]"
+                :placeholder="`${role} 模型 id`"
+              />
+            </div>
+          </template>
+
+          <!-- 密码框 -->
+          <NInput
+            v-else-if="f.type === 'secret'"
+            v-model:value="formValues[f.key] as string"
+            type="password"
+            show-password-on="click"
+            :placeholder="f.placeholder"
+          />
+
+          <!-- 普通文本框 -->
+          <NInput
+            v-else
+            v-model:value="formValues[f.key] as string"
+            :placeholder="f.placeholder"
+          />
+        </div>
+      </template>
+      <p v-else class="empty-desc">该 Agent 类型暂无结构化表单</p>
+
       <template #footer>
         <div class="modal-actions">
           <NButton size="small" @click="showModal = false">取消</NButton>
@@ -321,6 +360,20 @@ onMounted(async () => {
   display: block;
   font-size: 13px;
   margin-bottom: 6px;
+  color: var(--muted, #64748b);
+}
+
+.role-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.role-label {
+  width: 70px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--muted, #64748b);
 }
 
