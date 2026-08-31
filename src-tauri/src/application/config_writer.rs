@@ -266,6 +266,27 @@ pub async fn merge_into_live_async(
     write_from_value_async(live_path, &live).await
 }
 
+/// 与 `merge_into_live_async` 相同，但支持把 profile 的 `mcpServers` 段合并到
+/// live 配置的指定键（如 `mcp_servers` / `mcp` / `mcpServers`），避免 mcpServers
+/// 落入 provider 条目或 env 子对象内部。
+pub async fn merge_into_live_async_with_mcp(
+    live_path: &Path,
+    profile_config: &serde_json::Value,
+    strategy: MergeStrategy,
+    mcp_key: Option<&str>,
+) -> Result<(), String> {
+    let mut live = read_to_value_async(live_path).await?;
+    let mut cfg = profile_config.clone();
+
+    if let Some(key) = mcp_key {
+        apply_mcp_servers(&mut live, &mut cfg, key);
+    }
+
+    apply_merge(&mut live, &cfg, strategy);
+
+    write_from_value_async(live_path, &live).await
+}
+
 fn apply_merge(live: &mut serde_json::Value, profile_config: &serde_json::Value, strategy: MergeStrategy) {
     match strategy {
         MergeStrategy::TopLevel => {
@@ -383,6 +404,38 @@ fn apply_merge(live: &mut serde_json::Value, profile_config: &serde_json::Value,
             }
         }
     }
+}
+
+/// 从 profile 配置中取出 mcpServers 并合并到 live 配置的指定段（如 `mcp_servers`）。
+///
+/// - 会从 `profile_config` 中**移除** `mcpServers` 键，避免它落入 provider 条目内部
+///   （OpenCode/Hermes 累加模式）或 env 子对象（Gemini）。
+/// - 目标段不存在时创建；已有服务器按 name 深度合并（保留既有字段）。
+pub fn apply_mcp_servers(
+    live: &mut serde_json::Value,
+    profile_config: &mut serde_json::Value,
+    mcp_key: &str,
+) {
+    let servers = profile_config
+        .as_object_mut()
+        .and_then(|o| o.remove("mcpServers"));
+    let Some(servers) = servers else {
+        return;
+    };
+    if !servers.is_object() {
+        return;
+    }
+    if !live.is_object() {
+        *live = serde_json::json!({});
+    }
+    let obj = live.as_object_mut().unwrap();
+    let section = obj
+        .entry(mcp_key.to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !section.is_object() {
+        *section = serde_json::json!({});
+    }
+    json_deep_merge(section, &servers);
 }
 
 /// 从 live 配置中移除指定 provider（累加模式）
@@ -583,5 +636,32 @@ mod tests {
         assert_eq!(list[0].get("name").and_then(|v| v.as_str()), Some("b"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_mcp_servers_extracts_and_merges_to_target_key() {
+        // mcpServers 从 profile 剥离，合并到指定键；provider 段不残留
+        let mut live = serde_json::json!({});
+        let mut profile = serde_json::json!({
+            "_silk_provider_id": "p1",
+            "enabled_models": { "silk": ["gpt-4o"] },
+            "mcpServers": {
+                "echo": { "command": "npx", "args": ["-y", "mcp-echo"] }
+            }
+        });
+        apply_mcp_servers(&mut live, &mut profile, "mcp");
+
+        // mcp 段写入
+        let mcp = live.get("mcp").unwrap();
+        assert_eq!(mcp.get("echo").and_then(|v| v.get("command")).and_then(|v| v.as_str()), Some("npx"));
+        // profile 中 mcpServers 已被移除（不会落入 provider 条目）
+        assert!(profile.get("mcpServers").is_none());
+        assert!(profile.get("_silk_provider_id").is_some(), "其他字段保留");
+
+        // 无 mcpServers 时不产生空段
+        let mut live = serde_json::json!({});
+        let mut profile = serde_json::json!({ "model": "gpt-5" });
+        apply_mcp_servers(&mut live, &mut profile, "mcp_servers");
+        assert!(live.get("mcp_servers").is_none(), "无 mcpServers 不应创建空段");
     }
 }

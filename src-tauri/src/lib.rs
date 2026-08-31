@@ -339,6 +339,8 @@ pub fn run() {
             commands::profiles::get_common_snippet,
             commands::profiles::set_common_snippet,
             commands::profiles::list_all_models,
+            commands::profiles::import_live_config,
+            commands::profiles::get_agent_live_status,
             // 自动检测
             commands::discovery::detect_installed_ai_apps,
             // 预置配置

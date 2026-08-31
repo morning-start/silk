@@ -10,6 +10,17 @@ import {
   NModal,
 } from "naive-ui";
 import { api, type Profile, type AgentType, type SwitchResult, type ModelListingItem } from "../api";
+import McpEditor from "../components/McpEditor.vue";
+
+// 从 config_json 解析 mcpServers（编辑回显用）
+function parseMcp(configJson: string): Record<string, { url: string }> {
+  try {
+    const parsed = JSON.parse(configJson);
+    return parsed.mcpServers || {};
+  } catch {
+    return {};
+  }
+}
 
 const message = useMessage();
 const dialog = useDialog();
@@ -35,6 +46,11 @@ const allModels = ref<ModelListingItem[]>([]);
 const profiles = ref<Profile[]>([]);
 const loading = ref(false);
 
+// live 配置状态：agent_type → 是否被 silk 管理
+const liveStatus = ref<Record<string, boolean>>({});
+// 激活后需重启的 agent（切换结果 requires_restart）
+const restartNeeded = ref<Record<string, boolean>>({});
+
 async function loadData() {
   loading.value = true;
   try {
@@ -44,6 +60,7 @@ async function loadData() {
     ]);
     allModels.value = models;
     profiles.value = pr;
+    await loadLiveStatus(activeTab.value);
   } catch (e: any) {
     message.error(e?.message || "加载数据失败");
   } finally {
@@ -61,8 +78,31 @@ watch(activeTab, (newTab) => {
 async function loadProfiles(agentType: AgentType) {
   try {
     profiles.value = await api.listProfiles(agentType);
+    await loadLiveStatus(agentType);
   } catch (e: any) {
     message.error(e?.message || "加载配置失败");
+  }
+}
+
+// 查询 live 配置是否被 silk 管理（用于「未管理」状态回显）
+async function loadLiveStatus(agentType: AgentType) {
+  try {
+    const status = await api.getAgentLiveStatus(agentType);
+    liveStatus.value[agentType] = status.managed;
+  } catch {
+    // 查询失败不影响主流程，保持未知
+    delete liveStatus.value[agentType];
+  }
+}
+
+// 从现有 live 配置导入为 Profile
+async function importFromLive() {
+  try {
+    const profile = await api.importLiveConfig(activeTab.value);
+    message.success(`已从 live 配置导入「${profile.name}」`);
+    await loadProfiles(activeTab.value);
+  } catch (e: any) {
+    message.error(e?.message || "导入失败");
   }
 }
 
@@ -135,11 +175,13 @@ const claudeFormRoles = ref<ClaudeRoles>({
   fable: "",
   haiku: "",
 });
+const claudeFormMcp = ref<Record<string, { url: string }>>({});
 
 function openAddClaude() {
   editingClaudeId.value = null;
   claudeFormName.value = "";
   claudeFormRoles.value = { sonnet: "", opus: "", fable: "", haiku: "" };
+  claudeFormMcp.value = {};
   showClaudeModal.value = true;
 }
 
@@ -147,6 +189,7 @@ function openEditClaude(profile: Profile) {
   editingClaudeId.value = profile.id;
   claudeFormName.value = profile.name;
   claudeFormRoles.value = parseClaudeRoles(profile.config_json);
+  claudeFormMcp.value = parseMcp(profile.config_json);
   showClaudeModal.value = true;
 }
 
@@ -193,6 +236,7 @@ async function activateClaude(profile: Profile) {
   try {
     const result: SwitchResult = await api.switchProfile("claude_code", profile.id);
     message.success(`已切换到「${profile.name}」`);
+    restartNeeded.value["claude_code"] = result.requires_restart;
     for (const w of result.warnings) {
       message.warning(w);
     }
@@ -269,11 +313,13 @@ const showOpenCodeModal = ref(false);
 const editingOpenCodeId = ref<string | null>(null);
 const openCodeFormName = ref("");
 const openCodeFormEnabled = ref<Record<string, string[]>>({});
+const openCodeFormMcp = ref<Record<string, { url: string }>>({});
 
 function openAddOpenCode() {
   editingOpenCodeId.value = null;
   openCodeFormName.value = "";
   openCodeFormEnabled.value = {};
+  openCodeFormMcp.value = {};
   showOpenCodeModal.value = true;
 }
 
@@ -281,6 +327,7 @@ function openEditOpenCode(profile: Profile) {
   editingOpenCodeId.value = profile.id;
   openCodeFormName.value = profile.name;
   openCodeFormEnabled.value = parseOpenCodeEnabled(profile.config_json);
+  openCodeFormMcp.value = parseMcp(profile.config_json);
   showOpenCodeModal.value = true;
 }
 
@@ -313,6 +360,7 @@ async function saveOpenCodeConfig() {
   const configJson = JSON.stringify({
     _silk_provider_id: openCodeFormName.value.trim(),
     enabled_models: openCodeFormEnabled.value,
+    mcpServers: openCodeFormMcp.value,
   });
 
   try {
@@ -341,6 +389,7 @@ async function activateOpenCode(profile: Profile) {
   try {
     const result: SwitchResult = await api.switchProfile("opencode", profile.id);
     message.success(`已切换到「${profile.name}」`);
+    restartNeeded.value["opencode"] = result.requires_restart;
     for (const w of result.warnings) {
       message.warning(w);
     }
@@ -399,12 +448,19 @@ function parseCodexConfig(configToml: string): CodexConfig {
   return out;
 }
 
-function buildCodexToml(cfg: CodexConfig): string {
+function buildCodexToml(cfg: CodexConfig, mcp: Record<string, { url: string }>): string {
   const lines = [
     `model_provider = "${cfg.model_provider}"`,
     `model = "${cfg.model}"`,
     `wire_api = "${cfg.wire_api}"`,
   ];
+  // MCP 服务器：以 [mcp_servers.<name>] 表追加（Codex 官方格式）
+  for (const [name, server] of Object.entries(mcp)) {
+    if (!name.trim() || !server?.url?.trim()) continue;
+    lines.push("");
+    lines.push(`[mcp_servers.${name.trim()}]`);
+    lines.push(`url = "${server.url.trim()}"`);
+  }
   return lines.join("\n");
 }
 
@@ -412,11 +468,13 @@ const showCodexModal = ref(false);
 const editingCodexId = ref<string | null>(null);
 const codexFormName = ref("");
 const codexForm = ref<CodexConfig>({ model_provider: "custom", model: "", wire_api: "responses" });
+const codexFormMcp = ref<Record<string, { url: string }>>({});
 
 function openAddCodex() {
   editingCodexId.value = null;
   codexFormName.value = "";
   codexForm.value = { model_provider: "custom", model: "", wire_api: "responses" };
+  codexFormMcp.value = {};
   showCodexModal.value = true;
 }
 
@@ -424,6 +482,7 @@ function openEditCodex(profile: Profile) {
   editingCodexId.value = profile.id;
   codexFormName.value = profile.name;
   codexForm.value = parseCodexConfig(profile.config_json);
+  codexFormMcp.value = parseMcp(profile.config_json);
   showCodexModal.value = true;
 }
 
@@ -440,7 +499,7 @@ async function saveCodexConfig() {
     message.warning("请选择模型");
     return;
   }
-  const configJson = buildCodexToml(codexForm.value);
+  const configJson = buildCodexToml(codexForm.value, codexFormMcp.value);
 
   try {
     if (editingCodexId.value) {
@@ -468,6 +527,7 @@ async function activateCodex(profile: Profile) {
   try {
     const result: SwitchResult = await api.switchProfile("codex", profile.id);
     message.success(`已切换到「${profile.name}」`);
+    restartNeeded.value["codex"] = result.requires_restart;
     for (const w of result.warnings) {
       message.warning(w);
     }
@@ -516,11 +576,13 @@ const showGeminiModal = ref(false);
 const editingGeminiId = ref<string | null>(null);
 const geminiFormName = ref("");
 const geminiFormModel = ref("");
+const geminiFormMcp = ref<Record<string, { url: string }>>({});
 
 function openAddGemini() {
   editingGeminiId.value = null;
   geminiFormName.value = "";
   geminiFormModel.value = "";
+  geminiFormMcp.value = {};
   showGeminiModal.value = true;
 }
 
@@ -528,6 +590,7 @@ function openEditGemini(profile: Profile) {
   editingGeminiId.value = profile.id;
   geminiFormName.value = profile.name;
   geminiFormModel.value = parseGeminiConfig(profile.config_json);
+  geminiFormMcp.value = parseMcp(profile.config_json);
   showGeminiModal.value = true;
 }
 
@@ -540,7 +603,10 @@ async function saveGeminiConfig() {
     message.warning("请选择模型");
     return;
   }
-  const configJson = JSON.stringify({ GEMINI_MODEL: geminiFormModel.value });
+  const configJson = JSON.stringify({
+    GEMINI_MODEL: geminiFormModel.value,
+    mcpServers: geminiFormMcp.value,
+  });
 
   try {
     if (editingGeminiId.value) {
@@ -568,6 +634,7 @@ async function activateGemini(profile: Profile) {
   try {
     const result: SwitchResult = await api.switchProfile("gemini_cli", profile.id);
     message.success(`已切换到「${profile.name}」`);
+    restartNeeded.value["gemini_cli"] = result.requires_restart;
     for (const w of result.warnings) {
       message.warning(w);
     }
@@ -617,23 +684,25 @@ function parseHermesModels(configYaml: string): string[] {
   }
 }
 
-function buildHermesYaml(name: string, modelIds: string[]): string {
+function buildHermesYaml(name: string, modelIds: string[], mcp: Record<string, { url: string }>): string {
   const models: Record<string, object> = {};
   for (const id of modelIds) {
     models[id] = {};
   }
-  return JSON.stringify({ _silk_provider_id: name, models });
+  return JSON.stringify({ _silk_provider_id: name, models, mcpServers: mcp });
 }
 
 const showHermesModal = ref(false);
 const editingHermesId = ref<string | null>(null);
 const hermesFormName = ref("");
 const hermesFormModels = ref<string[]>([]);
+const hermesFormMcp = ref<Record<string, { url: string }>>({});
 
 function openAddHermes() {
   editingHermesId.value = null;
   hermesFormName.value = "";
   hermesFormModels.value = [];
+  hermesFormMcp.value = {};
   showHermesModal.value = true;
 }
 
@@ -641,6 +710,7 @@ function openEditHermes(profile: Profile) {
   editingHermesId.value = profile.id;
   hermesFormName.value = profile.name;
   hermesFormModels.value = parseHermesModels(profile.config_json);
+  hermesFormMcp.value = parseMcp(profile.config_json);
   showHermesModal.value = true;
 }
 
@@ -653,7 +723,7 @@ async function saveHermesConfig() {
     message.warning("请至少选择一个模型");
     return;
   }
-  const configJson = buildHermesYaml(hermesFormName.value.trim(), hermesFormModels.value);
+  const configJson = buildHermesYaml(hermesFormName.value.trim(), hermesFormModels.value, hermesFormMcp.value);
 
   try {
     if (editingHermesId.value) {
@@ -681,6 +751,7 @@ async function activateHermes(profile: Profile) {
   try {
     const result: SwitchResult = await api.switchProfile("hermes", profile.id);
     message.success(`已切换到「${profile.name}」`);
+    restartNeeded.value["hermes"] = result.requires_restart;
     for (const w of result.warnings) {
       message.warning(w);
     }
@@ -714,6 +785,11 @@ function deleteHermes(profile: Profile) {
     <div class="toolbar">
       <div class="toolbar-left">
         <h2 class="page-title">预设管理</h2>
+      </div>
+      <div class="toolbar-right">
+        <NButton size="small" quaternary @click="importFromLive">
+          从 live 配置导入（{{ agentTabs.find((t) => t.type === activeTab)?.label ?? activeTab }}）
+        </NButton>
       </div>
     </div>
 
@@ -749,6 +825,8 @@ function deleteHermes(profile: Profile) {
               <div class="config-card-name">
                 <span class="config-name-text">{{ profile.name }}</span>
                 <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
+                <NTag v-if="profile.is_active && restartNeeded[profile.agent_type]" size="tiny" type="warning">需重启</NTag>
+                <NTag v-if="liveStatus[profile.agent_type] === false" size="tiny" type="info">未管理</NTag>
               </div>
             </div>
 
@@ -813,6 +891,8 @@ function deleteHermes(profile: Profile) {
               <div class="config-card-name">
                 <span class="config-name-text">{{ profile.name }}</span>
                 <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
+                <NTag v-if="profile.is_active && restartNeeded[profile.agent_type]" size="tiny" type="warning">需重启</NTag>
+                <NTag v-if="liveStatus[profile.agent_type] === false" size="tiny" type="info">未管理</NTag>
               </div>
             </div>
 
@@ -877,6 +957,8 @@ function deleteHermes(profile: Profile) {
               <div class="config-card-name">
                 <span class="config-name-text">{{ profile.name }}</span>
                 <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
+                <NTag v-if="profile.is_active && restartNeeded[profile.agent_type]" size="tiny" type="warning">需重启</NTag>
+                <NTag v-if="liveStatus[profile.agent_type] === false" size="tiny" type="info">未管理</NTag>
               </div>
             </div>
 
@@ -950,6 +1032,8 @@ function deleteHermes(profile: Profile) {
               <div class="config-card-name">
                 <span class="config-name-text">{{ profile.name }}</span>
                 <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
+                <NTag v-if="profile.is_active && restartNeeded[profile.agent_type]" size="tiny" type="warning">需重启</NTag>
+                <NTag v-if="liveStatus[profile.agent_type] === false" size="tiny" type="info">未管理</NTag>
               </div>
             </div>
 
@@ -1013,6 +1097,8 @@ function deleteHermes(profile: Profile) {
               <div class="config-card-name">
                 <span class="config-name-text">{{ profile.name }}</span>
                 <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
+                <NTag v-if="profile.is_active && restartNeeded[profile.agent_type]" size="tiny" type="warning">需重启</NTag>
+                <NTag v-if="liveStatus[profile.agent_type] === false" size="tiny" type="info">未管理</NTag>
               </div>
             </div>
 
@@ -1087,6 +1173,8 @@ function deleteHermes(profile: Profile) {
           </div>
         </div>
 
+        <McpEditor v-model="claudeFormMcp" />
+
         <div class="claude-modal-actions">
           <NButton @click="showClaudeModal = false">取消</NButton>
           <NButton
@@ -1157,6 +1245,8 @@ function deleteHermes(profile: Profile) {
           <p class="empty-desc">暂无可用模型，请先在"渠道"中添加 Provider，或在"模型"中创建模型映射</p>
         </div>
 
+        <McpEditor v-model="openCodeFormMcp" />
+
         <div class="claude-modal-actions">
           <NButton @click="showOpenCodeModal = false">取消</NButton>
           <NButton
@@ -1213,6 +1303,8 @@ function deleteHermes(profile: Profile) {
           />
         </div>
 
+        <McpEditor v-model="codexFormMcp" />
+
         <div class="claude-modal-actions">
           <NButton @click="showCodexModal = false">取消</NButton>
           <NButton
@@ -1251,6 +1343,8 @@ function deleteHermes(profile: Profile) {
             placeholder="选择模型…"
           />
         </div>
+
+        <McpEditor v-model="geminiFormMcp" />
 
         <div class="claude-modal-actions">
           <NButton @click="showGeminiModal = false">取消</NButton>
@@ -1291,6 +1385,8 @@ function deleteHermes(profile: Profile) {
             placeholder="选择模型…"
           />
         </div>
+
+        <McpEditor v-model="hermesFormMcp" />
 
         <div class="claude-modal-actions">
           <NButton @click="showHermesModal = false">取消</NButton>

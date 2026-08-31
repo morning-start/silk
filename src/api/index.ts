@@ -103,6 +103,8 @@ export const api = {
   switchProfile: profilesApi.switch,
   getCommonSnippet: profilesApi.getCommonSnippet,
   setCommonSnippet: profilesApi.setCommonSnippet,
+  importLiveConfig: profilesApi.importLiveConfig,
+  getAgentLiveStatus: profilesApi.getAgentLiveStatus,
 } as const;
 
 // ---------------------------------------------------------------------------
