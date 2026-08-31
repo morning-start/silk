@@ -230,8 +230,10 @@ pub enum MergeStrategy {
     TopLevel,
     /// 合并到指定子对象（Gemini CLI → env）
     IntoSubObject(&'static str),
-    /// 累加模式 — 合并到 providers.{id}（OpenCode / OpenClaw / Hermes）
+    /// 累加模式 — 合并到 provider.{id}（OpenCode 原生 provider 段）
     IntoProvider,
+    /// Hermes 累加模式 — 合并到 custom_providers 列表（按 name 匹配）+ 更新 model 段
+    IntoHermesProvider,
 }
 
 /// 将 profile 配置合并写入 live 配置文件（仅替换对应部分）
@@ -288,8 +290,8 @@ fn apply_merge(live: &mut serde_json::Value, profile_config: &serde_json::Value,
                 *live = serde_json::json!({});
             }
             let live_obj = live.as_object_mut().unwrap();
-            if !live_obj.contains_key("providers") {
-                live_obj.insert("providers".to_string(), serde_json::json!({}));
+            if !live_obj.contains_key("provider") {
+                live_obj.insert("provider".to_string(), serde_json::json!({}));
             }
 
             let provider_id = profile_config
@@ -306,7 +308,7 @@ fn apply_merge(live: &mut serde_json::Value, profile_config: &serde_json::Value,
             let mut config = profile_config.clone();
             config.as_object_mut().map(|o| o.remove("_silk_provider_id"));
 
-            let providers = live_obj.get_mut("providers").unwrap();
+            let providers = live_obj.get_mut("provider").unwrap();
             if !providers.is_object() {
                 *providers = serde_json::json!({});
             }
@@ -319,26 +321,119 @@ fn apply_merge(live: &mut serde_json::Value, profile_config: &serde_json::Value,
                 }
             }
         }
+        MergeStrategy::IntoHermesProvider => {
+            if !live.is_object() {
+                *live = serde_json::json!({});
+            }
+            let live_obj = live.as_object_mut().unwrap();
+
+            let provider_name = profile_config
+                .get("_silk_provider_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| {
+                    profile_config
+                        .as_object()
+                        .and_then(|o| o.keys().next().cloned())
+                        .unwrap_or_else(|| "default".to_string())
+                });
+
+            // 构造 provider 条目：剥离内部标记，注入 name 与接管标记
+            let mut entry = profile_config.clone();
+            entry.as_object_mut().map(|o| o.remove("_silk_provider_id"));
+            if let Some(o) = entry.as_object_mut() {
+                o.insert("name".to_string(), serde_json::json!(provider_name.clone()));
+                o.insert("_silk_managed".to_string(), serde_json::json!(true));
+            }
+
+            // 确保 custom_providers 为列表
+            if !live_obj.contains_key("custom_providers") {
+                live_obj.insert("custom_providers".to_string(), serde_json::json!([]));
+            }
+            let list = live_obj.get_mut("custom_providers").unwrap();
+            if !list.is_array() {
+                *list = serde_json::json!([]);
+            }
+            let list = list.as_array_mut().unwrap();
+
+            // 按 name 匹配替换，否则追加
+            if let Some(existing) = list
+                .iter_mut()
+                .find(|p| p.get("name").and_then(|v| v.as_str()) == Some(provider_name.as_str()))
+            {
+                *existing = entry;
+            } else {
+                list.push(entry);
+            }
+
+            // 更新顶层 model 段：provider 恒指向当前 profile，default 取第一个模型
+            let first_model_id = profile_config
+                .get("models")
+                .and_then(|m| m.as_object())
+                .and_then(|o| o.keys().next())
+                .cloned();
+            let model = live_obj
+                .entry("model".to_string())
+                .or_insert_with(|| serde_json::json!({}));
+            if let Some(o) = model.as_object_mut() {
+                o.insert("provider".to_string(), serde_json::json!(provider_name));
+                if let Some(mid) = first_model_id {
+                    o.insert("default".to_string(), serde_json::json!(mid));
+                }
+            }
+        }
     }
 }
 
 /// 从 live 配置中移除指定 provider（累加模式）
-pub fn remove_provider_from_live(live_path: &Path, provider_id: &str) -> Result<(), String> {
+pub fn remove_provider_from_live(
+    live_path: &Path,
+    provider_id: &str,
+    strategy: MergeStrategy,
+) -> Result<(), String> {
     let mut live = read_to_value(live_path)?;
-    if let Some(providers) = live.get_mut("providers") {
-        if let Some(obj) = providers.as_object_mut() {
-            obj.remove(provider_id);
+    match strategy {
+        MergeStrategy::IntoProvider => {
+            if let Some(providers) = live.get_mut("provider") {
+                if let Some(obj) = providers.as_object_mut() {
+                    obj.remove(provider_id);
+                }
+            }
         }
+        MergeStrategy::IntoHermesProvider => {
+            if let Some(list) = live.get_mut("custom_providers") {
+                if let Some(arr) = list.as_array_mut() {
+                    arr.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some(provider_id));
+                }
+            }
+        }
+        _ => {}
     }
     write_from_value(live_path, &live)
 }
 
-pub async fn remove_provider_from_live_async(live_path: &Path, provider_id: &str) -> Result<(), String> {
+pub async fn remove_provider_from_live_async(
+    live_path: &Path,
+    provider_id: &str,
+    strategy: MergeStrategy,
+) -> Result<(), String> {
     let mut live = read_to_value_async(live_path).await?;
-    if let Some(providers) = live.get_mut("providers") {
-        if let Some(obj) = providers.as_object_mut() {
-            obj.remove(provider_id);
+    match strategy {
+        MergeStrategy::IntoProvider => {
+            if let Some(providers) = live.get_mut("provider") {
+                if let Some(obj) = providers.as_object_mut() {
+                    obj.remove(provider_id);
+                }
+            }
         }
+        MergeStrategy::IntoHermesProvider => {
+            if let Some(list) = live.get_mut("custom_providers") {
+                if let Some(arr) = list.as_array_mut() {
+                    arr.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some(provider_id));
+                }
+            }
+        }
+        _ => {}
     }
     write_from_value_async(live_path, &live).await
 }
@@ -360,4 +455,133 @@ pub fn validate_config_text(text: &str, format: ConfigFormat) -> Result<(), Stri
         }
     }
     Ok(())
+}
+
+// ============================================================================
+// 测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn into_provider_writes_singular_provider_key() {
+        // OpenCode 原生配置段是 provider（单数），不是 providers
+        let mut live = serde_json::json!({});
+        let profile = serde_json::json!({
+            "_silk_provider_id": "my-opencode",
+            "enabled_models": { "silk": ["gpt-4o"] }
+        });
+        apply_merge(&mut live, &profile, MergeStrategy::IntoProvider);
+
+        assert!(live.get("providers").is_none(), "不应写入 providers（复数）键");
+        let entry = live.get("provider").and_then(|v| v.get("my-opencode"));
+        assert!(entry.is_some(), "应写入 provider.my-opencode");
+        let entry = entry.unwrap();
+        assert_eq!(
+            entry.get("_silk_managed").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(entry.get("_silk_provider_id").is_none(), "内部标记应被剥离");
+    }
+
+    #[test]
+    fn into_hermes_provider_writes_custom_providers_list_and_model() {
+        // Hermes 原生结构：custom_providers 列表（按 name 匹配）+ 顶层 model 段
+        let mut live = serde_json::json!({});
+        let profile = serde_json::json!({
+            "_silk_provider_id": "my-hermes",
+            "base_url": "http://127.0.0.1:1877/v1",
+            "models": { "llama3": {}, "qwen": {} }
+        });
+        apply_merge(&mut live, &profile, MergeStrategy::IntoHermesProvider);
+
+        let list = live.get("custom_providers").and_then(|v| v.as_array());
+        assert!(list.is_some(), "应写入 custom_providers 列表");
+        let list = list.unwrap();
+        assert_eq!(list.len(), 1);
+
+        let entry = &list[0];
+        assert_eq!(entry.get("name").and_then(|v| v.as_str()), Some("my-hermes"));
+        assert_eq!(
+            entry.get("_silk_managed").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+
+        // model 段：provider 恒指向当前 profile，default 取第一个模型
+        let model = live.get("model").unwrap();
+        assert_eq!(
+            model.get("provider").and_then(|v| v.as_str()),
+            Some("my-hermes")
+        );
+        assert_eq!(model.get("default").and_then(|v| v.as_str()), Some("llama3"));
+    }
+
+    #[test]
+    fn into_hermes_provider_replaces_existing_by_name() {
+        let mut live = serde_json::json!({
+            "custom_providers": [
+                { "name": "old-hermes", "base_url": "https://old.example.com" }
+            ],
+            "model": { "provider": "old-hermes", "default": "x" }
+        });
+        let profile = serde_json::json!({
+            "_silk_provider_id": "old-hermes",
+            "base_url": "http://127.0.0.1:1877/v1",
+            "models": { "new-model": {} }
+        });
+        apply_merge(&mut live, &profile, MergeStrategy::IntoHermesProvider);
+
+        let list = live.get("custom_providers").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(list.len(), 1, "同名 provider 应替换而非追加");
+        assert_eq!(
+            list[0].get("base_url").and_then(|v| v.as_str()),
+            Some("http://127.0.0.1:1877/v1")
+        );
+        assert_eq!(
+            live.get("model").and_then(|v| v.get("default")).and_then(|v| v.as_str()),
+            Some("new-model")
+        );
+    }
+
+    #[test]
+    fn remove_provider_from_live_respects_strategy() {
+        // OpenCode：从 provider.<id> 移除
+        let dir = std::env::temp_dir().join(format!(
+            "silk-cw-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let opencode_path = dir.join("opencode.json");
+        let opencode_live = serde_json::json!({
+            "provider": {
+                "a": { "_silk_managed": true },
+                "b": { "_silk_managed": true }
+            }
+        });
+        write_from_value(&opencode_path, &opencode_live).unwrap();
+        remove_provider_from_live(&opencode_path, "a", MergeStrategy::IntoProvider).unwrap();
+        let after = read_to_value(&opencode_path).unwrap();
+        assert!(after.get("provider").unwrap().get("a").is_none());
+        assert!(after.get("provider").unwrap().get("b").is_some());
+
+        // Hermes：从 custom_providers 列表按 name 移除
+        let hermes_path = dir.join("hermes.yaml");
+        let hermes_live = serde_json::json!({
+            "custom_providers": [
+                { "name": "a", "_silk_managed": true },
+                { "name": "b", "_silk_managed": true }
+            ],
+            "model": { "provider": "a" }
+        });
+        write_from_value(&hermes_path, &hermes_live).unwrap();
+        remove_provider_from_live(&hermes_path, "a", MergeStrategy::IntoHermesProvider).unwrap();
+        let after = read_to_value(&hermes_path).unwrap();
+        let list = after.get("custom_providers").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].get("name").and_then(|v| v.as_str()), Some("b"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

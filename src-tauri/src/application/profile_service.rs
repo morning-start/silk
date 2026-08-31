@@ -39,7 +39,10 @@ pub trait AgentConfigWriter: Send + Sync {
         let mut live = config_writer::read_to_value_async(&path).await?;
 
         config_writer::json_deep_merge(&mut live, profile_config);
-        if self.merge_strategy() != MergeStrategy::IntoProvider {
+        if !matches!(
+            self.merge_strategy(),
+            MergeStrategy::IntoProvider | MergeStrategy::IntoHermesProvider
+        ) {
             if let Some(obj) = live.as_object_mut() {
                 obj.insert("_silk_managed".to_string(), serde_json::json!(true));
             }
@@ -133,6 +136,108 @@ impl AgentConfigWriter for CodexWriter {
     fn merge_strategy(&self) -> MergeStrategy {
         MergeStrategy::TopLevel
     }
+
+    async fn write_live(
+        &self,
+        home: &Path,
+        profile_config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let path = self.live_path(home);
+        let _snapshot = LiveSnapshot::take(&path).map_err(|e| format!("备份失败: {e}"))?;
+
+        let mut live = config_writer::read_to_value_async(&path).await?;
+        if !live.is_object() {
+            live = serde_json::json!({});
+        }
+
+        let cfg = profile_config.as_object().cloned().unwrap_or_default();
+        let provider_key = cfg
+            .get("model_provider")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("custom")
+            .to_string();
+        let base_url = cfg
+            .get("base_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let api_key = cfg
+            .get("api_key")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let wire_api = cfg
+            .get("wire_api")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // 顶层 model 保留（Codex 读取顶层 model 作为当前模型）
+        if let Some(m) = cfg.get("model") {
+            live["model"] = m.clone();
+        }
+
+        match provider_key.as_str() {
+            // 内置 openai 的改址走正统机制：顶层 openai_base_url（0.148+ 禁止
+            // 建 [model_providers.openai] 表覆盖内置 provider）
+            "openai" => {
+                if let Some(b) = base_url {
+                    live["openai_base_url"] = serde_json::json!(b);
+                }
+            }
+            // 这两个保留 id 没有等价顶层旋钮，建表会导致 Codex 拒绝加载整份配置
+            "ollama" | "lmstudio" => {
+                return Err(format!(
+                    "Codex 禁止覆盖内置 provider `{provider_key}`（0.148 起会拒绝加载整份配置）；请改用自定义 provider id"
+                ));
+            }
+            key => {
+                // 确保 [model_providers.<key>] 表存在，且 name 非空（0.149 起为空整份拒载）
+                let live_obj = live
+                    .as_object_mut()
+                    .ok_or_else(|| "config.toml 顶层不是对象".to_string())?;
+                let providers = live_obj
+                    .entry("model_providers".to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                let table = providers
+                    .as_object_mut()
+                    .ok_or_else(|| "config.toml 的 model_providers 不是表，无法写入".to_string())?;
+                let entry = table
+                    .entry(key.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                if let Some(e) = entry.as_object_mut() {
+                    let has_name = e
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|n| !n.is_empty())
+                        .is_some();
+                    if !has_name {
+                        e.insert("name".to_string(), serde_json::json!(key));
+                    }
+                    if let Some(b) = &base_url {
+                        e.insert("base_url".to_string(), serde_json::json!(b));
+                    }
+                    if let Some(k) = &api_key {
+                        e.insert("api_key".to_string(), serde_json::json!(k));
+                    }
+                    if let Some(w) = &wire_api {
+                        e.insert("wire_api".to_string(), serde_json::json!(w));
+                    }
+                }
+                live["model_provider"] = serde_json::json!(key);
+            }
+        }
+
+        if let Some(obj) = live.as_object_mut() {
+            obj.insert("_silk_managed".to_string(), serde_json::json!(true));
+        }
+
+        if let Err(e) = config_writer::write_from_value_async(&path, &live).await {
+            let _ = _snapshot.restore();
+            return Err(e);
+        }
+        Ok(())
+    }
 }
 
 // --- Gemini CLI ---
@@ -162,6 +267,15 @@ impl AgentConfigWriter for GeminiCliWriter {
 
     fn merge_strategy(&self) -> MergeStrategy {
         MergeStrategy::IntoSubObject("env")
+    }
+
+    async fn write_live(
+        &self,
+        home: &Path,
+        profile_config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let path = self.live_path(home);
+        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoSubObject("env")).await
     }
 }
 
@@ -205,7 +319,8 @@ impl AgentConfigWriter for OpenCodeWriter {
 
     async fn remove_live(&self, home: &Path, profile_id: &str) -> Result<(), String> {
         let path = self.live_path(home);
-        config_writer::remove_provider_from_live_async(&path, profile_id).await
+        config_writer::remove_provider_from_live_async(&path, profile_id, MergeStrategy::IntoProvider)
+            .await
     }
 
     async fn is_managed(&self, home: &Path) -> Result<bool, String> {
@@ -215,7 +330,7 @@ impl AgentConfigWriter for OpenCodeWriter {
         }
         let val = config_writer::read_to_value_async(&path).await?;
         // 检查是否有任何 provider 被 silk 管理
-        if let Some(providers) = val.get("providers").and_then(|v| v.as_object()) {
+        if let Some(providers) = val.get("provider").and_then(|v| v.as_object()) {
             for (_id, provider) in providers {
                 if provider.get("_silk_managed").and_then(|v| v.as_bool()).unwrap_or(false) {
                     return Ok(true);
@@ -252,7 +367,7 @@ impl AgentConfigWriter for HermesWriter {
     }
 
     fn merge_strategy(&self) -> MergeStrategy {
-        MergeStrategy::IntoProvider
+        MergeStrategy::IntoHermesProvider
     }
 
     async fn write_live(
@@ -261,12 +376,13 @@ impl AgentConfigWriter for HermesWriter {
         profile_config: &serde_json::Value,
     ) -> Result<(), String> {
         let path = self.live_path(home);
-        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoProvider).await
+        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoHermesProvider).await
     }
 
     async fn remove_live(&self, home: &Path, profile_id: &str) -> Result<(), String> {
         let path = self.live_path(home);
-        config_writer::remove_provider_from_live_async(&path, profile_id).await
+        config_writer::remove_provider_from_live_async(&path, profile_id, MergeStrategy::IntoHermesProvider)
+            .await
     }
 
     async fn is_managed(&self, home: &Path) -> Result<bool, String> {
@@ -275,8 +391,9 @@ impl AgentConfigWriter for HermesWriter {
             return Ok(false);
         }
         let val = config_writer::read_to_value_async(&path).await?;
-        if let Some(providers) = val.get("providers").and_then(|v| v.as_object()) {
-            for (_id, provider) in providers {
+        // 检查 custom_providers 列表是否有任何 provider 被 silk 管理
+        if let Some(list) = val.get("custom_providers").and_then(|v| v.as_array()) {
+            for provider in list {
                 if provider.get("_silk_managed").and_then(|v| v.as_bool()).unwrap_or(false) {
                     return Ok(true);
                 }
@@ -334,6 +451,78 @@ fn validate_profile_payload(agent_type: &str, config_json: &str) -> Result<(), S
             code: None,
         }
     })?;
+
+    validate_agent_schema(agent_type, config_json, fmt)?;
+
+    Ok(())
+}
+
+/// 按 agent 校验 config_json 的必填字段（在格式校验之后执行）
+fn validate_agent_schema(
+    agent_type: &str,
+    config_json: &str,
+    fmt: ConfigFormat,
+) -> Result<(), ServiceError> {
+    let value: serde_json::Value = match fmt {
+        ConfigFormat::Json => serde_json::from_str(config_json).map_err(|e| {
+            ServiceError::BadRequest {
+                message: format!("config_json 解析失败: {e}"),
+                code: None,
+            }
+        })?,
+        ConfigFormat::Toml => toml::from_str(config_json).map_err(|e| {
+            ServiceError::BadRequest {
+                message: format!("config_json 解析失败: {e}"),
+                code: None,
+            }
+        })?,
+        ConfigFormat::Yaml => serde_yaml::from_str(config_json).map_err(|e| {
+            ServiceError::BadRequest {
+                message: format!("config_json 解析失败: {e}"),
+                code: None,
+            }
+        })?,
+    };
+
+    let bad = |message: String| ServiceError::BadRequest { message, code: None };
+
+    match agent_type {
+        // Codex：必填 model / wire_api（顶层字符串）
+        "codex" => {
+            let mut missing = Vec::new();
+            for field in ["model", "wire_api"] {
+                let ok = value
+                    .get(field)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .is_some_and(|s| !s.is_empty());
+                if !ok {
+                    missing.push(field);
+                }
+            }
+            if !missing.is_empty() {
+                return Err(bad(format!("codex 配置缺少必填字段: {}", missing.join(", "))));
+            }
+        }
+        // Gemini CLI：至少一个 env 键（config_json 即 env 内容）
+        "gemini_cli" => {
+            if value.as_object().is_none_or(|o| o.is_empty()) {
+                return Err(bad("gemini_cli 配置至少需要一个 env 键（如 GEMINI_MODEL）".to_string()));
+            }
+        }
+        // OpenCode / Hermes：必填 provider 标识（_silk_provider_id）
+        "opencode" | "hermes" => {
+            let has_id = value
+                .get("_silk_provider_id")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .is_some_and(|s| !s.is_empty());
+            if !has_id {
+                return Err(bad(format!("{agent_type} 配置缺少必填字段: _silk_provider_id")));
+            }
+        }
+        _ => {}
+    }
 
     Ok(())
 }
@@ -470,7 +659,7 @@ pub async fn switch(
 
     let mut effective_config = build_effective_config(&config, _snippet.as_ref());
 
-    // 注入 base_url + api_key
+    // 注入 base_url + api_key（按 harness 映射到正确字段位置）
     if let Ok(settings) = crate::models::GatewaySettings::load(
         crate::get_settings_path().ok_or_else(|| ServiceError::Internal {
             message: "无法获取设置路径".to_string(),
@@ -478,9 +667,32 @@ pub async fn switch(
         })?,
     ) {
         let base_url = format!("http://{}:{}/v1", settings.bind_host, settings.bind_port);
+        let api_key = crate::application::gateway_key_service::builtin_key_value();
         if let Some(obj) = effective_config.as_object_mut() {
-            obj.insert("base_url".to_string(), serde_json::json!(base_url));
-            obj.insert("api_key".to_string(), serde_json::json!(crate::application::gateway_key_service::builtin_key_value()));
+            match agent_type.as_str() {
+                // Claude Code：写入 env 子对象（settings.json 的 env 作为环境变量注入）
+                "claude_code" => {
+                    let env = obj
+                        .entry("env".to_string())
+                        .or_insert_with(|| serde_json::json!({}));
+                    if let Some(e) = env.as_object_mut() {
+                        e.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::json!(base_url));
+                        e.insert("ANTHROPIC_AUTH_TOKEN".to_string(), serde_json::json!(api_key));
+                    }
+                }
+                // Gemini CLI：profile_config 即 env 内容（IntoSubObject("env") 合并），
+                // 注入 GOOGLE_GEMINI_BASE_URL / GEMINI_API_KEY
+                "gemini_cli" => {
+                    obj.insert("GOOGLE_GEMINI_BASE_URL".to_string(), serde_json::json!(base_url));
+                    obj.insert("GEMINI_API_KEY".to_string(), serde_json::json!(api_key));
+                }
+                // Codex：顶层注入，CodexWriter 会搬进 [model_providers.<id>] 表；
+                // OpenCode / Hermes：整个 profile_config 即 provider 条目内容，顶层注入即条目内
+                _ => {
+                    obj.insert("base_url".to_string(), serde_json::json!(base_url));
+                    obj.insert("api_key".to_string(), serde_json::json!(api_key));
+                }
+            }
         }
     }
 
