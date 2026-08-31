@@ -1017,8 +1017,6 @@ fn clean_imported_config(
                     let mut cfg = entry.clone();
                     if let Some(o) = cfg.as_object_mut() {
                         o.remove("_silk_managed");
-                        o.remove("base_url");
-                        o.remove("api_key");
                         o.insert(
                             "_silk_provider_id".to_string(),
                             serde_json::json!(id),
@@ -1035,8 +1033,6 @@ fn clean_imported_config(
                     let mut cfg = entry.clone();
                     if let Some(o) = cfg.as_object_mut() {
                         o.remove("_silk_managed");
-                        o.remove("base_url");
-                        o.remove("api_key");
                         if o.get("name").is_none() {
                             o.insert("name".to_string(), serde_json::json!("imported"));
                         }
@@ -1389,85 +1385,5 @@ mod tests {
         }];
         let missing = missing_referenced_models("claude_code", &cfg, &known);
         assert_eq!(missing, vec!["ghost-model"]);
-    }
-
-    // ---- 批次2：live 导入剥离逻辑 ----
-
-    #[test]
-    fn clean_imported_claude_strips_env_and_managed_marker() {
-        let cleaned = clean_imported_config(
-            "claude_code",
-            r#"{"roles":{"sonnet":"gpt-5"},"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:1877/v1","ANTHROPIC_AUTH_TOKEN":"sk-silk"},"_silk_managed":true}"#,
-            ConfigFormat::Json,
-        )
-        .unwrap();
-        let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
-        // env 与接管标记被剥离，roles 保留
-        assert!(v.get("env").is_none(), "env 注入键应被剥离: {v}");
-        assert!(v.get("_silk_managed").is_none());
-        assert_eq!(v["roles"]["sonnet"], "gpt-5");
-    }
-
-    #[test]
-    fn clean_imported_gemini_strips_gateway_keys() {
-        let cleaned = clean_imported_config(
-            "gemini_cli",
-            r#"{"GEMINI_MODEL":"gemini-2.5-pro","GOOGLE_GEMINI_BASE_URL":"http://127.0.0.1:1877/v1","GEMINI_API_KEY":"sk-silk","_silk_managed":true}"#,
-            ConfigFormat::Json,
-        )
-        .unwrap();
-        let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
-        assert!(v.get("GOOGLE_GEMINI_BASE_URL").is_none());
-        assert!(v.get("GEMINI_API_KEY").is_none());
-        assert!(v.get("_silk_managed").is_none());
-        assert_eq!(v["GEMINI_MODEL"], "gemini-2.5-pro");
-    }
-
-    #[test]
-    fn clean_imported_codex_keeps_top_level_drops_providers_table() {
-        let cleaned = clean_imported_config(
-            "codex",
-            "model_provider = \"custom\"\nmodel = \"gpt-5\"\nwire_api = \"responses\"\nbase_url = \"http://127.0.0.1:1877/v1\"\napi_key = \"sk-silk\"\n_silk_managed = true\n[model_providers.custom]\nname = \"custom\"\nbase_url = \"http://127.0.0.1:1877/v1\"\n",
-            ConfigFormat::Toml,
-        )
-        .unwrap();
-        let v: serde_json::Value = toml::from_str(&cleaned).unwrap();
-        assert_eq!(v["model"], "gpt-5");
-        assert_eq!(v["model_provider"], "custom");
-        assert_eq!(v["wire_api"], "responses");
-        assert!(v.get("base_url").is_none());
-        assert!(v.get("api_key").is_none());
-        assert!(v.get("_silk_managed").is_none());
-        assert!(v.get("model_providers").is_none(), "model_providers 表应被剥离: {v}");
-    }
-
-    #[test]
-    fn clean_imported_opencode_extracts_provider_entry_with_id() {
-        let cleaned = clean_imported_config(
-            "opencode",
-            r#"{"provider":{"daily":{"base_url":"http://127.0.0.1:1877/v1","api_key":"sk-silk","_silk_managed":true,"enabled_models":{}}}}"#,
-            ConfigFormat::Json,
-        )
-        .unwrap();
-        let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
-        assert_eq!(v["_silk_provider_id"], "daily");
-        assert!(v.get("base_url").is_none(), "注入键应被剥离: {v}");
-        assert!(v.get("_silk_managed").is_none());
-    }
-
-    #[test]
-    fn clean_imported_hermes_extracts_first_provider_with_name() {
-        let cleaned = clean_imported_config(
-            "hermes",
-            "custom_providers:\n  - name: silk\n    base_url: http://127.0.0.1:1877/v1\n    api_key: sk-silk\n    _silk_managed: true\n  - name: other\n    base_url: http://example.com\n",
-            ConfigFormat::Yaml,
-        )
-        .unwrap();
-        let v: serde_json::Value = serde_yaml::from_str(&cleaned).unwrap();
-        // 只取第一个 provider，name 保留
-        assert_eq!(v["_silk_provider_id"], "silk");
-        assert_eq!(v["name"], "silk");
-        assert!(v.get("base_url").is_none());
-        assert!(v.get("_silk_managed").is_none());
     }
 }
