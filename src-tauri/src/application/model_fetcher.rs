@@ -96,20 +96,48 @@ pub async fn fetch_models(
         }
     }
 
-    let models = json["data"].as_array().ok_or_else(|| {
-        let msg = "响应中未找到模型列表 (data 字段)".to_string();
-        error!(
-            "[fetch_provider_models] {msg}, 完整响应体: {}",
-            serde_json::to_string_pretty(&json).unwrap_or_default()
-        );
-        ServiceError::BadRequest { message: msg, code: None }
-    })?;
+    parse_models_response(&json)
+}
+
+/// 从响应 JSON 解析模型列表（纯函数，便于单测）。
+///
+/// 兼容多种格式：
+/// - OpenAI：`{"data": [{"id": "..."}]}`
+/// - Gemini：`{"models": [{"name": "models/gemini-2.5-pro", "displayName": "..."}]}`
+/// - Ollama：`{"models": [{"name": "llama3", "model": "llama3:latest"}]}`
+/// - 条目 id 回退：id → model → name；Gemini `models/` 前缀剥离
+fn parse_models_response(json: &serde_json::Value) -> Result<Vec<ProviderModelInfo>, ServiceError> {
+    // 兼容多种模型列表容器：OpenAI 用 data[]，Gemini/Ollama 用 models[]
+    let container = json["data"]
+        .as_array()
+        .or_else(|| json["models"].as_array())
+        .or_else(|| json["model_list"].as_array())
+        .ok_or_else(|| {
+            let msg = "响应中未找到模型列表 (data/models 字段)".to_string();
+            error!(
+                "[fetch_provider_models] {msg}, 完整响应体: {}",
+                serde_json::to_string_pretty(json).unwrap_or_default()
+            );
+            ServiceError::BadRequest { message: msg, code: None }
+        })?;
 
     let mut result: Vec<ProviderModelInfo> = Vec::new();
-    for item in models {
-        if let Some(model_id) = item["id"].as_str() {
+    for item in container {
+        // 条目 id 兼容：id → name → model（Gemini/Ollama 用 name，部分端点用 model），
+        // Gemini 的 name 形如 "models/gemini-2.5-pro"，剥离前缀
+        let raw_id = item["id"]
+            .as_str()
+            .or_else(|| item["name"].as_str())
+            .or_else(|| item["model"].as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        if let Some(model_id) = raw_id {
+            let model_id = model_id
+                .strip_prefix("models/")
+                .unwrap_or(model_id)
+                .to_string();
             result.push(ProviderModelInfo {
-                id: model_id.to_string(),
+                id: model_id,
                 object: item["object"].as_str().map(|s| s.to_string()),
                 created: item["created"].as_i64(),
                 owned_by: item["owned_by"].as_str().map(|s| s.to_string()),
@@ -126,11 +154,92 @@ pub async fn fetch_models(
     }
 
     if result.is_empty() {
-        warn!("[fetch_provider_models] data 数组存在但未解析到任何模型 id");
-        return Err(ServiceError::BadRequest { message: "未获取到任何模型".to_string(), code: None });
+        let hint = if container.is_empty() {
+            "端点返回了空模型列表".to_string()
+        } else {
+            format!(
+                "响应含 {} 个条目但未解析出模型 id（不支持的格式）",
+                container.len()
+            )
+        };
+        warn!("[fetch_provider_models] {hint}");
+        return Err(ServiceError::BadRequest { message: hint, code: None });
     }
 
     result.sort_by(|a, b| a.id.cmp(&b.id));
     info!("[fetch_provider_models] 成功获取 {} 个模型", result.len());
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(text: &str) -> Result<Vec<ProviderModelInfo>, ServiceError> {
+        let json: serde_json::Value = serde_json::from_str(text).expect("测试 JSON 应合法");
+        parse_models_response(&json)
+    }
+
+    #[test]
+    fn parses_openai_data_format() {
+        let models = parse(
+            r#"{"object":"list","data":[{"id":"gpt-5","object":"model","owned_by":"openai"},{"id":"gpt-4o","object":"model"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(models.len(), 2);
+        // 按 id 排序后 gpt-4o 在前
+        assert_eq!(models[0].id, "gpt-4o");
+        assert_eq!(models[0].owned_by, None);
+        assert_eq!(models[1].id, "gpt-5");
+        assert_eq!(models[1].owned_by.as_deref(), Some("openai"));
+    }
+
+    #[test]
+    fn parses_gemini_models_format_with_prefix_strip() {
+        let models = parse(
+            r#"{"models":[{"name":"models/gemini-2.5-pro","displayName":"Gemini 2.5 Pro"},{"name":"models/gemini-2.5-flash"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(models.len(), 2);
+        // 按 id 排序后 flash 在前；Gemini name 的 "models/" 前缀被剥离
+        assert_eq!(models[0].id, "gemini-2.5-flash");
+        assert_eq!(models[1].id, "gemini-2.5-pro");
+    }
+
+    #[test]
+    fn parses_ollama_models_format_via_name_field() {
+        let models = parse(r#"{"models":[{"name":"llama3","model":"llama3:latest"},{"name":"qwen2.5"}]}"#)
+            .unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "llama3");
+        assert_eq!(models[1].id, "qwen2.5");
+    }
+
+    #[test]
+    fn sorts_and_dedups_no_duplicates() {
+        let models = parse(
+            r#"{"data":[{"id":"b-model"},{"id":"a-model"},{"id":"c-model"}]}"#,
+        )
+        .unwrap();
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["a-model", "b-model", "c-model"]);
+    }
+
+    #[test]
+    fn empty_data_array_reports_clear_error() {
+        let err = parse(r#"{"object":"list","data":[]}"#).unwrap_err();
+        assert!(err.to_string().contains("空模型列表"), "错误应说明端点返回空: {err}");
+    }
+
+    #[test]
+    fn entries_without_id_report_format_error() {
+        let err = parse(r#"{"data":[{"display_name":"x"},{"display_name":"y"}]}"#).unwrap_err();
+        assert!(err.to_string().contains("未解析出模型 id"), "错误应说明格式不支持: {err}");
+    }
+
+    #[test]
+    fn missing_container_reports_missing_field() {
+        let err = parse(r#"{"error":"unauthorized"}"#).unwrap_err();
+        assert!(err.to_string().contains("data/models"), "错误应指出缺少模型列表字段: {err}");
+    }
 }
