@@ -150,11 +150,7 @@ impl AgentConfigWriter for CodexWriter {
             live = serde_json::json!({});
         }
 
-        // MCP 服务器：从 profile 中剥离并合并到 [mcp_servers] 顶层表
-        let mut profile_clone = profile_config.clone();
-        config_writer::apply_mcp_servers(&mut live, &mut profile_clone, "mcp_servers");
-
-        let cfg = profile_clone.as_object().cloned().unwrap_or_default();
+        let cfg = profile_config.as_object().cloned().unwrap_or_default();
         let provider_key = cfg
             .get("model_provider")
             .and_then(|v| v.as_str())
@@ -236,11 +232,6 @@ impl AgentConfigWriter for CodexWriter {
             obj.insert("_silk_managed".to_string(), serde_json::json!(true));
         }
 
-        // TOML 原生 mcp_servers 键透传（前端 Codex 表单以 [mcp_servers.<name>] 写入）
-        if let Some(mcp) = cfg.get("mcp_servers") {
-            live["mcp_servers"] = mcp.clone();
-        }
-
         if let Err(e) = config_writer::write_from_value_async(&path, &live).await {
             let _ = _snapshot.restore();
             return Err(e);
@@ -284,13 +275,7 @@ impl AgentConfigWriter for GeminiCliWriter {
         profile_config: &serde_json::Value,
     ) -> Result<(), String> {
         let path = self.live_path(home);
-        config_writer::merge_into_live_async_with_mcp(
-            &path,
-            profile_config,
-            MergeStrategy::IntoSubObject("env"),
-            Some("mcpServers"),
-        )
-        .await
+        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoSubObject("env")).await
     }
 }
 
@@ -329,13 +314,7 @@ impl AgentConfigWriter for OpenCodeWriter {
         profile_config: &serde_json::Value,
     ) -> Result<(), String> {
         let path = self.live_path(home);
-        config_writer::merge_into_live_async_with_mcp(
-            &path,
-            profile_config,
-            MergeStrategy::IntoProvider,
-            Some("mcp"),
-        )
-        .await
+        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoProvider).await
     }
 
     async fn remove_live(&self, home: &Path, profile_id: &str) -> Result<(), String> {
@@ -397,13 +376,7 @@ impl AgentConfigWriter for HermesWriter {
         profile_config: &serde_json::Value,
     ) -> Result<(), String> {
         let path = self.live_path(home);
-        config_writer::merge_into_live_async_with_mcp(
-            &path,
-            profile_config,
-            MergeStrategy::IntoHermesProvider,
-            Some("mcp_servers"),
-        )
-        .await
+        config_writer::merge_into_live_async(&path, profile_config, MergeStrategy::IntoHermesProvider).await
     }
 
     async fn remove_live(&self, home: &Path, profile_id: &str) -> Result<(), String> {
@@ -686,8 +659,6 @@ pub async fn switch(
 
     let mut effective_config = build_effective_config(&config, _snippet.as_ref());
 
-    let home = crate::get_home_dir().to_path_buf();
-
     // 注入 base_url + api_key（按 harness 映射到正确字段位置）
     if let Ok(settings) = crate::models::GatewaySettings::load(
         crate::get_settings_path().ok_or_else(|| ServiceError::Internal {
@@ -697,44 +668,37 @@ pub async fn switch(
     ) {
         let base_url = format!("http://{}:{}/v1", settings.bind_host, settings.bind_port);
         let api_key = crate::application::gateway_key_service::builtin_key_value();
-        inject_gateway_config(&agent_type, &mut effective_config, &base_url, &api_key);
-    }
-
-    // 冲突检测：live 配置存在但未被 silk 管理 → 提示外部修改
-    if let Some(conflict) = detect_live_conflict(writer.as_ref(), &home)
-        .await
-        .map_err(|e| ServiceError::Internal {
-            message: format!("检查 live 配置冲突失败: {e}"),
-            detail: None,
-        })?
-    {
-        warnings.push(conflict);
-    }
-
-    // 网关联动：校验 profile 引用的模型在模型池存在
-    if let Ok(models) = crate::application::models_listing::list_all_models().await {
-        let mut missing = missing_referenced_models(&agent_type, &config, &models);
-        if !missing.is_empty() {
-            warnings.push(format!(
-                "以下模型在模型池中不存在，可能无法路由: {}",
-                missing.join(", ")
-            ));
+        if let Some(obj) = effective_config.as_object_mut() {
+            match agent_type.as_str() {
+                // Claude Code：写入 env 子对象（settings.json 的 env 作为环境变量注入）
+                "claude_code" => {
+                    let env = obj
+                        .entry("env".to_string())
+                        .or_insert_with(|| serde_json::json!({}));
+                    if let Some(e) = env.as_object_mut() {
+                        e.insert("ANTHROPIC_BASE_URL".to_string(), serde_json::json!(base_url));
+                        e.insert("ANTHROPIC_AUTH_TOKEN".to_string(), serde_json::json!(api_key));
+                    }
+                }
+                // Gemini CLI：profile_config 即 env 内容（IntoSubObject("env") 合并），
+                // 注入 GOOGLE_GEMINI_BASE_URL / GEMINI_API_KEY
+                "gemini_cli" => {
+                    obj.insert("GOOGLE_GEMINI_BASE_URL".to_string(), serde_json::json!(base_url));
+                    obj.insert("GEMINI_API_KEY".to_string(), serde_json::json!(api_key));
+                }
+                // Codex：顶层注入，CodexWriter 会搬进 [model_providers.<id>] 表；
+                // OpenCode / Hermes：整个 profile_config 即 provider 条目内容，顶层注入即条目内
+                _ => {
+                    obj.insert("base_url".to_string(), serde_json::json!(base_url));
+                    obj.insert("api_key".to_string(), serde_json::json!(api_key));
+                }
+            }
         }
     }
 
-    // 写入前备份 live 配置；写入失败时恢复原状并回滚 DB 状态
-    let snapshot = config_writer::LiveSnapshot::take(&writer.live_path(&home))
-        .map_err(|e| ServiceError::Internal {
-            message: format!("备份 live 配置失败: {e}"),
-            detail: None,
-        })?;
-
+    let home = crate::get_home_dir().to_path_buf();
     if let Err(e) = writer.write_live(&home, &effective_config).await {
-        let _ = snapshot.restore();
-        return Err(ServiceError::Internal {
-            message: format!("写入 live 配置失败，已回滚: {e}"),
-            detail: None,
-        });
+        warnings.push(format!("写入 live 配置失败: {e}"));
     }
 
     ProfileRepo::deactivate_all(pool, &agent_type).await?;
@@ -765,342 +729,6 @@ async fn switch_db_only(
         success: true,
         warnings: vec!["该 Agent 类型尚未支持配置自动写入，请手动配置".to_string()],
         requires_restart: true,
-    })
-}
-
-/// 按 harness 把网关 base_url/api_key 注入到 effective_config 的正确字段位置。
-/// 同时保留 profile 自定义的 env 键（仅添加缺失项，不覆盖已存在键）。
-fn inject_gateway_config(
-    agent_type: &str,
-    effective_config: &mut serde_json::Value,
-    base_url: &str,
-    api_key: &str,
-) {
-    let Some(obj) = effective_config.as_object_mut() else {
-        return;
-    };
-    match agent_type {
-        // Claude Code：写入 env 子对象（settings.json 的 env 作为环境变量注入）
-        "claude_code" => {
-            let env = obj
-                .entry("env".to_string())
-                .or_insert_with(|| serde_json::json!({}));
-            if let Some(e) = env.as_object_mut() {
-                e.entry("ANTHROPIC_BASE_URL".to_string())
-                    .or_insert_with(|| serde_json::json!(base_url));
-                e.entry("ANTHROPIC_AUTH_TOKEN".to_string())
-                    .or_insert_with(|| serde_json::json!(api_key));
-            }
-        }
-        // Gemini CLI：profile_config 即 env 内容（IntoSubObject("env") 合并），
-        // 注入 GOOGLE_GEMINI_BASE_URL / GEMINI_API_KEY
-        "gemini_cli" => {
-            obj.entry("GOOGLE_GEMINI_BASE_URL".to_string())
-                .or_insert_with(|| serde_json::json!(base_url));
-            obj.entry("GEMINI_API_KEY".to_string())
-                .or_insert_with(|| serde_json::json!(api_key));
-        }
-        // Codex：顶层注入，CodexWriter 会搬进 [model_providers.<id>] 表；
-        // OpenCode / Hermes：整个 profile_config 即 provider 条目内容，顶层注入即条目内
-        _ => {
-            obj.entry("base_url".to_string())
-                .or_insert_with(|| serde_json::json!(base_url));
-            obj.entry("api_key".to_string())
-                .or_insert_with(|| serde_json::json!(api_key));
-        }
-    }
-}
-
-/// 冲突检测：live 配置存在但未被 silk 管理 → 返回外部修改提示。
-async fn detect_live_conflict(
-    writer: &dyn AgentConfigWriter,
-    home: &Path,
-) -> Result<Option<String>, String> {
-    if !writer.live_path(home).exists() {
-        return Ok(None);
-    }
-    let managed = writer.is_managed(home).await?;
-    if managed {
-        Ok(None)
-    } else {
-        Ok(Some(format!(
-            "检测到 {} 的 live 配置未被 silk 管理，切换将覆盖外部修改",
-            writer.agent_type()
-        )))
-    }
-}
-
-/// 提取 profile config 中引用的模型 id（按 agent 结构）
-fn referenced_models(agent_type: &str, config: &serde_json::Value) -> Vec<String> {
-    let mut out = Vec::new();
-    match agent_type {
-        "claude_code" => {
-            if let Some(roles) = config.get("roles").and_then(|v| v.as_object()) {
-                for v in roles.values() {
-                    if let Some(s) = v.as_str() {
-                        out.push(s.to_string());
-                    }
-                }
-            }
-        }
-        "gemini_cli" => {
-            for key in ["GEMINI_MODEL", "model"] {
-                if let Some(s) = config.get(key).and_then(|v| v.as_str()) {
-                    out.push(s.to_string());
-                }
-            }
-        }
-        "codex" => {
-            if let Some(s) = config.get("model").and_then(|v| v.as_str()) {
-                out.push(s.to_string());
-            }
-        }
-        "opencode" => {
-            if let Some(enabled) = config.get("enabled_models").and_then(|v| v.as_object()) {
-                for list in enabled.values() {
-                    if let Some(arr) = list.as_array() {
-                        for m in arr {
-                            if let Some(s) = m.as_str() {
-                                out.push(s.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        "hermes" => {
-            if let Some(models) = config.get("models").and_then(|v| v.as_object()) {
-                out.extend(models.keys().cloned());
-            }
-        }
-        _ => {}
-    }
-    out
-}
-
-/// 网关联动：返回 profile 引用的、但模型池中不存在的模型 id。
-fn missing_referenced_models(
-    agent_type: &str,
-    config: &serde_json::Value,
-    models: &[crate::application::models_listing::ModelListingItem],
-) -> Vec<String> {
-    let known: std::collections::HashSet<&str> = models
-        .iter()
-        .flat_map(|m| {
-            let mut keys = vec![m.id.as_str()];
-            if let Some(mid) = &m.model_mapping_id {
-                keys.push(mid.as_str());
-            }
-            keys
-        })
-        .collect();
-    referenced_models(agent_type, config)
-        .into_iter()
-        .filter(|m| !known.contains(m.as_str()))
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
-// live 配置导入（反向能力：现有配置 → Profile）
-// ---------------------------------------------------------------------------
-
-/// 从 live 配置文件导入为 Profile（未激活）。
-///
-/// 读取 agent 的 live 配置 → 剥离 silk 注入的字段 → 按该 agent 的格式序列化为
-/// config_json → 创建 Profile。live 文件不存在时返回明确错误。
-pub async fn import_live_config(agent_type: String) -> Result<ProfileResponse, ServiceError> {
-    validate_non_empty("agent_type", &agent_type)?;
-    if !AgentType::is_valid(&agent_type) {
-        return Err(ServiceError::BadRequest {
-            message: format!("不支持的 agent_type: {}", agent_type),
-            code: None,
-        });
-    }
-
-    let writer = writer_for(&agent_type).ok_or_else(|| ServiceError::BadRequest {
-        message: format!("该 Agent 类型 ({agent_type}) 不支持配置自动写入，无法导入"),
-        code: None,
-    })?;
-
-    let home = crate::get_home_dir().to_path_buf();
-    let data = writer
-        .read_live(&home)
-        .await
-        .map_err(|e| ServiceError::Internal {
-            message: format!("读取 live 配置失败: {e}"),
-            detail: None,
-        })?
-        .ok_or_else(|| ServiceError::BadRequest {
-            message: format!("未找到 {} 的 live 配置（{}）", agent_type, writer.live_path(&home).display()),
-            code: None,
-        })?;
-
-    let text = String::from_utf8(data).map_err(|_| ServiceError::BadRequest {
-        message: "live 配置不是合法 UTF-8 文本".to_string(),
-        code: None,
-    })?;
-
-    let fmt = config_format_for(&agent_type);
-    config_writer::validate_config_text(&text, fmt).map_err(|e| {
-        ServiceError::BadRequest {
-            message: format!("live 配置格式错误: {e}"),
-            code: None,
-        }
-    })?;
-
-    let cleaned = clean_imported_config(&agent_type, &text, fmt)?;
-    validate_profile_payload(&agent_type, &cleaned)?;
-
-    let pool = require_db()?;
-    let name = format!("导入 {}", AgentType::name_for(&agent_type).unwrap_or(&agent_type));
-    let new = NewProfile {
-        name,
-        agent_type,
-        config_json: cleaned,
-        is_active: Some(false),
-        sort_index: None,
-    };
-    let profile = ProfileRepo::create(pool, &new).await?;
-    Ok(ProfileResponse::from(profile))
-}
-
-/// 剥离 live 配置中 silk 注入的字段，还原为用户可编辑的 config_json。
-fn clean_imported_config(
-    agent_type: &str,
-    text: &str,
-    fmt: ConfigFormat,
-) -> Result<String, ServiceError> {
-    let mut value: serde_json::Value = match fmt {
-        ConfigFormat::Json => serde_json::from_str(text).map_err(|e| {
-            ServiceError::BadRequest { message: format!("live 配置解析失败: {e}"), code: None }
-        })?,
-        ConfigFormat::Toml => toml::from_str(text).map_err(|e| {
-            ServiceError::BadRequest { message: format!("live 配置解析失败: {e}"), code: None }
-        })?,
-        ConfigFormat::Yaml => serde_yaml::from_str(text).map_err(|e| {
-            ServiceError::BadRequest { message: format!("live 配置解析失败: {e}"), code: None }
-        })?,
-    };
-
-    match agent_type {
-        // Claude Code：保留 roles，剥离注入的 env（ANTHROPIC_BASE_URL/AUTH_TOKEN）与接管标记
-        "claude_code" => {
-            if let Some(obj) = value.as_object_mut() {
-                obj.remove("env");
-                obj.remove("_silk_managed");
-                obj.remove("base_url");
-                obj.remove("api_key");
-            }
-        }
-        // Gemini CLI：config_json 即 env 内容，剥离注入的网关键
-        "gemini_cli" => {
-            if let Some(obj) = value.as_object_mut() {
-                obj.remove("GOOGLE_GEMINI_BASE_URL");
-                obj.remove("GEMINI_API_KEY");
-                obj.remove("_silk_managed");
-            }
-        }
-        // Codex：保留顶层 model/model_provider/wire_api，剥离注入字段与 model_providers 表
-        "codex" => {
-            if let Some(obj) = value.as_object_mut() {
-                obj.remove("base_url");
-                obj.remove("api_key");
-                obj.remove("openai_base_url");
-                obj.remove("_silk_managed");
-                obj.remove("model_providers");
-            }
-        }
-        // OpenCode：从 provider.<id> 提取第一个条目为 profile 配置
-        "opencode" => {
-            if let Some(providers) = value.get("provider").and_then(|v| v.as_object()) {
-                if let Some((id, entry)) = providers.iter().next() {
-                    let mut cfg = entry.clone();
-                    if let Some(o) = cfg.as_object_mut() {
-                        o.remove("_silk_managed");
-                        o.insert(
-                            "_silk_provider_id".to_string(),
-                            serde_json::json!(id),
-                        );
-                    }
-                    value = cfg;
-                }
-            }
-        }
-        // Hermes：从 custom_providers 列表提取第一条为 profile 配置
-        "hermes" => {
-            if let Some(list) = value.get("custom_providers").and_then(|v| v.as_array()) {
-                if let Some(entry) = list.iter().next() {
-                    let mut cfg = entry.clone();
-                    if let Some(o) = cfg.as_object_mut() {
-                        o.remove("_silk_managed");
-                        if o.get("name").is_none() {
-                            o.insert("name".to_string(), serde_json::json!("imported"));
-                        }
-                    }
-                    value = cfg;
-                }
-            }
-        }
-        _ => {}
-    }
-
-    // _silk_provider_id 若无显式值，用 name 兜底（schema 要求 opencode/hermes 必填）
-    if matches!(agent_type, "opencode" | "hermes") {
-        let has_id = value
-            .get("_silk_provider_id")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .is_some_and(|s| !s.is_empty());
-        if !has_id {
-            let fallback = value
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("imported")
-                .to_string();
-            if let Some(o) = value.as_object_mut() {
-                o.insert("_silk_provider_id".to_string(), serde_json::json!(fallback));
-            }
-        }
-    }
-
-    match fmt {
-        ConfigFormat::Json => serde_json::to_string_pretty(&value).map_err(|e| {
-            ServiceError::Internal { message: format!("config_json 序列化失败: {e}"), detail: None }
-        }),
-        ConfigFormat::Toml => toml::to_string_pretty(&value).map_err(|e| {
-            ServiceError::Internal { message: format!("config_json 序列化失败: {e}"), detail: None }
-        }),
-        ConfigFormat::Yaml => serde_yaml::to_string(&value).map_err(|e| {
-            ServiceError::Internal { message: format!("config_json 序列化失败: {e}"), detail: None }
-        }),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// live 状态查询（三态回显：当前激活 / live 未管理 / 需重启）
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentLiveStatus {
-    /// live 配置文件是否被 silk 管理（存在 _silk_managed 标记）
-    pub managed: bool,
-    /// live 配置文件路径
-    pub live_path: String,
-}
-
-pub async fn get_agent_live_status(agent_type: String) -> Result<AgentLiveStatus, ServiceError> {
-    let writer = writer_for(&agent_type).ok_or_else(|| ServiceError::BadRequest {
-        message: format!("该 Agent 类型 ({agent_type}) 不支持配置自动写入"),
-        code: None,
-    })?;
-    let home = crate::get_home_dir().to_path_buf();
-    let managed = writer.is_managed(&home).await.map_err(|e| ServiceError::Internal {
-        message: format!("检查 live 配置状态失败: {e}"),
-        detail: None,
-    })?;
-    Ok(AgentLiveStatus {
-        managed,
-        live_path: writer.live_path(&home).display().to_string(),
     })
 }
 
@@ -1323,67 +951,5 @@ mod tests {
         // 不应写入任何文件
         assert!(!home.join(".codex/config.toml").exists());
         let _ = std::fs::remove_dir_all(&home);
-    }
-
-    // ---- 批次3：env 注入扩展 / 冲突检测 / 网关联动 ----
-
-    #[test]
-    fn inject_gateway_config_keeps_custom_env_and_does_not_overwrite() {
-        // claude_code：profile 自定义 env 键保留，注入键不覆盖已有值
-        let mut cfg = json!({
-            "roles": { "sonnet": "gpt-5" },
-            "env": { "ANTHROPIC_MODEL": "custom-sonnet", "ANTHROPIC_BASE_URL": "user-provided" }
-        });
-        inject_gateway_config("claude_code", &mut cfg, "http://127.0.0.1:1877/v1", "sk-silk");
-        let env = cfg.get("env").unwrap();
-        // 自定义键保留
-        assert_eq!(env.get("ANTHROPIC_MODEL").and_then(|v| v.as_str()), Some("custom-sonnet"));
-        // 已存在的注入键不被覆盖（用户显式提供优先）
-        assert_eq!(env.get("ANTHROPIC_BASE_URL").and_then(|v| v.as_str()), Some("user-provided"));
-        // 缺失的注入键被补充
-        assert_eq!(env.get("ANTHROPIC_AUTH_TOKEN").and_then(|v| v.as_str()), Some("sk-silk"));
-
-        // gemini_cli：自定义 env 键保留，注入 GOOGLE_* 键
-        let mut cfg = json!({ "GEMINI_MODEL": "gemini-2.5-pro" });
-        inject_gateway_config("gemini_cli", &mut cfg, "http://127.0.0.1:1877/v1", "sk-silk");
-        assert_eq!(cfg.get("GEMINI_MODEL").and_then(|v| v.as_str()), Some("gemini-2.5-pro"));
-        assert_eq!(cfg.get("GOOGLE_GEMINI_BASE_URL").and_then(|v| v.as_str()), Some("http://127.0.0.1:1877/v1"));
-        assert_eq!(cfg.get("GEMINI_API_KEY").and_then(|v| v.as_str()), Some("sk-silk"));
-    }
-
-    #[test]
-    fn referenced_models_extracts_per_agent() {
-        let claude = json!({ "roles": { "sonnet": "m1", "opus": "m2" } });
-        let mut models = referenced_models("claude_code", &claude);
-        models.sort();
-        assert_eq!(models, vec!["m1", "m2"]);
-
-        let gemini = json!({ "GEMINI_MODEL": "gemini-2.5-pro" });
-        assert_eq!(referenced_models("gemini_cli", &gemini), vec!["gemini-2.5-pro"]);
-
-        let opencode = json!({ "enabled_models": { "silk": ["a", "b"], "other": ["c"] } });
-        let mut opencode_models = referenced_models("opencode", &opencode);
-        opencode_models.sort();
-        assert_eq!(opencode_models, vec!["a", "b", "c"]);
-
-        let hermes = json!({ "models": { "llama3": {}, "qwen": {} } });
-        assert_eq!(referenced_models("hermes", &hermes), vec!["llama3", "qwen"]);
-
-        let codex = json!({ "model": "gpt-5" });
-        assert_eq!(referenced_models("codex", &codex), vec!["gpt-5"]);
-    }
-
-    #[test]
-    fn missing_referenced_models_flags_unknown() {
-        let cfg = json!({ "roles": { "sonnet": "known-model", "opus": "ghost-model" } });
-        let known = vec![crate::application::models_listing::ModelListingItem {
-            id: "known-model".to_string(),
-            object: "model".to_string(),
-            created: 0,
-            owned_by: "silk".to_string(),
-            model_mapping_id: None,
-        }];
-        let missing = missing_referenced_models("claude_code", &cfg, &known);
-        assert_eq!(missing, vec!["ghost-model"]);
     }
 }

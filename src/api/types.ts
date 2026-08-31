@@ -224,13 +224,6 @@ export interface SwitchResult {
   requires_restart: boolean;
 }
 
-export interface AgentLiveStatus {
-  /** live 配置文件是否被 silk 管理（存在 _silk_managed 标记） */
-  managed: boolean;
-  /** live 配置文件路径 */
-  live_path: string;
-}
-
 // ---------------------------------------------------------------------------
 // 其他类型
 // ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 use crate::application::models_listing::ModelListingItem;
-use crate::application::profile_service::{
-    AgentLiveStatus, CreateProfilePayload, ProfileResponse, SwitchResult, UpdateProfilePayload,
-};
 use crate::application::profile_service as ps;
+use crate::application::profile_service::{
+    CreateProfilePayload, ProfileResponse, SwitchResult, UpdateProfilePayload,
+};
 use crate::AppState;
 use tauri::State;
 
@@ -11,22 +11,6 @@ pub async fn list_all_models() -> Result<Vec<ModelListingItem>, String> {
     crate::application::models_listing::list_all_models()
         .await
         .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn import_live_config(
-    _state: State<'_, AppState>,
-    agent_type: String,
-) -> Result<ProfileResponse, String> {
-    ps::import_live_config(agent_type).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn get_agent_live_status(
-    _state: State<'_, AppState>,
-    agent_type: String,
-) -> Result<AgentLiveStatus, String> {
-    ps::get_agent_live_status(agent_type).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
