@@ -14,11 +14,12 @@ pub struct ModelListingItem {
     pub model_mapping_id: Option<String>,
 }
 
-/// 返回全量模型列表：模型池（top） + 全部启用渠道的模型（按 owned_by 排序）
+/// 返回 /v1/models 的模型清单：模型池（top） + 穿透渠道模型（按 owned_by 排序）
 /// 与网关 /v1/models 完全一致，去重。
 ///
-/// 注意：渠道取 `find_enabled`（含非穿透渠道）——预设管理「获取模型」与
-/// /v1/models 都需要看到用户配置过的全部渠道模型，而非仅穿透渠道。
+/// 注意：渠道取 `find_passthrough_enabled`——`/v1/models` 是给客户端（Claude
+/// Code/Codex 等）看的**可路由模型清单**，非穿透渠道的模型不直接暴露（它们
+/// 走模型映射路由，出现在预设表单的「获取模型」里由 list_local_pool_models 单独聚合）。
 pub async fn list_all_models() -> Result<Vec<ModelListingItem>, ServiceError> {
     let pool = crate::error::require_db()?;
 
@@ -31,8 +32,8 @@ pub async fn list_all_models() -> Result<Vec<ModelListingItem>, ServiceError> {
         }
     };
 
-    // ② 全部启用渠道的模型（含非穿透渠道）
-    let providers = match ProviderRepo::find_enabled(pool).await {
+    // ② 穿透渠道模型（仅 models_passthrough=1）
+    let providers = match ProviderRepo::find_passthrough_enabled(pool).await {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(%e, "查询渠道列表失败");
