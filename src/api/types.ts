@@ -231,13 +231,6 @@ export interface AgentLiveStatus {
   live_path: string;
 }
 
-export interface ImportableProvider {
-  /** provider 键：opencode 为 provider.<id> 的 id；hermes 为 custom_providers 的 name */
-  key: string;
-  /** 摘要（模型信息等，便于用户辨认） */
-  summary: string;
-}
-
 // ---------------------------------------------------------------------------
 // 其他类型
 // ---------------------------------------------------------------------------

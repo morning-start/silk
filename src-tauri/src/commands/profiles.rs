@@ -1,7 +1,6 @@
 use crate::application::models_listing::ModelListingItem;
 use crate::application::profile_service::{
-    AgentLiveStatus, CreateProfilePayload, ImportableProvider, ProfileResponse, SwitchResult,
-    UpdateProfilePayload,
+    AgentLiveStatus, CreateProfilePayload, ProfileResponse, SwitchResult, UpdateProfilePayload,
 };
 use crate::application::profile_service as ps;
 use crate::AppState;
@@ -18,21 +17,8 @@ pub async fn list_all_models() -> Result<Vec<ModelListingItem>, String> {
 pub async fn import_live_config(
     _state: State<'_, AppState>,
     agent_type: String,
-    provider_key: Option<String>,
 ) -> Result<ProfileResponse, String> {
-    ps::import_live_config(agent_type, provider_key)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn list_importable_providers(
-    _state: State<'_, AppState>,
-    agent_type: String,
-) -> Result<Vec<ImportableProvider>, String> {
-    ps::list_importable_providers(agent_type)
-        .await
-        .map_err(|e| e.to_string())
+    ps::import_live_config(agent_type).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

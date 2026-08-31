@@ -6,7 +6,6 @@ import type {
   UpdateProfilePayload,
   SwitchResult,
   AgentLiveStatus,
-  ImportableProvider,
 } from "./types";
 
 export const profilesApi = {
@@ -34,14 +33,8 @@ export const profilesApi = {
   setCommonSnippet: (agentType: AgentType, content: string): Promise<void> =>
     invoke<void>("set_common_snippet", { agentType, content }),
 
-  importLiveConfig: (
-    agentType: AgentType,
-    providerKey?: string | null
-  ): Promise<Profile> =>
-    invoke<Profile>("import_live_config", { agentType, providerKey }),
-
-  listImportableProviders: (agentType: AgentType): Promise<ImportableProvider[]> =>
-    invoke<ImportableProvider[]>("list_importable_providers", { agentType }),
+  importLiveConfig: (agentType: AgentType): Promise<Profile> =>
+    invoke<Profile>("import_live_config", { agentType }),
 
   getAgentLiveStatus: (agentType: AgentType): Promise<AgentLiveStatus> =>
     invoke<AgentLiveStatus>("get_agent_live_status", { agentType }),

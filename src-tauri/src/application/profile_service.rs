@@ -908,10 +908,7 @@ fn missing_referenced_models(
 ///
 /// 读取 agent 的 live 配置 → 剥离 silk 注入的字段 → 按该 agent 的格式序列化为
 /// config_json → 创建 Profile。live 文件不存在时返回明确错误。
-pub async fn import_live_config(
-    agent_type: String,
-    provider_key: Option<String>,
-) -> Result<ProfileResponse, ServiceError> {
+pub async fn import_live_config(agent_type: String) -> Result<ProfileResponse, ServiceError> {
     validate_non_empty("agent_type", &agent_type)?;
     if !AgentType::is_valid(&agent_type) {
         return Err(ServiceError::BadRequest {
@@ -951,7 +948,7 @@ pub async fn import_live_config(
         }
     })?;
 
-    let cleaned = clean_imported_config(&agent_type, &text, fmt, provider_key.as_deref())?;
+    let cleaned = clean_imported_config(&agent_type, &text, fmt)?;
     validate_profile_payload(&agent_type, &cleaned)?;
 
     let pool = require_db()?;
@@ -967,115 +964,11 @@ pub async fn import_live_config(
     Ok(ProfileResponse::from(profile))
 }
 
-/// live 配置中可导入的 provider 候选（供前端选择弹窗使用）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImportableProvider {
-    /// provider 键：opencode 为 provider.<id> 的 id；hermes 为 custom_providers 的 name
-    pub key: String,
-    /// 摘要（模型信息等，便于用户辨认）
-    pub summary: String,
-}
-
-/// 列出 opencode/hermes live 配置中可导入的 provider 条目。
-/// 其他 agent（claude/gemini/codex）结构单一，不适用多 provider 选择，返回空列表。
-pub async fn list_importable_providers(
-    agent_type: String,
-) -> Result<Vec<ImportableProvider>, ServiceError> {
-    validate_non_empty("agent_type", &agent_type)?;
-    if !AgentType::is_valid(&agent_type) {
-        return Err(ServiceError::BadRequest {
-            message: format!("不支持的 agent_type: {}", agent_type),
-            code: None,
-        });
-    }
-    // 仅 opencode/hermes 是多 provider 累加模式
-    if !matches!(agent_type.as_str(), "opencode" | "hermes") {
-        return Ok(Vec::new());
-    }
-
-    let writer = writer_for(&agent_type).ok_or_else(|| ServiceError::BadRequest {
-        message: format!("该 Agent 类型 ({agent_type}) 不支持配置自动写入"),
-        code: None,
-    })?;
-
-    let home = crate::get_home_dir().to_path_buf();
-    let data = writer
-        .read_live(&home)
-        .await
-        .map_err(|e| ServiceError::Internal {
-            message: format!("读取 live 配置失败: {e}"),
-            detail: None,
-        })?
-        .ok_or_else(|| ServiceError::BadRequest {
-            message: format!("未找到 {} 的 live 配置（{}）", agent_type, writer.live_path(&home).display()),
-            code: None,
-        })?;
-
-    let text = String::from_utf8(data).map_err(|_| ServiceError::BadRequest {
-        message: "live 配置不是合法 UTF-8 文本".to_string(),
-        code: None,
-    })?;
-
-    let fmt = config_format_for(&agent_type);
-    let value: serde_json::Value = match fmt {
-        ConfigFormat::Json => serde_json::from_str(&text).map_err(|e| {
-            ServiceError::BadRequest { message: format!("live 配置解析失败: {e}"), code: None }
-        })?,
-        ConfigFormat::Yaml => serde_yaml::from_str(&text).map_err(|e| {
-            ServiceError::BadRequest { message: format!("live 配置解析失败: {e}"), code: None }
-        })?,
-        _ => return Ok(Vec::new()),
-    };
-
-    let mut out = Vec::new();
-    match agent_type.as_str() {
-        "opencode" => {
-            if let Some(providers) = value.get("provider").and_then(|v| v.as_object()) {
-                for (id, entry) in providers {
-                    let summary = entry
-                        .get("models")
-                        .or_else(|| entry.get("model"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("model: {s}"))
-                        .unwrap_or_else(|| "provider".to_string());
-                    out.push(ImportableProvider { key: id.clone(), summary });
-                }
-            }
-        }
-        "hermes" => {
-            if let Some(list) = value.get("custom_providers").and_then(|v| v.as_array()) {
-                for entry in list {
-                    let name = entry
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(未命名)")
-                        .to_string();
-                    let summary = entry
-                        .get("models")
-                        .and_then(|v| v.as_object())
-                        .map(|m| {
-                            let keys: Vec<String> = m.keys().cloned().collect();
-                            format!("models: {}", keys.join(", "))
-                        })
-                        .unwrap_or_else(|| "provider".to_string());
-                    out.push(ImportableProvider { key: name.clone(), summary });
-                }
-            }
-        }
-        _ => {}
-    }
-    Ok(out)
-}
-
 /// 剥离 live 配置中 silk 注入的字段，还原为用户可编辑的 config_json。
-///
-/// `provider_key`：opencode/hermes 指定导入某个 provider 条目（opencode→provider.<id>；
-/// hermes→custom_providers 中 name 匹配）；None 时取第一个条目。
 fn clean_imported_config(
     agent_type: &str,
     text: &str,
     fmt: ConfigFormat,
-    provider_key: Option<&str>,
 ) -> Result<String, ServiceError> {
     let mut value: serde_json::Value = match fmt {
         ConfigFormat::Json => serde_json::from_str(text).map_err(|e| {
@@ -1117,14 +1010,11 @@ fn clean_imported_config(
                 obj.remove("model_providers");
             }
         }
-        // OpenCode：从 provider.<id> 提取指定条目（缺省取第一个）为 profile 配置
+        // OpenCode：从 provider.<id> 提取第一个条目为 profile 配置
         "opencode" => {
             if let Some(providers) = value.get("provider").and_then(|v| v.as_object()) {
-                let picked = provider_key
-                    .and_then(|k| providers.get(k).map(|e| (k.to_string(), e.clone())))
-                    .or_else(|| providers.iter().next().map(|(id, e)| (id.clone(), e.clone())));
-                if let Some((id, entry)) = picked {
-                    let mut cfg = entry;
+                if let Some((id, entry)) = providers.iter().next() {
+                    let mut cfg = entry.clone();
                     if let Some(o) = cfg.as_object_mut() {
                         o.remove("_silk_managed");
                         o.remove("base_url");
@@ -1138,15 +1028,11 @@ fn clean_imported_config(
                 }
             }
         }
-        // Hermes：从 custom_providers 列表提取指定条目（缺省取第一个）为 profile 配置
+        // Hermes：从 custom_providers 列表提取第一条为 profile 配置
         "hermes" => {
             if let Some(list) = value.get("custom_providers").and_then(|v| v.as_array()) {
-                let picked = provider_key
-                    .and_then(|k| list.iter().find(|p| p.get("name").and_then(|n| n.as_str()) == Some(k)))
-                    .cloned()
-                    .or_else(|| list.iter().next().cloned());
-                if let Some(entry) = picked {
-                    let mut cfg = entry;
+                if let Some(entry) = list.iter().next() {
+                    let mut cfg = entry.clone();
                     if let Some(o) = cfg.as_object_mut() {
                         o.remove("_silk_managed");
                         o.remove("base_url");
@@ -1513,7 +1399,6 @@ mod tests {
             "claude_code",
             r#"{"roles":{"sonnet":"gpt-5"},"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:1877/v1","ANTHROPIC_AUTH_TOKEN":"sk-silk"},"_silk_managed":true}"#,
             ConfigFormat::Json,
-            None,
         )
         .unwrap();
         let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
@@ -1529,7 +1414,6 @@ mod tests {
             "gemini_cli",
             r#"{"GEMINI_MODEL":"gemini-2.5-pro","GOOGLE_GEMINI_BASE_URL":"http://127.0.0.1:1877/v1","GEMINI_API_KEY":"sk-silk","_silk_managed":true}"#,
             ConfigFormat::Json,
-            None,
         )
         .unwrap();
         let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
@@ -1545,7 +1429,6 @@ mod tests {
             "codex",
             "model_provider = \"custom\"\nmodel = \"gpt-5\"\nwire_api = \"responses\"\nbase_url = \"http://127.0.0.1:1877/v1\"\napi_key = \"sk-silk\"\n_silk_managed = true\n[model_providers.custom]\nname = \"custom\"\nbase_url = \"http://127.0.0.1:1877/v1\"\n",
             ConfigFormat::Toml,
-            None,
         )
         .unwrap();
         let v: serde_json::Value = toml::from_str(&cleaned).unwrap();
@@ -1564,7 +1447,6 @@ mod tests {
             "opencode",
             r#"{"provider":{"daily":{"base_url":"http://127.0.0.1:1877/v1","api_key":"sk-silk","_silk_managed":true,"enabled_models":{}}}}"#,
             ConfigFormat::Json,
-            None,
         )
         .unwrap();
         let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
@@ -1579,7 +1461,6 @@ mod tests {
             "hermes",
             "custom_providers:\n  - name: silk\n    base_url: http://127.0.0.1:1877/v1\n    api_key: sk-silk\n    _silk_managed: true\n  - name: other\n    base_url: http://example.com\n",
             ConfigFormat::Yaml,
-            None,
         )
         .unwrap();
         let v: serde_json::Value = serde_yaml::from_str(&cleaned).unwrap();
@@ -1588,34 +1469,5 @@ mod tests {
         assert_eq!(v["name"], "silk");
         assert!(v.get("base_url").is_none());
         assert!(v.get("_silk_managed").is_none());
-    }
-
-    // ---- 批次2：多 provider 指定导入 ----
-
-    #[test]
-    fn clean_imported_opencode_picks_specified_provider() {
-        let cleaned = clean_imported_config(
-            "opencode",
-            r#"{"provider":{"daily":{"enabled_models":{}},"night":{"enabled_models":{}}}}"#,
-            ConfigFormat::Json,
-            Some("night"),
-        )
-        .unwrap();
-        let v: serde_json::Value = serde_json::from_str(&cleaned).unwrap();
-        assert_eq!(v["_silk_provider_id"], "night");
-    }
-
-    #[test]
-    fn clean_imported_hermes_picks_specified_provider() {
-        let cleaned = clean_imported_config(
-            "hermes",
-            "custom_providers:\n  - name: silk\n    base_url: http://127.0.0.1:1877/v1\n  - name: other\n    base_url: http://example.com\n",
-            ConfigFormat::Yaml,
-            Some("other"),
-        )
-        .unwrap();
-        let v: serde_json::Value = serde_yaml::from_str(&cleaned).unwrap();
-        assert_eq!(v["_silk_provider_id"], "other");
-        assert_eq!(v["name"], "other");
     }
 }
