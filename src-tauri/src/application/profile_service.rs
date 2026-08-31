@@ -639,6 +639,8 @@ pub async fn switch(
 ) -> Result<SwitchResult, ServiceError> {
     let pool = require_db()?;
 
+    tracing::debug!("[profiles:switch] agent_type={agent_type} profile_id={profile_id} 开始切换");
+
     let profile = require_found(
         ProfileRepo::find_by_id(pool, &profile_id).await?,
         "Profile",
@@ -656,9 +658,13 @@ pub async fn switch(
     let writer = match writer_for(&agent_type) {
         Some(w) => w,
         None => {
+            tracing::debug!("[profiles:switch] {} 无 writer，仅切 DB 状态", agent_type);
             return switch_db_only(pool, &agent_type, &profile_id).await;
         }
     };
+
+    let live_path = writer.live_path(&crate::get_home_dir().to_path_buf());
+    tracing::debug!("[profiles:switch] live 配置路径: {}", live_path.display());
 
     let fmt = config_format_for(&agent_type);
     let config: serde_json::Value = match fmt {
@@ -697,7 +703,10 @@ pub async fn switch(
     ) {
         let base_url = format!("http://{}:{}/v1", settings.bind_host, settings.bind_port);
         let api_key = crate::application::gateway_key_service::builtin_key_value();
+        tracing::debug!("[profiles:switch] 注入网关配置 base_url={base_url}");
         inject_gateway_config(&agent_type, &mut effective_config, &base_url, &api_key);
+    } else {
+        tracing::warn!("[profiles:switch] 读取网关设置失败，跳过 base_url/api_key 注入");
     }
 
     // 冲突检测：live 配置存在但未被 silk 管理 → 提示外部修改
@@ -708,13 +717,15 @@ pub async fn switch(
             detail: None,
         })?
     {
+        tracing::warn!("[profiles:switch] 检测到 live 配置冲突: {conflict}");
         warnings.push(conflict);
     }
 
     // 网关联动：校验 profile 引用的模型在模型池存在
     if let Ok(models) = crate::application::models_listing::list_all_models().await {
-        let mut missing = missing_referenced_models(&agent_type, &config, &models);
+        let missing = missing_referenced_models(&agent_type, &config, &models);
         if !missing.is_empty() {
+            tracing::warn!("[profiles:switch] 模型池缺失模型: {}", missing.join(", "));
             warnings.push(format!(
                 "以下模型在模型池中不存在，可能无法路由: {}",
                 missing.join(", ")
@@ -729,13 +740,19 @@ pub async fn switch(
             detail: None,
         })?;
 
+    tracing::debug!(
+        "[profiles:switch] 写入 live 配置 config_json_bytes={}",
+        serde_json::to_string(&effective_config).map(|s| s.len()).unwrap_or(0)
+    );
     if let Err(e) = writer.write_live(&home, &effective_config).await {
+        tracing::error!("[profiles:switch] 写入 live 配置失败: {e}，正在恢复快照");
         let _ = snapshot.restore();
         return Err(ServiceError::Internal {
             message: format!("写入 live 配置失败，已回滚: {e}"),
             detail: None,
         });
     }
+    tracing::info!("[profiles:switch] 写入 live 配置成功: {}", live_path.display());
 
     ProfileRepo::deactivate_all(pool, &agent_type).await?;
     ProfileRepo::activate(pool, &profile_id).await?;
@@ -925,6 +942,11 @@ pub async fn import_live_config(
         code: None,
     })?;
 
+    tracing::debug!(
+        "[profiles:import_live_config] agent_type={agent_type} provider_key={:?}",
+        provider_key
+    );
+
     let home = crate::get_home_dir().to_path_buf();
     let data = writer
         .read_live(&home)
@@ -964,6 +986,11 @@ pub async fn import_live_config(
         sort_index: None,
     };
     let profile = ProfileRepo::create(pool, &new).await?;
+    tracing::info!(
+        "[profiles:import_live_config] 导入成功 profile_id={} name={}",
+        profile.id,
+        profile.name
+    );
     Ok(ProfileResponse::from(profile))
 }
 
@@ -1064,6 +1091,10 @@ pub async fn list_importable_providers(
         }
         _ => {}
     }
+    tracing::debug!(
+        "[profiles:list_importable_providers] agent_type={agent_type} 候选数={}",
+        out.len()
+    );
     Ok(out)
 }
 
@@ -1212,13 +1243,17 @@ pub async fn get_agent_live_status(agent_type: String) -> Result<AgentLiveStatus
         code: None,
     })?;
     let home = crate::get_home_dir().to_path_buf();
+    let live_path = writer.live_path(&home).display().to_string();
     let managed = writer.is_managed(&home).await.map_err(|e| ServiceError::Internal {
         message: format!("检查 live 配置状态失败: {e}"),
         detail: None,
     })?;
+    tracing::debug!(
+        "[profiles:get_agent_live_status] agent_type={agent_type} managed={managed} path={live_path}"
+    );
     Ok(AgentLiveStatus {
         managed,
-        live_path: writer.live_path(&home).display().to_string(),
+        live_path,
     })
 }
 
