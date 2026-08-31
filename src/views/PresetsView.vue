@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
-import { NButton, NInput, NTag, NModal, useMessage, useDialog } from "naive-ui";
-import { api, type Preset, type AgentTypeInfo } from "../api";
+import { NButton, NInput, NSelect, NTag, NModal, useMessage, useDialog } from "naive-ui";
+import { api, type Preset, type AgentTypeInfo, type ProviderModelInfo } from "../api";
 import { formSpecFor, type HarnessFormSpec } from "../config/harnessForms";
 
 const message = useMessage();
@@ -20,6 +20,10 @@ const showModal = ref(false);
 const editingId = ref<string | null>(null);
 const formName = ref("");
 const formValues = ref<Record<string, unknown>>({});
+
+// 获取模型
+const fetchedModels = ref<ProviderModelInfo[]>([]);
+const fetchingModels = ref(false);
 
 // 初始化：加载 agent 类型，默认选第一个
 async function loadAgentTypes() {
@@ -69,8 +73,74 @@ function openEdit(preset: Preset) {
   formName.value = preset.name;
   const s = formSpecFor(preset.agent_type);
   formValues.value = s ? s.fromSettings(preset.settings_config) : {};
+  fetchedModels.value = [];
   showModal.value = true;
 }
+
+// 从表单提取端点+Key（按 harness 字段 key 映射），用于获取模型
+function endpointAndKeyFromForm(agentType: string, form: Record<string, unknown>) {
+  switch (agentType) {
+    case "claude_code":
+      return { baseUrl: String(form.ANTHROPIC_BASE_URL || ""), apiKey: String(form.ANTHROPIC_AUTH_TOKEN || "") };
+    case "opencode":
+      return { baseUrl: String(form.baseURL || ""), apiKey: String(form.apiKey || "") };
+    case "hermes":
+    case "codex":
+      return { baseUrl: String(form.base_url || ""), apiKey: String(form.api_key || "") };
+    case "gemini_cli":
+      return { baseUrl: String(form.GOOGLE_GEMINI_BASE_URL || ""), apiKey: String(form.GEMINI_API_KEY || "") };
+    default:
+      return { baseUrl: "", apiKey: "" };
+  }
+}
+
+// 从远程端点获取模型列表（对齐 cc-switch fetchModelsForConfig）
+async function fetchModels() {
+  const { baseUrl, apiKey } = endpointAndKeyFromForm(activeTab.value, formValues.value);
+  if (!baseUrl.trim() || !apiKey.trim()) {
+    message.warning("请先填写 API 端点与 API Key");
+    return;
+  }
+  fetchingModels.value = true;
+  try {
+    const models = await api.fetchProviderModels({
+      api_base_url: baseUrl.trim(),
+      api_key: apiKey.trim(),
+      timeout_seconds: 10,
+    });
+    fetchedModels.value = models;
+    if (models.length > 0) {
+      message.success(`已获取 ${models.length} 个模型`);
+    } else {
+      message.warning("未获取到模型");
+    }
+  } catch (e: any) {
+    message.error(e?.message || "获取模型失败");
+  } finally {
+    fetchingModels.value = false;
+  }
+}
+
+const modelOptions = computed(() =>
+  fetchedModels.value.map((m) => ({ label: m.id, value: m.id }))
+);
+
+// 当前 harness 的端点字段 key（用于「获取模型」按钮可用性判断）
+const modelEndpointKey = computed(() => {
+  switch (activeTab.value) {
+    case "claude_code":
+      return "ANTHROPIC_BASE_URL";
+    case "opencode":
+      return "baseURL";
+    case "hermes":
+    case "codex":
+      return "base_url";
+    case "gemini_cli":
+      return "GOOGLE_GEMINI_BASE_URL";
+    default:
+      return "";
+  }
+});
 
 async function save() {
   if (!formName.value.trim()) {
@@ -211,6 +281,24 @@ onMounted(async () => {
 
       <!-- 结构化字段（按 harness 规格渲染） -->
       <template v-if="spec">
+        <!-- 获取模型（对齐 cc-switch fetchModelsForConfig） -->
+        <div class="form-item fetch-row">
+          <label>模型列表</label>
+          <NButton
+            size="small"
+            type="primary"
+            ghost
+            :loading="fetchingModels"
+            :disabled="!formValues[modelEndpointKey]"
+            @click="fetchModels"
+          >
+            获取模型
+          </NButton>
+          <span v-if="fetchedModels.length > 0" class="fetch-count">
+            已获取 {{ fetchedModels.length }} 个
+          </span>
+        </div>
+
         <div
           v-for="f in spec.fields"
           :key="f.key"
@@ -222,12 +310,27 @@ onMounted(async () => {
           <template v-if="f.type === 'model-roles'">
             <div class="role-row" v-for="role in f.roles || []" :key="role">
               <span class="role-label">{{ role }}</span>
-              <NInput
+              <NSelect
                 v-model:value="((formValues[f.key] as Record<string, string>) || {})[role]"
+                :options="modelOptions"
+                filterable
+                clearable
+                tag
                 :placeholder="`${role} 模型 id`"
               />
             </div>
           </template>
+
+          <!-- 模型下拉（从端点获取的模型列表选择，可自定义输入） -->
+          <NSelect
+            v-else-if="f.type === 'model-select'"
+            v-model:value="formValues[f.key] as string"
+            :options="modelOptions"
+            filterable
+            clearable
+            tag
+            :placeholder="f.placeholder"
+          />
 
           <!-- 密码框 -->
           <NInput
@@ -360,6 +463,21 @@ onMounted(async () => {
 
 .form-item {
   margin-bottom: 12px;
+}
+
+.fetch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fetch-row label {
+  margin-bottom: 0;
+}
+
+.fetch-count {
+  font-size: 12px;
+  color: var(--muted, #94a3b8);
 }
 
 .form-item label {
