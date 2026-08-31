@@ -122,16 +122,13 @@ fn is_local_gateway(base_url: &str) -> bool {
     base_norm == expect_norm
 }
 
-/// 直接读本地模型池（模型池 + 穿透渠道），转换为 ProviderModelInfo。
+/// 直接读本地模型池（模型池 + 全部启用渠道的 models 列），转换为 ProviderModelInfo。
 /// 空池返回明确错误，提示先配置渠道/模型池。
 async fn list_local_pool_models() -> Result<Vec<ProviderModelInfo>, ServiceError> {
+    let pool = crate::error::require_db()?;
+
+    // ① 模型池（list_all_models = 模型映射 + 穿透渠道）
     let items = crate::application::models_listing::list_all_models().await?;
-    if items.is_empty() {
-        return Err(ServiceError::BadRequest {
-            message: "本机模型池为空：请先在「渠道 / 模型」页添加渠道并拉取模型，或创建模型映射".to_string(),
-            code: None,
-        });
-    }
     let mut result: Vec<ProviderModelInfo> = items
         .iter()
         .map(|item| ProviderModelInfo {
@@ -142,6 +139,38 @@ async fn list_local_pool_models() -> Result<Vec<ProviderModelInfo>, ServiceError
             supported_endpoint_types: Vec::new(),
         })
         .collect();
+
+    // ② 补充全部启用渠道的 models 列（含非穿透渠道——预设选模型通常就是
+    //    选自己渠道的模型；穿透渠道已在 list_all_models 中，按 id 去重）
+    let mut seen: std::collections::HashSet<String> =
+        result.iter().map(|m| m.id.clone()).collect();
+    match crate::persistence::ProviderRepo::find_enabled(pool).await {
+        Ok(providers) => {
+            for provider in providers {
+                for model_id in provider.models_vec() {
+                    if seen.insert(model_id.clone()) {
+                        result.push(ProviderModelInfo {
+                            id: model_id,
+                            object: Some("model".to_string()),
+                            created: None,
+                            owned_by: Some(provider.name.clone()),
+                            supported_endpoint_types: Vec::new(),
+                        });
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("[fetch_provider_models] 查询渠道模型失败: {e}");
+        }
+    }
+
+    if result.is_empty() {
+        return Err(ServiceError::BadRequest {
+            message: "本机模型池为空：请先在「渠道 / 模型」页添加渠道并拉取模型，或创建模型映射".to_string(),
+            code: None,
+        });
+    }
     result.sort_by(|a, b| a.id.cmp(&b.id));
     tracing::info!("[fetch_provider_models] 本地模型池共 {} 个模型", result.len());
     Ok(result)
