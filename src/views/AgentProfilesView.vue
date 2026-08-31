@@ -221,7 +221,7 @@ function deleteClaude(profile: Profile) {
 }
 
 // ========================================================================
-// OpenCode — 按 owned_by 分组（匹配 /v1/models 返回结构）
+// OpenCode — Profile 卡片 + 按 owned_by 分组的模型多选（累加模式）
 // ========================================================================
 
 interface ModelOwnerGroup {
@@ -251,14 +251,44 @@ const modelOwnerGroups = computed<ModelOwnerGroup[]>(() => {
   return groups;
 });
 
-// OpenCode 配置：每个 owned_by 组下，哪些 model id 被启用
-const opencodeEnabled = ref<Record<string, string[]>>({});
+const opencodeProfiles = computed(() =>
+  profiles.value.filter((p) => p.agent_type === "opencode")
+);
+
+// 解析 OpenCode 配置的 enabled_models
+function parseOpenCodeEnabled(configJson: string): Record<string, string[]> {
+  try {
+    const parsed = JSON.parse(configJson);
+    return parsed.enabled_models || {};
+  } catch {
+    return {};
+  }
+}
+
+const showOpenCodeModal = ref(false);
+const editingOpenCodeId = ref<string | null>(null);
+const openCodeFormName = ref("");
+const openCodeFormEnabled = ref<Record<string, string[]>>({});
+
+function openAddOpenCode() {
+  editingOpenCodeId.value = null;
+  openCodeFormName.value = "";
+  openCodeFormEnabled.value = {};
+  showOpenCodeModal.value = true;
+}
+
+function openEditOpenCode(profile: Profile) {
+  editingOpenCodeId.value = profile.id;
+  openCodeFormName.value = profile.name;
+  openCodeFormEnabled.value = parseOpenCodeEnabled(profile.config_json);
+  showOpenCodeModal.value = true;
+}
 
 function toggleOpenCodeModel(owner: string, modelId: string) {
-  if (!opencodeEnabled.value[owner]) {
-    opencodeEnabled.value[owner] = [];
+  if (!openCodeFormEnabled.value[owner]) {
+    openCodeFormEnabled.value[owner] = [];
   }
-  const list = opencodeEnabled.value[owner];
+  const list = openCodeFormEnabled.value[owner];
   const idx = list.indexOf(modelId);
   if (idx >= 0) {
     list.splice(idx, 1);
@@ -268,16 +298,414 @@ function toggleOpenCodeModel(owner: string, modelId: string) {
 }
 
 function selectAllInGroup(owner: string, models: string[]) {
-  opencodeEnabled.value[owner] = [...models];
+  openCodeFormEnabled.value[owner] = [...models];
 }
 
 function deselectAllInGroup(owner: string) {
-  opencodeEnabled.value[owner] = [];
+  openCodeFormEnabled.value[owner] = [];
 }
 
-function saveOpenCodeConfig() {
-  const total = Object.values(opencodeEnabled.value).reduce((s, v) => s + v.length, 0);
-  message.success(`已保存，共 ${total} 个模型`);
+async function saveOpenCodeConfig() {
+  if (!openCodeFormName.value.trim()) {
+    message.warning("请输入配置名称");
+    return;
+  }
+  const configJson = JSON.stringify({
+    _silk_provider_id: openCodeFormName.value.trim(),
+    enabled_models: openCodeFormEnabled.value,
+  });
+
+  try {
+    if (editingOpenCodeId.value) {
+      await api.updateProfile(editingOpenCodeId.value, {
+        name: openCodeFormName.value.trim(),
+        config_json: configJson,
+      });
+      message.success("已更新");
+    } else {
+      await api.createProfile({
+        agent_type: "opencode",
+        name: openCodeFormName.value.trim(),
+        config_json: configJson,
+      });
+      message.success("已创建");
+    }
+    showOpenCodeModal.value = false;
+    await loadProfiles("opencode");
+  } catch (e: any) {
+    message.error(e?.message || "操作失败");
+  }
+}
+
+async function activateOpenCode(profile: Profile) {
+  try {
+    const result: SwitchResult = await api.switchProfile("opencode", profile.id);
+    message.success(`已切换到「${profile.name}」`);
+    for (const w of result.warnings) {
+      message.warning(w);
+    }
+    await loadProfiles("opencode");
+  } catch (e: any) {
+    message.error(e?.message || "切换失败");
+  }
+}
+
+function deleteOpenCode(profile: Profile) {
+  dialog.warning({
+    title: "确认删除",
+    content: `确定要删除配置「${profile.name}」吗？`,
+    positiveText: "删除",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        await api.deleteProfile(profile.id);
+        message.success("已删除");
+        await loadProfiles("opencode");
+      } catch (e: any) {
+        message.error(e?.message || "删除失败");
+      }
+    },
+  });
+}
+
+function openCodeModelCount(profile: Profile): number {
+  const enabled = parseOpenCodeEnabled(profile.config_json);
+  return Object.values(enabled).reduce((s, v) => s + v.length, 0);
+}
+
+// ========================================================================
+// Codex — TOML 配置（model_provider / model / wire_api）
+// ========================================================================
+
+interface CodexConfig {
+  model_provider: string;
+  model: string;
+  wire_api: string;
+}
+
+const codexProfiles = computed(() =>
+  profiles.value.filter((p) => p.agent_type === "codex")
+);
+
+// 宽松解析 TOML 顶层键值
+function parseCodexConfig(configToml: string): CodexConfig {
+  const out: CodexConfig = { model_provider: "", model: "", wire_api: "responses" };
+  for (const line of configToml.split("\n")) {
+    const m = line.match(/^\s*([\w_]+)\s*=\s*"([^"]*)"\s*$/);
+    if (m && (m[1] === "model_provider" || m[1] === "model" || m[1] === "wire_api")) {
+      out[m[1]] = m[2];
+    }
+  }
+  return out;
+}
+
+function buildCodexToml(cfg: CodexConfig): string {
+  const lines = [
+    `model_provider = "${cfg.model_provider}"`,
+    `model = "${cfg.model}"`,
+    `wire_api = "${cfg.wire_api}"`,
+  ];
+  return lines.join("\n");
+}
+
+const showCodexModal = ref(false);
+const editingCodexId = ref<string | null>(null);
+const codexFormName = ref("");
+const codexForm = ref<CodexConfig>({ model_provider: "custom", model: "", wire_api: "responses" });
+
+function openAddCodex() {
+  editingCodexId.value = null;
+  codexFormName.value = "";
+  codexForm.value = { model_provider: "custom", model: "", wire_api: "responses" };
+  showCodexModal.value = true;
+}
+
+function openEditCodex(profile: Profile) {
+  editingCodexId.value = profile.id;
+  codexFormName.value = profile.name;
+  codexForm.value = parseCodexConfig(profile.config_json);
+  showCodexModal.value = true;
+}
+
+async function saveCodexConfig() {
+  if (!codexFormName.value.trim()) {
+    message.warning("请输入配置名称");
+    return;
+  }
+  if (!codexForm.value.model_provider.trim()) {
+    message.warning("请输入 Model Provider");
+    return;
+  }
+  if (!codexForm.value.model.trim()) {
+    message.warning("请选择模型");
+    return;
+  }
+  const configJson = buildCodexToml(codexForm.value);
+
+  try {
+    if (editingCodexId.value) {
+      await api.updateProfile(editingCodexId.value, {
+        name: codexFormName.value.trim(),
+        config_json: configJson,
+      });
+      message.success("已更新");
+    } else {
+      await api.createProfile({
+        agent_type: "codex",
+        name: codexFormName.value.trim(),
+        config_json: configJson,
+      });
+      message.success("已创建");
+    }
+    showCodexModal.value = false;
+    await loadProfiles("codex");
+  } catch (e: any) {
+    message.error(e?.message || "操作失败");
+  }
+}
+
+async function activateCodex(profile: Profile) {
+  try {
+    const result: SwitchResult = await api.switchProfile("codex", profile.id);
+    message.success(`已切换到「${profile.name}」`);
+    for (const w of result.warnings) {
+      message.warning(w);
+    }
+    await loadProfiles("codex");
+  } catch (e: any) {
+    message.error(e?.message || "切换失败");
+  }
+}
+
+function deleteCodex(profile: Profile) {
+  dialog.warning({
+    title: "确认删除",
+    content: `确定要删除配置「${profile.name}」吗？`,
+    positiveText: "删除",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        await api.deleteProfile(profile.id);
+        message.success("已删除");
+        await loadProfiles("codex");
+      } catch (e: any) {
+        message.error(e?.message || "删除失败");
+      }
+    },
+  });
+}
+
+// ========================================================================
+// Gemini CLI — env 配置（GEMINI_MODEL 等）
+// ========================================================================
+
+const geminiProfiles = computed(() =>
+  profiles.value.filter((p) => p.agent_type === "gemini_cli")
+);
+
+function parseGeminiConfig(configJson: string): string {
+  try {
+    const parsed = JSON.parse(configJson);
+    return parsed.GEMINI_MODEL || "";
+  } catch {
+    return "";
+  }
+}
+
+const showGeminiModal = ref(false);
+const editingGeminiId = ref<string | null>(null);
+const geminiFormName = ref("");
+const geminiFormModel = ref("");
+
+function openAddGemini() {
+  editingGeminiId.value = null;
+  geminiFormName.value = "";
+  geminiFormModel.value = "";
+  showGeminiModal.value = true;
+}
+
+function openEditGemini(profile: Profile) {
+  editingGeminiId.value = profile.id;
+  geminiFormName.value = profile.name;
+  geminiFormModel.value = parseGeminiConfig(profile.config_json);
+  showGeminiModal.value = true;
+}
+
+async function saveGeminiConfig() {
+  if (!geminiFormName.value.trim()) {
+    message.warning("请输入配置名称");
+    return;
+  }
+  if (!geminiFormModel.value) {
+    message.warning("请选择模型");
+    return;
+  }
+  const configJson = JSON.stringify({ GEMINI_MODEL: geminiFormModel.value });
+
+  try {
+    if (editingGeminiId.value) {
+      await api.updateProfile(editingGeminiId.value, {
+        name: geminiFormName.value.trim(),
+        config_json: configJson,
+      });
+      message.success("已更新");
+    } else {
+      await api.createProfile({
+        agent_type: "gemini_cli",
+        name: geminiFormName.value.trim(),
+        config_json: configJson,
+      });
+      message.success("已创建");
+    }
+    showGeminiModal.value = false;
+    await loadProfiles("gemini_cli");
+  } catch (e: any) {
+    message.error(e?.message || "操作失败");
+  }
+}
+
+async function activateGemini(profile: Profile) {
+  try {
+    const result: SwitchResult = await api.switchProfile("gemini_cli", profile.id);
+    message.success(`已切换到「${profile.name}」`);
+    for (const w of result.warnings) {
+      message.warning(w);
+    }
+    await loadProfiles("gemini_cli");
+  } catch (e: any) {
+    message.error(e?.message || "切换失败");
+  }
+}
+
+function deleteGemini(profile: Profile) {
+  dialog.warning({
+    title: "确认删除",
+    content: `确定要删除配置「${profile.name}」吗？`,
+    positiveText: "删除",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        await api.deleteProfile(profile.id);
+        message.success("已删除");
+        await loadProfiles("gemini_cli");
+      } catch (e: any) {
+        message.error(e?.message || "删除失败");
+      }
+    },
+  });
+}
+
+// ========================================================================
+// Hermes — YAML 配置（_silk_provider_id + models 列表）
+// ========================================================================
+
+const hermesProfiles = computed(() =>
+  profiles.value.filter((p) => p.agent_type === "hermes")
+);
+
+// Hermes 的 config_json 是 YAML（JSON 文本是合法 YAML 子集），models 为 dict
+function parseHermesModels(configYaml: string): string[] {
+  try {
+    const parsed = JSON.parse(configYaml);
+    const models = parsed.models;
+    if (models && typeof models === "object" && !Array.isArray(models)) {
+      return Object.keys(models);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function buildHermesYaml(name: string, modelIds: string[]): string {
+  const models: Record<string, object> = {};
+  for (const id of modelIds) {
+    models[id] = {};
+  }
+  return JSON.stringify({ _silk_provider_id: name, models });
+}
+
+const showHermesModal = ref(false);
+const editingHermesId = ref<string | null>(null);
+const hermesFormName = ref("");
+const hermesFormModels = ref<string[]>([]);
+
+function openAddHermes() {
+  editingHermesId.value = null;
+  hermesFormName.value = "";
+  hermesFormModels.value = [];
+  showHermesModal.value = true;
+}
+
+function openEditHermes(profile: Profile) {
+  editingHermesId.value = profile.id;
+  hermesFormName.value = profile.name;
+  hermesFormModels.value = parseHermesModels(profile.config_json);
+  showHermesModal.value = true;
+}
+
+async function saveHermesConfig() {
+  if (!hermesFormName.value.trim()) {
+    message.warning("请输入配置名称");
+    return;
+  }
+  if (hermesFormModels.value.length === 0) {
+    message.warning("请至少选择一个模型");
+    return;
+  }
+  const configJson = buildHermesYaml(hermesFormName.value.trim(), hermesFormModels.value);
+
+  try {
+    if (editingHermesId.value) {
+      await api.updateProfile(editingHermesId.value, {
+        name: hermesFormName.value.trim(),
+        config_json: configJson,
+      });
+      message.success("已更新");
+    } else {
+      await api.createProfile({
+        agent_type: "hermes",
+        name: hermesFormName.value.trim(),
+        config_json: configJson,
+      });
+      message.success("已创建");
+    }
+    showHermesModal.value = false;
+    await loadProfiles("hermes");
+  } catch (e: any) {
+    message.error(e?.message || "操作失败");
+  }
+}
+
+async function activateHermes(profile: Profile) {
+  try {
+    const result: SwitchResult = await api.switchProfile("hermes", profile.id);
+    message.success(`已切换到「${profile.name}」`);
+    for (const w of result.warnings) {
+      message.warning(w);
+    }
+    await loadProfiles("hermes");
+  } catch (e: any) {
+    message.error(e?.message || "切换失败");
+  }
+}
+
+function deleteHermes(profile: Profile) {
+  dialog.warning({
+    title: "确认删除",
+    content: `确定要删除配置「${profile.name}」吗？`,
+    positiveText: "删除",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        await api.deleteProfile(profile.id);
+        message.success("已删除");
+        await loadProfiles("hermes");
+      } catch (e: any) {
+        message.error(e?.message || "删除失败");
+      }
+    },
+  });
 }
 </script>
 
@@ -368,50 +796,124 @@ function saveOpenCodeConfig() {
     </div>
 
     <!-- ================================================================ -->
-    <!-- OpenCode — 按 owned_by 分组                                       -->
+    <!-- OpenCode — 配置卡片（累加模式）                                   -->
     <!-- ================================================================ -->
     <div v-if="activeTab === 'opencode'" class="tab-content">
       <div v-if="loading" class="loading-state">加载模型中…</div>
 
       <template v-else>
-        <div class="opencode-hint">
-          模型按来源分组展示，结构与网关 <code>/v1/models</code> 返回一致。
-        </div>
-
-        <div class="owner-groups">
-          <div v-for="group in modelOwnerGroups" :key="group.owner" class="owner-group">
-            <div class="group-header">
-              <div class="group-title">
-                <span class="group-label">{{ group.ownerLabel }}</span>
-                <span class="group-count">{{ group.models.length }}</span>
-              </div>
-              <div class="group-actions">
-                <NButton size="tiny" quaternary @click="selectAllInGroup(group.owner, group.models)">全选</NButton>
-                <NButton size="tiny" quaternary @click="deselectAllInGroup(group.owner)">取消</NButton>
+        <div class="claude-configs">
+          <div
+            v-for="profile in opencodeProfiles"
+            :key="profile.id"
+            class="config-card"
+            :class="{ active: profile.is_active }"
+          >
+            <div class="config-card-header">
+              <div class="config-card-name">
+                <span class="config-name-text">{{ profile.name }}</span>
+                <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
               </div>
             </div>
 
-            <div class="group-models">
-              <label
-                v-for="mid in group.models"
-                :key="group.owner + '-' + mid"
-                class="model-check-item"
-                :class="{ checked: (opencodeEnabled[group.owner] || []).includes(mid) }"
+            <div class="role-list">
+              <div class="role-row">
+                <span class="role-label">模型数</span>
+                <span class="role-arrow">→</span>
+                <span class="role-model">{{ openCodeModelCount(profile) }} 个模型</span>
+              </div>
+            </div>
+
+            <div class="config-card-actions">
+              <NButton
+                v-if="!profile.is_active"
+                size="tiny"
+                type="primary"
+                @click="activateOpenCode(profile)"
               >
-                <input
-                  type="checkbox"
-                  class="model-checkbox"
-                  :checked="(opencodeEnabled[group.owner] || []).includes(mid)"
-                  @change="toggleOpenCodeModel(group.owner, mid)"
-                />
-                <span class="model-check-name">{{ mid }}</span>
-              </label>
-              <div v-if="group.models.length === 0" class="group-empty">无模型</div>
+                激活
+              </NButton>
+              <NButton size="tiny" quaternary @click="openEditOpenCode(profile)">编辑</NButton>
+              <NButton size="tiny" quaternary type="error" @click="deleteOpenCode(profile)">删除</NButton>
             </div>
           </div>
         </div>
 
-        <div v-if="modelOwnerGroups.length === 0" class="empty-state">
+        <div v-if="opencodeProfiles.length === 0" class="empty-state">
+          <div class="empty-icon" style="opacity: 0.4">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <h3 class="empty-title">暂无 OpenCode 配置</h3>
+          <p class="empty-desc">按来源（模型池 / Provider）勾选可用的模型组合</p>
+          <NButton type="primary" size="small" @click="openAddOpenCode">+ 新建配置</NButton>
+        </div>
+
+        <div v-if="opencodeProfiles.length > 0" class="add-config-bar">
+          <NButton type="primary" size="small" @click="openAddOpenCode">+ 新建配置</NButton>
+        </div>
+      </template>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- Codex — TOML 配置（model_provider / model / wire_api）            -->
+    <!-- ================================================================ -->
+    <div v-if="activeTab === 'codex'" class="tab-content">
+      <div v-if="loading" class="loading-state">加载模型中…</div>
+
+      <template v-else>
+        <div class="claude-configs">
+          <div
+            v-for="profile in codexProfiles"
+            :key="profile.id"
+            class="config-card"
+            :class="{ active: profile.is_active }"
+          >
+            <div class="config-card-header">
+              <div class="config-card-name">
+                <span class="config-name-text">{{ profile.name }}</span>
+                <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
+              </div>
+            </div>
+
+            <div class="role-list">
+              <div class="role-row">
+                <span class="role-label">Provider</span>
+                <span class="role-arrow">→</span>
+                <span class="role-model">{{ parseCodexConfig(profile.config_json).model_provider || "custom" }}</span>
+              </div>
+              <div class="role-row">
+                <span class="role-label">Model</span>
+                <span class="role-arrow">→</span>
+                <span class="role-model">{{ parseCodexConfig(profile.config_json).model }}</span>
+              </div>
+              <div class="role-row">
+                <span class="role-label">Wire API</span>
+                <span class="role-arrow">→</span>
+                <span class="role-model">{{ parseCodexConfig(profile.config_json).wire_api }}</span>
+              </div>
+            </div>
+
+            <div class="config-card-actions">
+              <NButton
+                v-if="!profile.is_active"
+                size="tiny"
+                type="primary"
+                @click="activateCodex(profile)"
+              >
+                激活
+              </NButton>
+              <NButton size="tiny" quaternary @click="openEditCodex(profile)">编辑</NButton>
+              <NButton size="tiny" quaternary type="error" @click="deleteCodex(profile)">删除</NButton>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="codexProfiles.length === 0" class="empty-state">
           <div class="empty-icon" style="opacity: 0.4">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px">
               <circle cx="12" cy="12" r="9"/>
@@ -419,14 +921,139 @@ function saveOpenCodeConfig() {
               <path d="M12 8v8"/>
             </svg>
           </div>
-          <h3 class="empty-title">暂无可用模型</h3>
-          <p class="empty-desc">请先在"渠道"中添加 Provider，或在"模型"中创建模型映射</p>
+          <h3 class="empty-title">暂无 Codex 配置</h3>
+          <p class="empty-desc">指定 model_provider / model / wire_api，激活后写入 ~/.codex/config.toml</p>
+          <NButton type="primary" size="small" @click="openAddCodex">+ 新建配置</NButton>
         </div>
 
-        <div v-if="modelOwnerGroups.length > 0" class="opencode-save-bar">
-          <NButton type="primary" size="small" @click="saveOpenCodeConfig">
-            保存配置（{{ Object.values(opencodeEnabled).reduce((s, v) => s + v.length, 0) }} 模型）
-          </NButton>
+        <div v-if="codexProfiles.length > 0" class="add-config-bar">
+          <NButton type="primary" size="small" @click="openAddCodex">+ 新建配置</NButton>
+        </div>
+      </template>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- Gemini CLI — env 配置                                             -->
+    <!-- ================================================================ -->
+    <div v-if="activeTab === 'gemini_cli'" class="tab-content">
+      <div v-if="loading" class="loading-state">加载模型中…</div>
+
+      <template v-else>
+        <div class="claude-configs">
+          <div
+            v-for="profile in geminiProfiles"
+            :key="profile.id"
+            class="config-card"
+            :class="{ active: profile.is_active }"
+          >
+            <div class="config-card-header">
+              <div class="config-card-name">
+                <span class="config-name-text">{{ profile.name }}</span>
+                <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
+              </div>
+            </div>
+
+            <div class="role-list">
+              <div class="role-row">
+                <span class="role-label">Model</span>
+                <span class="role-arrow">→</span>
+                <span class="role-model">{{ parseGeminiConfig(profile.config_json) || "—" }}</span>
+              </div>
+            </div>
+
+            <div class="config-card-actions">
+              <NButton
+                v-if="!profile.is_active"
+                size="tiny"
+                type="primary"
+                @click="activateGemini(profile)"
+              >
+                激活
+              </NButton>
+              <NButton size="tiny" quaternary @click="openEditGemini(profile)">编辑</NButton>
+              <NButton size="tiny" quaternary type="error" @click="deleteGemini(profile)">删除</NButton>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="geminiProfiles.length === 0" class="empty-state">
+          <div class="empty-icon" style="opacity: 0.4">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M8 12h8"/>
+              <path d="M12 8v8"/>
+            </svg>
+          </div>
+          <h3 class="empty-title">暂无 Gemini CLI 配置</h3>
+          <p class="empty-desc">选择默认模型，激活后写入 ~/.gemini/settings.json 的 env</p>
+          <NButton type="primary" size="small" @click="openAddGemini">+ 新建配置</NButton>
+        </div>
+
+        <div v-if="geminiProfiles.length > 0" class="add-config-bar">
+          <NButton type="primary" size="small" @click="openAddGemini">+ 新建配置</NButton>
+        </div>
+      </template>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- Hermes — YAML 配置（_silk_provider_id + models）                  -->
+    <!-- ================================================================ -->
+    <div v-if="activeTab === 'hermes'" class="tab-content">
+      <div v-if="loading" class="loading-state">加载模型中…</div>
+
+      <template v-else>
+        <div class="claude-configs">
+          <div
+            v-for="profile in hermesProfiles"
+            :key="profile.id"
+            class="config-card"
+            :class="{ active: profile.is_active }"
+          >
+            <div class="config-card-header">
+              <div class="config-card-name">
+                <span class="config-name-text">{{ profile.name }}</span>
+                <NTag v-if="profile.is_active" size="tiny" type="success">当前</NTag>
+              </div>
+            </div>
+
+            <div class="role-list">
+              <div class="role-row">
+                <span class="role-label">模型数</span>
+                <span class="role-arrow">→</span>
+                <span class="role-model">{{ parseHermesModels(profile.config_json).length }} 个模型</span>
+              </div>
+            </div>
+
+            <div class="config-card-actions">
+              <NButton
+                v-if="!profile.is_active"
+                size="tiny"
+                type="primary"
+                @click="activateHermes(profile)"
+              >
+                激活
+              </NButton>
+              <NButton size="tiny" quaternary @click="openEditHermes(profile)">编辑</NButton>
+              <NButton size="tiny" quaternary type="error" @click="deleteHermes(profile)">删除</NButton>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="hermesProfiles.length === 0" class="empty-state">
+          <div class="empty-icon" style="opacity: 0.4">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M8 12h8"/>
+              <path d="M12 8v8"/>
+            </svg>
+          </div>
+          <h3 class="empty-title">暂无 Hermes 配置</h3>
+          <p class="empty-desc">选择可用模型，激活后写入 ~/.hermes/config.yaml 的 custom_providers</p>
+          <NButton type="primary" size="small" @click="openAddHermes">+ 新建配置</NButton>
+        </div>
+
+        <div v-if="hermesProfiles.length > 0" class="add-config-bar">
+          <NButton type="primary" size="small" @click="openAddHermes">+ 新建配置</NButton>
         </div>
       </template>
     </div>
@@ -468,6 +1095,211 @@ function saveOpenCodeConfig() {
             @click="saveClaudeConfig"
           >
             {{ editingClaudeId ? "保存" : "创建" }}
+          </NButton>
+        </div>
+      </div>
+    </NModal>
+
+    <!-- ================================================================ -->
+    <!-- OpenCode 新建/编辑弹窗（按 owned_by 分组勾选模型）                  -->
+    <!-- ================================================================ -->
+    <NModal
+      v-model:show="showOpenCodeModal"
+      preset="card"
+      :title="editingOpenCodeId ? '编辑配置' : '新建配置'"
+      style="max-width: 560px"
+      :bordered="false"
+    >
+      <div class="claude-modal">
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">配置名称</label>
+          <NInput v-model:value="openCodeFormName" placeholder="如：日常编码" />
+        </div>
+
+        <div class="opencode-hint">
+          模型按来源分组展示，结构与网关 <code>/v1/models</code> 返回一致。
+        </div>
+
+        <div class="owner-groups">
+          <div v-for="group in modelOwnerGroups" :key="group.owner" class="owner-group">
+            <div class="group-header">
+              <div class="group-title">
+                <span class="group-label">{{ group.ownerLabel }}</span>
+                <span class="group-count">{{ group.models.length }}</span>
+              </div>
+              <div class="group-actions">
+                <NButton size="tiny" quaternary @click="selectAllInGroup(group.owner, group.models)">全选</NButton>
+                <NButton size="tiny" quaternary @click="deselectAllInGroup(group.owner)">取消</NButton>
+              </div>
+            </div>
+
+            <div class="group-models">
+              <label
+                v-for="mid in group.models"
+                :key="group.owner + '-' + mid"
+                class="model-check-item"
+                :class="{ checked: (openCodeFormEnabled[group.owner] || []).includes(mid) }"
+              >
+                <input
+                  type="checkbox"
+                  class="model-checkbox"
+                  :checked="(openCodeFormEnabled[group.owner] || []).includes(mid)"
+                  @change="toggleOpenCodeModel(group.owner, mid)"
+                />
+                <span class="model-check-name">{{ mid }}</span>
+              </label>
+              <div v-if="group.models.length === 0" class="group-empty">无模型</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="modelOwnerGroups.length === 0" class="empty-state">
+          <p class="empty-desc">暂无可用模型，请先在"渠道"中添加 Provider，或在"模型"中创建模型映射</p>
+        </div>
+
+        <div class="claude-modal-actions">
+          <NButton @click="showOpenCodeModal = false">取消</NButton>
+          <NButton
+            type="primary"
+            :disabled="!openCodeFormName.trim()"
+            @click="saveOpenCodeConfig"
+          >
+            {{ editingOpenCodeId ? "保存" : "创建" }}
+          </NButton>
+        </div>
+      </div>
+    </NModal>
+
+    <!-- ================================================================ -->
+    <!-- Codex 新建/编辑弹窗                                                -->
+    <!-- ================================================================ -->
+    <NModal
+      v-model:show="showCodexModal"
+      preset="card"
+      :title="editingCodexId ? '编辑配置' : '新建配置'"
+      style="max-width: 520px"
+      :bordered="false"
+    >
+      <div class="claude-modal">
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">配置名称</label>
+          <NInput v-model:value="codexFormName" placeholder="如：日常编码" />
+        </div>
+
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">Model Provider</label>
+          <NInput v-model:value="codexForm.model_provider" placeholder="custom（内置 openai 会自动改址 openai_base_url）" />
+        </div>
+
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">模型</label>
+          <NSelect
+            v-model:value="codexForm.model"
+            :options="allModelOptions"
+            filterable
+            placeholder="选择模型…"
+          />
+        </div>
+
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">Wire API</label>
+          <NSelect
+            v-model:value="codexForm.wire_api"
+            :options="[
+              { label: 'responses', value: 'responses' },
+              { label: 'chat', value: 'chat' },
+            ]"
+            placeholder="选择 API 类型…"
+          />
+        </div>
+
+        <div class="claude-modal-actions">
+          <NButton @click="showCodexModal = false">取消</NButton>
+          <NButton
+            type="primary"
+            :disabled="!codexFormName.trim() || !codexForm.model_provider.trim() || !codexForm.model.trim()"
+            @click="saveCodexConfig"
+          >
+            {{ editingCodexId ? "保存" : "创建" }}
+          </NButton>
+        </div>
+      </div>
+    </NModal>
+
+    <!-- ================================================================ -->
+    <!-- Gemini CLI 新建/编辑弹窗                                           -->
+    <!-- ================================================================ -->
+    <NModal
+      v-model:show="showGeminiModal"
+      preset="card"
+      :title="editingGeminiId ? '编辑配置' : '新建配置'"
+      style="max-width: 520px"
+      :bordered="false"
+    >
+      <div class="claude-modal">
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">配置名称</label>
+          <NInput v-model:value="geminiFormName" placeholder="如：Gemini 日常" />
+        </div>
+
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">模型</label>
+          <NSelect
+            v-model:value="geminiFormModel"
+            :options="allModelOptions"
+            filterable
+            placeholder="选择模型…"
+          />
+        </div>
+
+        <div class="claude-modal-actions">
+          <NButton @click="showGeminiModal = false">取消</NButton>
+          <NButton
+            type="primary"
+            :disabled="!geminiFormName.trim() || !geminiFormModel"
+            @click="saveGeminiConfig"
+          >
+            {{ editingGeminiId ? "保存" : "创建" }}
+          </NButton>
+        </div>
+      </div>
+    </NModal>
+
+    <!-- ================================================================ -->
+    <!-- Hermes 新建/编辑弹窗                                               -->
+    <!-- ================================================================ -->
+    <NModal
+      v-model:show="showHermesModal"
+      preset="card"
+      :title="editingHermesId ? '编辑配置' : '新建配置'"
+      style="max-width: 520px"
+      :bordered="false"
+    >
+      <div class="claude-modal">
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">配置名称</label>
+          <NInput v-model:value="hermesFormName" placeholder="如：Hermes 日常" />
+        </div>
+
+        <div class="claude-modal-field">
+          <label class="claude-modal-label">模型（可多选）</label>
+          <NSelect
+            v-model:value="hermesFormModels"
+            :options="allModelOptions"
+            multiple
+            filterable
+            placeholder="选择模型…"
+          />
+        </div>
+
+        <div class="claude-modal-actions">
+          <NButton @click="showHermesModal = false">取消</NButton>
+          <NButton
+            type="primary"
+            :disabled="!hermesFormName.trim() || hermesFormModels.length === 0"
+            @click="saveHermesConfig"
+          >
+            {{ editingHermesId ? "保存" : "创建" }}
           </NButton>
         </div>
       </div>

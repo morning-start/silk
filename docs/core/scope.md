@@ -45,7 +45,7 @@
 | B1 | 图像/视频透传 | passthrough 模式是否已完整覆盖？需实测 |
 | B2 | 多模态/工具调用 | 协议转换是否完整处理？需实测 |
 | B3 | AnalyticsView / MonitoringView | 是否接入路由？还是移除？ |
-| B4 | 非 Claude Code Agent 预设 | 是否需要完善？ |
+| B4 | 非 Claude Code Agent 预设 | ✅ 已解决（CR-001：OpenCode 真保存 + Codex/Gemini CLI/Hermes Tab，2026-08-31） |
 | B5 | 远程访问安全性 | 是否需要额外安全措施？ |
 
 ## 签署确认
