@@ -26,7 +26,7 @@
 | E6 | 插件系统 | ✅ 已完成 | Prompt Cache / 滑动窗口 / 日志裁剪 |
 | E7 | Token 用量统计与定价 | ✅ 已完成 | request_log_extra_token 表 |
 | E8 | 深色/浅色主题 | ⚠️ 部分完成 | 需确认切换完整性 |
-| E9 | 非 Claude Code Agent 预设 | ✅ 已完成 | OpenCode 真保存 + Codex/Gemini CLI/Hermes Tab（CR-001） |
+| E9 | 非 Claude Code Agent 预设 | ✅ 已完成 | OpenCode 真保存 + Codex/Gemini CLI/Hermes Tab（CR-001）；iteration-003 增强：live 导入、状态三态回显、切换回滚、env 注入扩展、冲突检测、网关联动模型校验、MCP 服务器管理 |
 
 ## 待确认需求（known_gaps）
 
