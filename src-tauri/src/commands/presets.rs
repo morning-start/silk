@@ -1,4 +1,4 @@
-use crate::application::preset_service::{PresetService, SwitchResult};
+use crate::application::preset_service::{PresetDefaults, PresetService, SwitchResult};
 use crate::models::{AgentType, NewPreset, Preset, UpdatePreset};
 use crate::AppState;
 use tauri::State;
@@ -57,4 +57,13 @@ pub async fn switch_preset(
 #[tauri::command]
 pub async fn list_agent_types() -> Vec<AgentType> {
     AgentType::all_typed()
+}
+
+/// 新建预设默认值（silk 网关 base_url/api_key，按 harness 映射表单字段）
+#[tauri::command]
+pub async fn get_preset_defaults(
+    _state: State<'_, AppState>,
+    agent_type: String,
+) -> Result<PresetDefaults, String> {
+    PresetService::get_defaults(agent_type).await.map_err(|e| e.to_string())
 }

@@ -233,6 +233,12 @@ export interface PresetSwitchResult {
   requires_restart: boolean;
 }
 
+export interface PresetDefaults {
+  agent_type: string;
+  /** 表单字段 key → 默认值（silk 网关 base_url/api_key） */
+  values: Record<string, string>;
+}
+
 // ---------------------------------------------------------------------------
 // 模型列表
 // ---------------------------------------------------------------------------

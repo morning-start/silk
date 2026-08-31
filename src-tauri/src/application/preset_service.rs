@@ -294,6 +294,68 @@ impl PresetService {
     }
 }
 
+/// 新建预设的默认填充值：silk 网关 base_url/api_key（按 harness 映射到表单字段）。
+/// 用户可手动修改。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PresetDefaults {
+    pub agent_type: String,
+    /// 表单字段 key → 默认值（与前端 harnessForms.ts 的字段 key 对齐）
+    pub values: serde_json::Map<String, serde_json::Value>,
+}
+
+impl PresetService {
+    /// 返回该 harness 的默认表单值（silk 网关端点 + 内置 key）。
+    /// 无端点/key 表单字段的 harness（如 codex）返回空 values。
+    pub async fn get_defaults(agent_type: String) -> Result<PresetDefaults, ServiceError> {
+        validate_non_empty("agent_type", &agent_type)?;
+        let mut values = serde_json::Map::new();
+
+        // 读网关设置构造 base_url；设置缺失时回退默认 127.0.0.1:1877
+        let settings_path = crate::get_settings_path().unwrap_or(std::path::Path::new(""));
+        let (base_url, api_key) = match crate::models::GatewaySettings::load(settings_path) {
+            Ok(s) => (
+                format!("http://{}:{}/v1", s.bind_host, s.bind_port),
+                crate::application::gateway_key_service::builtin_key_value(),
+            ),
+            Err(_) => (
+                "http://127.0.0.1:1877/v1".to_string(),
+                crate::application::gateway_key_service::builtin_key_value(),
+            ),
+        };
+
+        match agent_type.as_str() {
+            // Claude Code：env 子对象键（与 harnessForms claudeSpec 字段 key 对齐）
+            "claude_code" => {
+                values.insert("ANTHROPIC_BASE_URL".into(), base_url.into());
+                values.insert("ANTHROPIC_AUTH_TOKEN".into(), api_key.into());
+            }
+            // OpenCode：options 内键（表单字段 baseURL/apiKey）
+            "opencode" => {
+                values.insert("baseURL".into(), base_url.into());
+                values.insert("apiKey".into(), api_key.into());
+            }
+            // Hermes：provider 条目内键
+            "hermes" => {
+                values.insert("base_url".into(), base_url.into());
+                values.insert("api_key".into(), api_key.into());
+            }
+            // Gemini CLI：env 子对象键
+            "gemini_cli" => {
+                values.insert("GOOGLE_GEMINI_BASE_URL".into(), base_url.into());
+                values.insert("GEMINI_API_KEY".into(), api_key.into());
+            }
+            // codex 等无端点/key 表单字段 → 空
+            _ => {}
+        }
+
+        tracing::debug!(
+            "[presets:defaults] agent_type={agent_type} 默认值字段数={}",
+            values.len()
+        );
+        Ok(PresetDefaults { agent_type, values })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 行映射
 // ---------------------------------------------------------------------------

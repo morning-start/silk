@@ -5,6 +5,7 @@ import type {
   NewPresetPayload,
   UpdatePresetPayload,
   PresetSwitchResult,
+  PresetDefaults,
 } from "./types";
 
 export const presetsApi = {
@@ -28,4 +29,7 @@ export const presetsApi = {
 
   listAgentTypes: (): Promise<AgentTypeInfo[]> =>
     invoke<AgentTypeInfo[]>("list_agent_types"),
+
+  getDefaults: (agentType: string): Promise<PresetDefaults> =>
+    invoke<PresetDefaults>("get_preset_defaults", { agentType }),
 };

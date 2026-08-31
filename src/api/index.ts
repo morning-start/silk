@@ -37,6 +37,7 @@ export type {
   NewPresetPayload,
   UpdatePresetPayload,
   PresetSwitchResult,
+  PresetDefaults,
   FileOperationResponse,
 } from "./types";
 
@@ -102,6 +103,7 @@ export const api = {
   deletePreset: presetsApi.remove,
   switchPreset: presetsApi.switch,
   listAgentTypes: presetsApi.listAgentTypes,
+  getPresetDefaults: presetsApi.getDefaults,
 } as const;
 
 // ---------------------------------------------------------------------------

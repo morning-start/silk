@@ -343,6 +343,7 @@ pub fn run() {
             commands::presets::delete_preset,
             commands::presets::switch_preset,
             commands::presets::list_agent_types,
+            commands::presets::get_preset_defaults,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

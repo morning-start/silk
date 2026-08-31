@@ -51,10 +51,16 @@ const tabLabel = (id: string) => agentTypes.value.find((t) => t.id === id)?.name
 // 当前 agent 的表单规格（结构化字段）
 const spec = computed<HarnessFormSpec | undefined>(() => formSpecFor(activeTab.value));
 
-function openAdd() {
+async function openAdd() {
   editingId.value = null;
   formName.value = "";
-  formValues.value = {};
+  // 默认填充 silk 网关的端点/Key（用户可修改）
+  try {
+    const defaults = await api.getPresetDefaults(activeTab.value);
+    formValues.value = { ...defaults.values };
+  } catch {
+    formValues.value = {};
+  }
   showModal.value = true;
 }
 
