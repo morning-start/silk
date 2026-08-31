@@ -122,16 +122,21 @@ fn is_local_gateway(base_url: &str) -> bool {
     base_norm == expect_norm
 }
 
-/// 直接读本地模型池：与网关 /v1/models 完全一致（模型池 + 穿透渠道）。
-/// 空池返回明确错误，提示给渠道开启穿透或创建模型映射。
+/// 直接读本地模型池：`/v1/models` 内容（模型池 + 穿透渠道）+ 补充全部启用
+/// 渠道的 models 列（含非穿透渠道——预设选模型选的是自己渠道的模型），按 id 去重。
+/// 与 `/v1/models` 接口的语义区分：接口只暴露可路由清单（穿透渠道），
+/// 预设表单「获取模型」需要看到用户配置过的全部模型。
 async fn list_local_pool_models() -> Result<Vec<ProviderModelInfo>, ServiceError> {
+    let pool = match crate::error::require_db() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("[fetch_provider_models] 本地模型池查询失败（数据库未就绪）: {e}");
+            return Err(e);
+        }
+    };
+
+    // ① /v1/models 内容：模型池 + 穿透渠道
     let items = crate::application::models_listing::list_all_models().await?;
-    if items.is_empty() {
-        return Err(ServiceError::BadRequest {
-            message: "本机模型池为空：请给渠道开启「穿透」或创建模型映射（/v1/models 只暴露模型池与穿透渠道）".to_string(),
-            code: None,
-        });
-    }
     let mut result: Vec<ProviderModelInfo> = items
         .iter()
         .map(|item| ProviderModelInfo {
@@ -142,8 +147,44 @@ async fn list_local_pool_models() -> Result<Vec<ProviderModelInfo>, ServiceError
             supported_endpoint_types: Vec::new(),
         })
         .collect();
+
+    // ② 补充全部启用渠道的 models 列（含非穿透渠道），按 id 去重
+    let mut seen: std::collections::HashSet<String> =
+        result.iter().map(|m| m.id.clone()).collect();
+    match crate::persistence::ProviderRepo::find_enabled(pool).await {
+        Ok(providers) => {
+            for provider in providers {
+                for model_id in provider.models_vec() {
+                    if seen.insert(model_id.clone()) {
+                        result.push(ProviderModelInfo {
+                            id: model_id,
+                            object: Some("model".to_string()),
+                            created: None,
+                            owned_by: Some(provider.name.clone()),
+                            supported_endpoint_types: Vec::new(),
+                        });
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("[fetch_provider_models] 查询渠道模型失败: {e}");
+        }
+    }
+
+    if result.is_empty() {
+        tracing::warn!("[fetch_provider_models] 本地模型池为空：无模型映射、穿透渠道或启用渠道模型");
+        return Err(ServiceError::BadRequest {
+            message: "本机模型池为空：请先在「渠道 / 模型」页添加渠道并拉取模型，或创建模型映射".to_string(),
+            code: None,
+        });
+    }
     result.sort_by(|a, b| a.id.cmp(&b.id));
-    tracing::info!("[fetch_provider_models] 本地模型池共 {} 个模型", result.len());
+    tracing::info!(
+        "[fetch_provider_models] 本地模型池共 {} 个模型（含 {} 个渠道模型）",
+        result.len(),
+        result.len() - items.len()
+    );
     Ok(result)
 }
 
