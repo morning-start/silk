@@ -4,9 +4,9 @@
   <img src="src-tauri/icons/icon.png" alt="Silk Logo" width="128" />
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2.0-purple" alt="tauri" />
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
+  <img src="https://img.shields.io/badge/license-AGPLv3-green" alt="license" />
 </p>
 
 > **一个本地端点，三大协议任意互转。** 装个桌面应用，加几把 API Key，你的所有 AI 工具就都能用上 OpenAI Chat Completion、Claude Messages、OpenAI Responses——协议自动转换（已经 OpenCode + Agnes 实际联调验证），失败自动换 Key 换 Provider，Key 加密存本地。
@@ -16,10 +16,10 @@ Silk 是一个运行在你桌面的 AI 多模型网关（Tauri 2 + Rust/Axum）�
 ## ✨ 功能亮点
 
 - **🌐 统一接入** — 你的 ChatBox、LobeChat、VS Code 插件、OpenAI-compatible 客户端……所有工具指向一个地址就够了。Silk 根据模型名自动路由到正确的提供商
-- **🔄 协议自动转换** — 用 OpenAI Chat 格式发请求，发给 Claude 也能正确响应。三种主流协议（OpenAI Chat / Claude Messages / OpenAI Responses）任意互转，不用记三套 API 文档
+- **🔄 协议自动转换** — 用 OpenAI Chat 格式发请求，发给 Claude 也能正确响应。OpenAI Chat / Claude Messages / OpenAI Responses 三大协议任意互转，不用记三套 API 文档
 - **🛡️ 三级失败回退** — 上游超时 → 自动重试（指数退避）→ 换一个 API Key → 换一个提供商。用户无感知，你的 AI 体验不中断
 - **🔐 纯本地，隐私由你** — 所有数据存本地 SQLite，API Key 用 AES-GCM 加密，没有云端组件。你发的每个请求，你说了算
-- **🔌 可插拔中间件** — 网关中间件按需加载，不想要就关掉（Token 节省类扩展功能已在规划中）
+- **🔌 可插拔中间件** — 网关中间件按需加载，不想要就关掉（Token 节省类扩展功能：未来支持）
 - **🖥️ 图形化管理** — 开箱即用的桌面 UI（Vue 3 + NaiveUI），管理提供商、路由规则、查看日志——不用写一行配置
 
 ## 🔄 协议支持
@@ -34,6 +34,13 @@ Silk 支持 **OpenAI Chat（openai）、Claude Messages（messages）、OpenAI R
 | Gemini | — | 🚧 开发中 |
 
 > 三大协议互转已经 OpenCode + Agnes 实际联调验证（含流式 SSE 与思考过程事件）；Gemini 协议转换仍在开发中，后续版本接入。
+
+## 🚧 开发中 / 未来支持
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| Agent 配置替换（类似 cc-switch） | 🚧 开发中 | 一键替换 OpenCode / Codex / Gemini CLI / Hermes 等工具的 Provider 配置，指向 Silk 网关 |
+| Token 节省类扩展 | 🕐 未来支持 | 提示词缓存、滑动窗口上下文截断、终端日志裁剪等插件 |
 
 ## 快速开始
 
@@ -107,7 +114,7 @@ curl http://127.0.0.1:1877/v1/chat/completions \
 <summary>展开看开发命令</summary>
 
 ```bash
-bun run dev              # Vite 前端开发 (port 1510)
+bun run dev              # Vite 前端开发 (port 5173)
 bun run tauri dev        # 完整桌面应用开发
 bun run tauri build      # 打包安装包
 cargo check              # Rust 类型检查（在 src-tauri/ 下）
@@ -117,9 +124,28 @@ cargo check              # Rust 类型检查（在 src-tauri/ 下）
 
 ## 相关文档
 
-- [API 使用指南](docs/API使用指南.md) — 网关路由、Provider 配置、模型映射完整说明
-- [开发者指南](docs/开发者指南.md) — 扩展协议适配器、添加中间件、理解数据模型
-- [网关 API 文档](docs/网关API文档.md) — HTTP 端点参考
+- [API 使用指南](docs/reference/api-guide.md) — 网关路由、Provider 配置、模型映射完整说明
+- [开发者指南](docs/reference/dev-guide.md) — 扩展协议适配器、添加中间件、理解数据模型
+- [网关 API 文档](docs/reference/gateway-api.md) — HTTP 端点参考
+- [用户手册](docs/guides/user-manual.md) — 桌面端使用说明
+- [FAQ](docs/guides/faq.md) — 常见问题
+
+## 参考链接
+
+- [Prism](https://github.com/morning-start/prism) — AI 协议转换 WASM 引擎，驱动 Silk 的协议互转能力
+- [cc-switch](https://github.com/farion1231/cc-switch) — Claude Code 模型切换工具，Silk 生态相关项目
+
+## 友情链接
+
+- [MoonBit](https://www.moonbitlang.cn/) — 类 Rust 的 Wasm 优先开发语言，Prism 的构建语言
+- [LINUX DO](https://linux.do)
+- <p>
+  本项目的 AI API 支持由
+  <a href="https://tokeness.io">
+    Tokeness.io
+  </a>
+  赞助提供。
+</p>
 
 ## 许可证
 
