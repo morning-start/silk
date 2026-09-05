@@ -44,12 +44,12 @@ impl AiAppDetector {
         ];
 
         let installed = config_paths.iter().any(|p| {
-            p.as_ref().map_or(false, |path| path.exists())
+            p.as_ref().is_some_and(|path| path.exists())
         });
 
         let config_path = config_paths
             .into_iter()
-            .find(|p| p.as_ref().map_or(false, |path| path.exists()))
+            .find(|p| p.as_ref().is_some_and(|path| path.exists()))
             .flatten()
             .map(|p| p.to_string_lossy().to_string());
 
@@ -73,12 +73,12 @@ impl AiAppDetector {
         ];
 
         let installed = config_paths.iter().any(|p| {
-            p.as_ref().map_or(false, |path| path.exists())
+            p.as_ref().is_some_and(|path| path.exists())
         });
 
         let config_path = config_paths
             .into_iter()
-            .find(|p| p.as_ref().map_or(false, |path| path.exists()))
+            .find(|p| p.as_ref().is_some_and(|path| path.exists()))
             .flatten()
             .map(|p| p.to_string_lossy().to_string());
 
@@ -100,12 +100,12 @@ impl AiAppDetector {
         ];
 
         let installed = config_paths.iter().any(|p| {
-            p.as_ref().map_or(false, |path| path.exists())
+            p.as_ref().is_some_and(|path| path.exists())
         });
 
         let config_path = config_paths
             .into_iter()
-            .find(|p| p.as_ref().map_or(false, |path| path.exists()))
+            .find(|p| p.as_ref().is_some_and(|path| path.exists()))
             .flatten()
             .map(|p| p.to_string_lossy().to_string());
 

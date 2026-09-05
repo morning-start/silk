@@ -899,14 +899,13 @@ impl SseConverter {
             _ => {
                 // 未知协议：尝试用 prism 冲刷
                 let done_event = "data: [DONE]\n\n";
-                match prism_wasm::convert_stream_event(&self.source, done_event, &self.target) {
-                    Ok(converted) => {
-                        let filtered = filter_empty_events(&converted);
-                        if !filtered.is_empty() {
-                            output.extend_from_slice(filtered.as_bytes());
-                        }
+                if let Ok(converted) =
+                    prism_wasm::convert_stream_event(&self.source, done_event, &self.target)
+                {
+                    let filtered = filter_empty_events(&converted);
+                    if !filtered.is_empty() {
+                        output.extend_from_slice(filtered.as_bytes());
                     }
-                    Err(_) => {}
                 }
             }
         };
@@ -927,7 +926,6 @@ impl SseConverter {
 ///
 /// prism 对 content_block_start 等事件会输出空占位（`\n\n`），需过滤；
 /// `[DONE]` 由 dispatch 统一发送流结束标记，避免重复。
-
 fn filter_empty_events(sse: &str) -> String {
     let blocks: Vec<&str> = sse
         .split("\n\n")

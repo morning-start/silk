@@ -127,7 +127,7 @@ impl PrismWasm {
             // 取当前内存大小，扩展 needed 字节，写入新区域末尾。
             let current_pages = self.memory.size(&self.store);
             let current_bytes = (current_pages as usize) * 65536;
-            let grow_pages = ((needed as usize + 65535) / 65536) as u64;
+            let grow_pages = (needed as usize).div_ceil(65536) as u64;
             if grow_pages > 0 {
                 self.memory
                     .grow(&mut self.store, grow_pages)

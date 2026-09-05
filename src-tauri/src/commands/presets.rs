@@ -67,3 +67,13 @@ pub async fn get_preset_defaults(
 ) -> Result<PresetDefaults, String> {
     PresetService::get_defaults(agent_type).await.map_err(|e| e.to_string())
 }
+
+/// 预设重排序（拖拽后按序落 sort_index，对齐 cc-switch update_sort_order）
+#[tauri::command]
+pub async fn update_preset_order(
+    _state: State<'_, AppState>,
+    agent_type: String,
+    ordered_ids: Vec<String>,
+) -> Result<(), String> {
+    PresetService::reorder(agent_type, ordered_ids).await.map_err(|e| e.to_string())
+}

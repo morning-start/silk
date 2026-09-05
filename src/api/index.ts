@@ -104,6 +104,7 @@ export const api = {
   switchPreset: presetsApi.switch,
   listAgentTypes: presetsApi.listAgentTypes,
   getPresetDefaults: presetsApi.getDefaults,
+  updatePresetOrder: presetsApi.reorder,
 } as const;
 
 // ---------------------------------------------------------------------------

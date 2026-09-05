@@ -344,6 +344,7 @@ pub fn run() {
             commands::presets::switch_preset,
             commands::presets::list_agent_types,
             commands::presets::get_preset_defaults,
+            commands::presets::update_preset_order,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -377,6 +378,11 @@ async fn bootstrap(
         .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
 
     init_home_dir(data_dir);
+
+    // 首次启动或数据库尚无对应预设时，导入用户已有的 harness live 配置。
+    crate::application::preset_service::PresetService::import_existing_live_configs(pool, get_home_dir())
+        .await
+        .map_err(|error| sqlx::Error::Io(std::io::Error::other(error.to_string())))?;
 
     // 启动后台日志写入任务
     let log_writer_handle = crate::gateway::spawn_log_writer(pool.clone(), log_receiver);

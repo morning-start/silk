@@ -32,4 +32,7 @@ export const presetsApi = {
 
   getDefaults: (agentType: string): Promise<PresetDefaults> =>
     invoke<PresetDefaults>("get_preset_defaults", { agentType }),
+
+  reorder: (agentType: string, orderedIds: string[]): Promise<void> =>
+    invoke<void>("update_preset_order", { agentType, orderedIds }),
 };
