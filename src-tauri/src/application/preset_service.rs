@@ -1,3 +1,4 @@
+use crate::application::provider_service::normalize_api_base_url;
 use crate::error::{require_db, require_found, validate_non_empty, ServiceError};
 use crate::models::{AgentType, NewPreset, Preset, UpdatePreset};
 
@@ -46,13 +47,51 @@ impl PresetService {
             .fetch_all(pool)
             .await
             .map_err(ServiceError::from)?;
-            let mut active_claimed = existing.iter().any(|preset| preset.is_active);
+            // 官方直连行（category=official）不算普通配置：不占激活名额、不阻挡 live 导入
+            let regular_existing: Vec<&PresetRow> = existing
+                .iter()
+                .filter(|preset| preset.category.as_deref() != Some("official"))
+                .collect();
+            let mut active_claimed = regular_existing.iter().any(|preset| preset.is_active);
+
+            // OpenCode 累加模式：live 中存在的 provider 段 = 已激活（对齐 cc-switch isInConfig）。
+            // 启动时按 live 现状同步存量 preset 的激活位：在 live → 1，不在 live → 0。
+            if agent_type == "opencode" {
+                let imported_ids: Vec<Option<String>> = imported
+                    .iter()
+                    .map(|settings| Self::startup_identity(agent_type, settings))
+                    .collect();
+                for row in &existing {
+                    let identity = serde_json::from_str::<serde_json::Value>(&row.settings_config)
+                        .ok()
+                        .and_then(|value| Self::startup_identity(agent_type, &value));
+                    let in_live = identity
+                        .as_ref()
+                        .map(|id| imported_ids.iter().any(|item| item.as_ref() == Some(id)))
+                        .unwrap_or(false);
+                    if in_live != row.is_active {
+                        sqlx::query(
+                            "UPDATE presets SET is_active = ?, updated_at = datetime('now') WHERE id = ?",
+                        )
+                        .bind(in_live)
+                        .bind(&row.id)
+                        .execute(pool)
+                        .await
+                        .map_err(ServiceError::from)?;
+                        tracing::info!(
+                            "[presets:import] opencode 预设 {} 激活位已按 live 同步为 {in_live}",
+                            row.id
+                        );
+                    }
+                }
+            }
 
             for settings in imported {
                 let Some(identity) = Self::startup_identity(agent_type, &settings) else { continue };
-                if existing.iter().any(|preset| Self::startup_identity(agent_type, &serde_json::from_str::<serde_json::Value>(&preset.settings_config).unwrap_or(serde_json::Value::Null)) == Some(identity.clone())) { continue; }
+                if regular_existing.iter().any(|preset| Self::startup_identity(agent_type, &serde_json::from_str::<serde_json::Value>(&preset.settings_config).unwrap_or(serde_json::Value::Null)) == Some(identity.clone())) { continue; }
                 let id = uuid::Uuid::new_v4().to_string();
-                let is_active = if agent_type == "opencode" { false } else { !active_claimed };
+                // opencode 新导入的 provider 来自 live 配置，天然处于激活态
+                let is_active = if agent_type == "opencode" { true } else { !active_claimed };
                 let name = Self::startup_preset_name(agent_type, agent_name, &identity);
                 let settings_text = serde_json::to_string(&settings).map_err(|error| ServiceError::Internal { message: format!("保存 {agent_name} 导入配置失败: {error}"), detail: Some(error.to_string()) })?;
                 sqlx::query(
@@ -155,13 +194,20 @@ impl PresetService {
         validate_non_empty("preset_id", &preset_id)?;
         let pool = require_db()?;
         let existing = Self::get(preset_id.clone()).await?;
+        let is_official = existing.category.as_deref() == Some("official");
 
         let name = payload.name.clone().unwrap_or_else(|| existing.name.clone());
-        let settings_config = payload
-            .settings_config
-            .clone()
+        // 官方直连行放开编辑但收紧内容：settings 仅保留白名单凭据键（端点/模型锚定官方，
+        // 由 sanitize_official_settings 清洗，防止经 API 绕过锚定）
+        let new_settings_value: Option<serde_json::Value> = match (is_official, payload.settings_config.as_ref()) {
+            (true, Some(source)) => Some(Self::sanitize_official_settings(&existing.agent_type, source)),
+            (false, Some(source)) => Some(source.clone()),
+            _ => None,
+        };
+        let settings_config = new_settings_value
+            .as_ref()
             .map(|v| {
-                serde_json::to_string(&v).map_err(|e| ServiceError::BadRequest {
+                serde_json::to_string(v).map_err(|e| ServiceError::BadRequest {
                     message: format!("settings_config 序列化失败: {e}"),
                     code: None,
                 })
@@ -175,7 +221,7 @@ impl PresetService {
         if existing.is_active
             && crate::application::harness::writer_for(&existing.agent_type).is_some()
         {
-            if let Some(new_settings) = payload.settings_config.as_ref() {
+            if let Some(new_settings) = new_settings_value.as_ref() {
                 // 剥离键：本预设旧声明、新 settings 不再声明的键（如移除某角色的模型）
                 let old_keys = Self::collect_env_keys(&existing.agent_type, &existing.settings_config);
                 let new_keys = Self::collect_env_keys(&existing.agent_type, new_settings);
@@ -190,8 +236,35 @@ impl PresetService {
                         remove_keys
                     );
                 }
-                Self::write_live_projection(&existing.agent_type, new_settings, &remove_keys).await?;
-                tracing::info!("[presets:update] 激活预设 {preset_id} 已同步 live（编辑即生效）");
+                // codex 官方行无 env 键可投影：写 live 会重写 custom provider，必须走
+                // remove_from_live 重新剥离托管足迹回归官方 OAuth（编辑仅允许改名）
+                if is_official && existing.agent_type == "codex" {
+                    let home = crate::get_home_dir().to_path_buf();
+                    let writer = crate::application::harness::writer_for(&existing.agent_type)
+                        .ok_or_else(|| ServiceError::BadRequest {
+                            message: "该 Agent 类型不支持配置自动写入".to_string(),
+                            code: None,
+                        })?;
+                    writer
+                        .remove_from_live(&home, &existing.settings_config)
+                        .await
+                        .map_err(|e| ServiceError::Internal {
+                            message: format!("剥离 codex 托管配置失败: {e}"),
+                            detail: None,
+                        })?;
+                    tracing::info!(
+                        "[presets:update] 激活的 codex 官方预设 {preset_id} 已重新剥离托管配置"
+                    );
+                } else {
+                    Self::write_live_projection(
+                        &existing.agent_type,
+                        new_settings,
+                        &remove_keys,
+                        !is_official,
+                    )
+                    .await?;
+                    tracing::info!("[presets:update] 激活预设 {preset_id} 已同步 live（编辑即生效）");
+                }
             }
         }
 
@@ -214,6 +287,13 @@ impl PresetService {
         validate_non_empty("preset_id", &preset_id)?;
         let pool = require_db()?;
         let existing = Self::get(preset_id.clone()).await?;
+        // 官方直连行为锚定项（category=official），不允许删除
+        if existing.category.as_deref() == Some("official") {
+            return Err(ServiceError::BadRequest {
+                message: "官方直连配置为锚定项，不可删除".to_string(),
+                code: None,
+            });
+        }
         // 最小侵入（对齐 cc-switch）：当前激活的供应商不可删除，需先切换到其他预设
         if existing.is_active {
             return Err(ServiceError::BadRequest {
@@ -237,6 +317,29 @@ impl PresetService {
             return Ok(());
         }
         let pool = require_db()?;
+        // 官方直连行（category=official）锚定在首位：不参与重排，sort_index 恒为 0
+        sqlx::query("UPDATE presets SET sort_index = 0 WHERE agent_type = ? AND category = 'official'")
+            .bind(&agent_type)
+            .execute(pool)
+            .await
+            .map_err(ServiceError::from)?;
+        let official_ids: Vec<String> = sqlx::query_as::<_, (String,)>(
+            "SELECT id FROM presets WHERE agent_type = ? AND category = 'official'",
+        )
+        .bind(&agent_type)
+        .fetch_all(pool)
+        .await
+        .map_err(ServiceError::from)?
+        .into_iter()
+        .map(|(id,)| id)
+        .collect();
+        let ordered_ids: Vec<String> = ordered_ids
+            .into_iter()
+            .filter(|id| !official_ids.contains(id))
+            .collect();
+        if ordered_ids.is_empty() {
+            return Ok(());
+        }
         // 预校验：所有 id 必须存在且属于该 agent_type（防跨 agent 篡改）
         let count: i64 = {
             let ids: Vec<String> = ordered_ids.to_vec();
@@ -254,9 +357,10 @@ impl PresetService {
                 code: Some("preset_reorder_mismatch".to_string()),
             });
         }
+        // 普通行从 1 起排（0 已留给官方直连行）
         for (i, id) in ordered_ids.iter().enumerate() {
             sqlx::query("UPDATE presets SET sort_index = ?, updated_at = datetime('now') WHERE id = ?")
-                .bind(i as i64)
+                .bind(i as i64 + 1)
                 .bind(id)
                 .execute(pool)
                 .await
@@ -269,6 +373,11 @@ impl PresetService {
     /// 切换：写目标 preset 的 live 投影（注入网关 base_url/api_key）→ 更新 is_active。
     /// 写 live 失败时快照已由 writer 回滚，DB 状态不变。
     pub async fn switch(agent_type: String, preset_id: String) -> Result<SwitchResult, ServiceError> {
+        // OpenCode 为累加模式：多个预设可同时激活，“激活”=加入 live 配置并置位自身，
+        // 不清除其他预设。与单激活应用（整体切换）语义不同，走独立启停路径。
+        if agent_type == "opencode" {
+            return Self::set_active(agent_type, preset_id, true).await;
+        }
         let pool = require_db()?;
         let preset = Self::get(preset_id.clone()).await?;
         if preset.agent_type != agent_type {
@@ -290,16 +399,21 @@ impl PresetService {
         // 注入网关 base_url/api_key（按 harness 映射到正确字段位置）
         // OpenCode: 使用原始 id 字段作为 provider key，不覆盖为 UUID
         // _silk_provider_id 仅用于内部追踪，不写入 live 配置
+        // 官方直连预设（category=official）为锚定项：跳过网关注入，
+        // new_keys 为空 → remove_keys 自动剥离上一预设声明的全部管理键，live 回归官方/用户原状
+        let is_official = preset.category.as_deref() == Some("official");
         let mut effective = preset.settings_config.clone();
-        if let Ok(settings) = crate::models::GatewaySettings::load(
-            crate::get_settings_path().ok_or_else(|| ServiceError::Internal {
-                message: "无法获取设置路径".to_string(),
-                detail: None,
-            })?,
-        ) {
-            let base_url = format!("http://{}:{}/v1", settings.bind_host, settings.bind_port);
-            let api_key = crate::application::gateway_key_service::builtin_key_value();
-            Self::inject_gateway_config(&agent_type, &mut effective, &base_url, &api_key);
+        if !is_official {
+            if let Ok(settings) = crate::models::GatewaySettings::load(
+                crate::get_settings_path().ok_or_else(|| ServiceError::Internal {
+                    message: "无法获取设置路径".to_string(),
+                    detail: None,
+                })?,
+            ) {
+                let base_url = format!("http://{}:{}/v1", settings.bind_host, settings.bind_port);
+                let api_key = crate::application::gateway_key_service::builtin_key_value();
+                Self::inject_gateway_config(&agent_type, &mut effective, &base_url, &api_key);
+            }
         }
         // 返回旧激活预设声明的 env 键（切换前捕获，backfill 会覆盖该行内容），用于计算残留键。
         let old_declared_keys =
@@ -320,29 +434,44 @@ impl PresetService {
             );
         }
 
-        // 写 live（writer 内部快照回滚）
-        writer
-            .write_live(&home, &effective, &remove_keys)
-            .await
-            .map_err(|e| ServiceError::Internal {
-                message: format!("写入 live 配置失败: {e}"),
-                detail: None,
-            })?;
-        tracing::info!("[presets:switch] 写入 live 配置成功: {}", live_path.display());
-
-        // OpenCode 是累加模式：写 live 配置但不改变 is_active，允许多个 preset 同时激活。
-        if agent_type != "opencode" {
-            sqlx::query("UPDATE presets SET is_active = 0 WHERE agent_type = ?")
-                .bind(&agent_type)
-                .execute(pool)
+        // 写 live（writer 内部快照回滚）。codex 官方直连 = 整体剥离 silk 托管足迹
+        // 回归官方 OAuth 登录（无 env 键可剥离，走 remove_from_live）；claude/gemini 等
+        // env 型应用走常规 write_live（remove_keys 已剥离旧预设声明的全部管理键）。
+        if is_official && agent_type == "codex" {
+            writer
+                .remove_from_live(&home, &preset.settings_config)
                 .await
-                .map_err(ServiceError::from)?;
-            sqlx::query("UPDATE presets SET is_active = 1, updated_at = datetime('now') WHERE id = ?")
-                .bind(&preset_id)
-                .execute(pool)
+                .map_err(|e| ServiceError::Internal {
+                    message: format!("剥离 codex 托管配置失败: {e}"),
+                    detail: None,
+                })?;
+            tracing::info!(
+                "[presets:switch] 已剥离 codex 托管配置，回归官方 OAuth: {}",
+                live_path.display()
+            );
+        } else {
+            writer
+                .write_live(&home, &effective, &remove_keys)
                 .await
-                .map_err(ServiceError::from)?;
+                .map_err(|e| ServiceError::Internal {
+                    message: format!("写入 live 配置失败: {e}"),
+                    detail: None,
+                })?;
+            tracing::info!("[presets:switch] 写入 live 配置成功: {}", live_path.display());
         }
+
+        // 单激活应用：切换即整体替换 —— 其余预设全部置 0，仅目标置 1。
+        // （OpenCode 累加模式已在函数入口走 set_active，不经过此处）
+        sqlx::query("UPDATE presets SET is_active = 0 WHERE agent_type = ?")
+            .bind(&agent_type)
+            .execute(pool)
+            .await
+            .map_err(ServiceError::from)?;
+        sqlx::query("UPDATE presets SET is_active = 1, updated_at = datetime('now') WHERE id = ?")
+            .bind(&preset_id)
+            .execute(pool)
+            .await
+            .map_err(ServiceError::from)?;
 
 
         let requires_restart = AgentType::requires_restart(&agent_type);
@@ -351,6 +480,99 @@ impl PresetService {
             warnings.push("请重启终端/应用以使配置生效".to_string());
         }
         Ok(SwitchResult { success: true, warnings, requires_restart })
+    }
+
+    /// OpenCode 累加模式下的独立启停（对齐 cc-switch additive 应用：
+    /// 每个 provider 单独“加入/移出 opencode.json”，多个 preset 可同时激活）。
+    ///
+    /// - active=true：注入网关信息后写 live（合并 provider.<id> 段，保留其他已激活项），
+    ///   置 is_active=1（不清除其他 preset 的激活态）；
+    /// - active=false：从 live 移除该 preset 的 provider 段，置 is_active=0。
+    ///
+    /// 非 opencode 应用为单激活整体切换（switch），不支持独立启停。
+    pub async fn set_active(
+        agent_type: String,
+        preset_id: String,
+        active: bool,
+    ) -> Result<SwitchResult, ServiceError> {
+        if agent_type != "opencode" {
+            return Err(ServiceError::BadRequest {
+                message: "仅 OpenCode 支持多预设独立启停，其余应用请使用「激活」切换".to_string(),
+                code: None,
+            });
+        }
+        let pool = require_db()?;
+        let preset = Self::get(preset_id.clone()).await?;
+        if preset.agent_type != agent_type {
+            return Err(ServiceError::BadRequest {
+                message: format!(
+                    "Preset 的 agent_type ({}) 与请求 ({}) 不匹配",
+                    preset.agent_type,
+                    agent_type
+                ),
+                code: None,
+            });
+        }
+        let writer = crate::application::harness::writer_for(&agent_type).ok_or_else(|| {
+            ServiceError::BadRequest {
+                message: format!("该 Agent 类型 ({agent_type}) 不支持配置自动写入"),
+                code: None,
+            }
+        })?;
+        let home = crate::get_home_dir().to_path_buf();
+
+        if active {
+            // 写 live：注入网关 base_url/api_key 后合并 provider.<id> 段（仅当尚未激活时写，
+            // 避免每次点击都重写 live；已激活则只同步 DB 位）
+            if !preset.is_active {
+                let mut effective = preset.settings_config.clone();
+                if let Ok(settings) = crate::models::GatewaySettings::load(
+                    crate::get_settings_path().ok_or_else(|| ServiceError::Internal {
+                        message: "无法获取设置路径".to_string(),
+                        detail: None,
+                    })?,
+                ) {
+                    let base_url = format!("http://{}:{}/v1", settings.bind_host, settings.bind_port);
+                    let api_key = crate::application::gateway_key_service::builtin_key_value();
+                    Self::inject_gateway_config(&agent_type, &mut effective, &base_url, &api_key);
+                }
+                writer
+                    .write_live(&home, &effective, &[])
+                    .await
+                    .map_err(|e| ServiceError::Internal {
+                        message: format!("写入 live 配置失败: {e}"),
+                        detail: None,
+                    })?;
+                tracing::info!("[presets:set_active] opencode 预设 {preset_id} 已加入 live 配置");
+            }
+            sqlx::query("UPDATE presets SET is_active = 1, updated_at = datetime('now') WHERE id = ?")
+                .bind(&preset_id)
+                .execute(pool)
+                .await
+                .map_err(ServiceError::from)?;
+        } else {
+            if preset.is_active {
+                writer
+                    .remove_from_live(&home, &preset.settings_config)
+                    .await
+                    .map_err(|e| ServiceError::Internal {
+                        message: format!("从 live 配置移除失败: {e}"),
+                        detail: None,
+                    })?;
+                tracing::info!("[presets:set_active] opencode 预设 {preset_id} 已从 live 配置移除");
+            }
+            sqlx::query("UPDATE presets SET is_active = 0, updated_at = datetime('now') WHERE id = ?")
+                .bind(&preset_id)
+                .execute(pool)
+                .await
+                .map_err(ServiceError::from)?;
+        }
+
+        Ok(SwitchResult {
+            success: true,
+            warnings: Vec::new(),
+            requires_restart: AgentType::requires_restart(&agent_type),
+        })
     }
 
     /// backfill：切走前把 live 配置中的用户手工改动回填到当前激活 preset。
@@ -417,6 +639,107 @@ impl PresetService {
     }
 
 
+    /// 官方直连行可填凭据白名单（env 子对象内键）。端点/模型/自由 env 一律锚定官方，
+    /// 由 sanitize_official_settings 在编辑时清洗，防止绕过锚定。
+    fn official_credential_keys(agent_type: &str) -> &'static [&'static str] {
+        match agent_type {
+            "claude_code" => &["ANTHROPIC_AUTH_TOKEN"],
+            "gemini_cli" => &["GEMINI_API_KEY"],
+            _ => &[],
+        }
+    }
+
+    /// 官方直连锚定 settings（「恢复默认」的目标值）：claude/gemini 官方形态 = 空 env
+    /// （不注入任何端点/Key/模型，CLI 使用官方默认与登录态/用户自带凭据）。
+    fn official_anchor_settings(agent_type: &str) -> serde_json::Value {
+        match agent_type {
+            "claude_code" | "gemini_cli" => serde_json::json!({ "env": {} }),
+            _ => serde_json::json!({}),
+        }
+    }
+
+    /// 官方直连行编辑清洗：以官方锚定形态为骨架，仅允许填入 env 子对象中的白名单凭据键
+    /// （去空白）。codex 等无凭据白名单的应用一律回到锚定形态，防止绕过端点/模型锚定。
+    fn sanitize_official_settings(agent_type: &str, value: &serde_json::Value) -> serde_json::Value {
+        let whitelist = Self::official_credential_keys(agent_type);
+        let mut anchor = Self::official_anchor_settings(agent_type);
+        if let Some(env) = anchor.get_mut("env").and_then(|v| v.as_object_mut()) {
+            if let Some(source) = value.get("env").and_then(|v| v.as_object()) {
+                for key in whitelist {
+                    if let Some(text) = source
+                        .get(*key)
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                    {
+                        env.insert(key.to_string(), serde_json::json!(text));
+                    }
+                }
+            }
+        }
+        anchor
+    }
+
+    /// 官方直连行一键恢复默认（category=official）：settings 重置回官方锚定形态；
+    /// 若当前激活，先把已注入 live 的声明键全部剥离（锚定 settings 不声明任何键）。
+    pub async fn reset_official_default(preset_id: String) -> Result<Preset, ServiceError> {
+        let pool = require_db()?;
+        let existing = Self::get(preset_id.clone()).await?;
+        if existing.category.as_deref() != Some("official") {
+            return Err(ServiceError::BadRequest {
+                message: "仅官方直连配置支持一键恢复默认".to_string(),
+                code: None,
+            });
+        }
+        let anchor = Self::official_anchor_settings(&existing.agent_type);
+
+        // 激活中的官方行：剥离其声明的管理足迹，live 回到官方默认/用户原状。
+        // codex 官方 = remove_from_live 整体剥离（无 env 键）；env 型（claude/gemini）走
+        // write_live_projection（锚定 env 为空 → remove_keys 全量剥离，且不注入网关）
+        if existing.is_active
+            && crate::application::harness::writer_for(&existing.agent_type).is_some()
+        {
+            if existing.agent_type == "codex" {
+                let home = crate::get_home_dir().to_path_buf();
+                let writer =
+                    crate::application::harness::writer_for(&existing.agent_type).ok_or_else(
+                        || ServiceError::BadRequest {
+                            message: "该 Agent 类型不支持配置自动写入".to_string(),
+                            code: None,
+                        },
+                    )?;
+                writer
+                    .remove_from_live(&home, &existing.settings_config)
+                    .await
+                    .map_err(|e| ServiceError::Internal {
+                        message: format!("剥离 codex 托管配置失败: {e}"),
+                        detail: None,
+                    })?;
+            } else {
+                let declared =
+                    Self::collect_env_keys(&existing.agent_type, &existing.settings_config);
+                Self::write_live_projection(&existing.agent_type, &anchor, &declared, false).await?;
+            }
+            tracing::info!(
+                "[presets:reset_official] 官方预设 {preset_id} 已剥离 live 管理足迹并同步"
+            );
+        }
+
+        let anchor_text = serde_json::to_string(&anchor).map_err(|e| ServiceError::BadRequest {
+            message: format!("settings_config 序列化失败: {e}"),
+            code: None,
+        })?;
+        sqlx::query(
+            "UPDATE presets SET settings_config = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(&anchor_text)
+        .bind(&preset_id)
+        .execute(pool)
+        .await
+        .map_err(ServiceError::from)?;
+        Self::get(preset_id).await
+    }
+
     /// 提取 settings_config 中声明、会投影到 live env 的键（claude_code/gemini_cli）：
     /// env 子对象键 + 顶层兜底键（writer 会把两处都合并进 live env）。
     /// 其余 agent（codex/opencode/hermes 整条替换）无需键级剥离，返回空。
@@ -441,12 +764,14 @@ impl PresetService {
         keys
     }
 
-    /// 把 preset settings_config 注入网关信息后投影到 live（原子写 + 快照回滚）。
-    /// 供 switch / 编辑激活预设复用。
+    /// 把 preset settings_config（可选注入网关信息）投影到 live（原子写 + 快照回滚）。
+    /// 供 switch / 编辑激活预设复用。官方直连行（category=official）不注入网关：
+    /// 锚定官方端点，凭据直连官方 API。
     async fn write_live_projection(
         agent_type: &str,
         settings: &serde_json::Value,
         remove_keys: &[String],
+        inject_gateway: bool,
     ) -> Result<(), ServiceError> {
         let writer = crate::application::harness::writer_for(agent_type).ok_or_else(|| {
             ServiceError::BadRequest {
@@ -455,15 +780,17 @@ impl PresetService {
             }
         })?;
         let mut effective = settings.clone();
-        if let Ok(gs) = crate::models::GatewaySettings::load(
-            crate::get_settings_path().ok_or_else(|| ServiceError::Internal {
-                message: "无法获取设置路径".to_string(),
-                detail: None,
-            })?,
-        ) {
-            let base_url = format!("http://{}:{}/v1", gs.bind_host, gs.bind_port);
-            let api_key = crate::application::gateway_key_service::builtin_key_value();
-            Self::inject_gateway_config(agent_type, &mut effective, &base_url, &api_key);
+        if inject_gateway {
+            if let Ok(gs) = crate::models::GatewaySettings::load(
+                crate::get_settings_path().ok_or_else(|| ServiceError::Internal {
+                    message: "无法获取设置路径".to_string(),
+                    detail: None,
+                })?,
+            ) {
+                let base_url = format!("http://{}:{}/v1", gs.bind_host, gs.bind_port);
+                let api_key = crate::application::gateway_key_service::builtin_key_value();
+                Self::inject_gateway_config(agent_type, &mut effective, &base_url, &api_key);
+            }
         }
         let home = crate::get_home_dir().to_path_buf();
         writer
@@ -494,8 +821,9 @@ impl PresetService {
                     .or_insert_with(|| serde_json::json!({}));
                 if let Some(e) = env.as_object_mut() {
                     if matches!(agent_type, "claude_code") {
+                        // Claude Code 会自动追加 /v1/messages，注入端点去尾部 /v1
                         e.entry("ANTHROPIC_BASE_URL".to_string())
-                            .or_insert_with(|| serde_json::json!(base_url));
+                            .or_insert_with(|| serde_json::json!(normalize_api_base_url(base_url)));
                         e.entry("ANTHROPIC_AUTH_TOKEN".to_string())
                             .or_insert_with(|| serde_json::json!(api_key));
                     } else {
@@ -544,7 +872,7 @@ pub struct PresetDefaults {
 
 impl PresetService {
     /// 返回该 harness 的默认表单值（silk 网关端点 + 内置 key）。
-    /// 无端点/key 表单字段的 harness（如 codex）返回空 values。
+    /// 无端点/key 表单字段的 harness（尚未接入的类型）返回空 values。
     pub async fn get_defaults(agent_type: String) -> Result<PresetDefaults, ServiceError> {
         validate_non_empty("agent_type", &agent_type)?;
         let mut values = serde_json::Map::new();
@@ -565,7 +893,8 @@ impl PresetService {
         match agent_type.as_str() {
             // Claude Code：env 子对象键（与 harnessForms claudeSpec 字段 key 对齐）
             "claude_code" => {
-                values.insert("ANTHROPIC_BASE_URL".into(), base_url.into());
+                // Claude Code 会自动追加 /v1/messages，端点默认值去尾部 /v1
+                values.insert("ANTHROPIC_BASE_URL".into(), normalize_api_base_url(&base_url).into());
                 values.insert("ANTHROPIC_AUTH_TOKEN".into(), api_key.into());
             }
             // OpenCode：options 内键（表单字段 baseURL/apiKey）
@@ -573,8 +902,9 @@ impl PresetService {
                 values.insert("baseURL".into(), base_url.into());
                 values.insert("apiKey".into(), api_key.into());
             }
-            // Hermes：provider 条目内键
-            "hermes" => {
+            // Codex / Hermes：provider 条目内顶层键（与 inject_gateway_config codex|hermes
+            // 分支一致，表单字段 base_url/api_key 同形）
+            "codex" | "hermes" => {
                 values.insert("base_url".into(), base_url.into());
                 values.insert("api_key".into(), api_key.into());
             }
@@ -583,7 +913,7 @@ impl PresetService {
                 values.insert("GOOGLE_GEMINI_BASE_URL".into(), base_url.into());
                 values.insert("GEMINI_API_KEY".into(), api_key.into());
             }
-            // codex 等无端点/key 表单字段 → 空
+            // 其他（未接入）类型 → 空
             _ => {}
         }
 

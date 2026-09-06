@@ -50,6 +50,53 @@ impl super::HarnessWriter for OpenCodeWriter {
             .map_err(|error| format!("写入 opencode.json 失败: {error}"))
     }
 
+    /// 取消激活：从 opencode.json 删除本 preset 对应的 provider.<id> 段（快照回滚）。
+    /// opencode 为累加模式，停用一个 provider 不影响其他已激活 provider。
+    async fn remove_from_live(
+        &self,
+        home: &Path,
+        settings: &serde_json::Value,
+    ) -> Result<(), String> {
+        let path = self.live_path(home);
+        let snapshot =
+            crate::application::config_writer::LiveSnapshot::take(&path)
+                .map_err(|error| format!("备份失败: {error}"))?;
+        let result: Result<(), String> = async {
+            let mut live =
+                match crate::application::config_writer::read_to_value_async(&path).await? {
+                    Some(value) => value,
+                    None => return Ok(()), // 无 live 文件，无需移除
+                };
+            let provider_id = settings
+                .get("_silk_provider_id")
+                .or_else(|| settings.get("id"))
+                .or_else(|| settings.get("name"))
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("silk");
+            let removed = match live
+                .as_object_mut()
+                .ok_or_else(|| "live 配置不是 JSON 对象".to_string())?
+                .get_mut("provider")
+                .and_then(|value| value.as_object_mut())
+            {
+                Some(providers) => providers.remove(provider_id).is_some(),
+                None => false,
+            };
+            if removed {
+                crate::application::config_writer::write_to_path_atomic(&path, &live)
+                    .map_err(|error| format!("写入 opencode.json 失败: {error}"))?;
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(error) = &result {
+            let _ = snapshot.restore();
+            return Err(format!("移除失败，已恢复快照: {error}"));
+        }
+        result
+    }
+
     fn extract_startup_settings(&self, live: &serde_json::Value) -> Vec<serde_json::Value> {
         let Some(providers) = live.get("provider").and_then(|value| value.as_object()) else { return Vec::new() };
         providers.iter().filter_map(|(id, value)| {

@@ -113,12 +113,6 @@ function setNested(root: JsonObject, key: string, value: unknown) {
   else root[key] = value;
 }
 
-const codexWireApiOptions = [
-  { label: "Responses（原生）", value: "responses" },
-  { label: "Chat Completions", value: "chat" },
-  { label: "Anthropic Messages", value: "anthropic" },
-];
-
 const codexReasoningOptions = [
   "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
 ].map((value) => ({ label: value, value }));
@@ -127,14 +121,16 @@ const hermesApiModeOptions = [
   { label: "Chat Completions", value: "chat_completions" },
   { label: "Anthropic Messages", value: "anthropic_messages" },
   { label: "Codex Responses", value: "codex_responses" },
-  { label: "Bedrock Converse", value: "bedrock_converse" },
+  // bedrock 不在 silk 网关 4 协议转换集内：仅直连第三方端点可用（对齐 AgentType 能力表）
+  { label: "Bedrock Converse（仅直连）", value: "bedrock_converse" },
 ];
 
 const openCodeSdkOptions = [
   { label: "OpenAI Responses", value: "@ai-sdk/openai" },
   { label: "OpenAI Compatible", value: "@ai-sdk/openai-compatible" },
   { label: "Anthropic", value: "@ai-sdk/anthropic" },
-  { label: "Amazon Bedrock", value: "@ai-sdk/amazon-bedrock" },
+  // bedrock 不在 silk 网关 4 协议转换集内：仅直连第三方端点可用（对齐 AgentType 能力表）
+  { label: "Amazon Bedrock（仅直连）", value: "@ai-sdk/amazon-bedrock" },
   { label: "Google Gemini", value: "@ai-sdk/google" },
 ];
 
@@ -143,7 +139,7 @@ const claudeSpec: HarnessFormSpec = {
   agentType: "claude_code",
   label: "Claude Code",
   fields: [
-    { key: "ANTHROPIC_BASE_URL", label: "API 端点", type: "text", placeholder: "https://api.example.com/anthropic" },
+    { key: "ANTHROPIC_BASE_URL", label: "API 端点", type: "text", placeholder: "http://127.0.0.1:1877（自动补 /v1/messages，勿带 /v1）" },
     { key: "ANTHROPIC_AUTH_TOKEN", label: "API Key", type: "secret", placeholder: "sk-..." },
     { key: "ANTHROPIC_MODEL", label: "主模型", type: "model-select", placeholder: "选择或输入模型 id" },
     { key: "CLAUDE_CODE_SUBAGENT_MODEL", label: "子代理模型", type: "model-select", placeholder: "可选" },
@@ -156,7 +152,9 @@ const claudeSpec: HarnessFormSpec = {
     const controlled = new Set(["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"]);
     for (const key of controlled) delete env[key];
     Object.assign(env, cleanKeyValue(form.env_extra));
-    for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"]) setNested(env, key, string(form[key]).trim());
+    // Claude Code 会自动追加 /v1/messages：保存时自动去除端点尾部 /v1（与后端 normalize_api_base_url 一致）
+    setNested(env, "ANTHROPIC_BASE_URL", string(form.ANTHROPIC_BASE_URL).trim().replace(/\/+$/, "").replace(/\/v1$/, ""));
+    for (const key of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"]) setNested(env, key, string(form[key]).trim());
     const roles = object(form.roles);
     for (const role of ["sonnet", "opus", "fable", "haiku"]) setNested(env, `ANTHROPIC_DEFAULT_${role.toUpperCase()}_MODEL`, string(roles[role]).trim());
     out.env = env;
@@ -178,7 +176,8 @@ const codexSpec: HarnessFormSpec = {
   fields: [
     { key: "model_provider", label: "Model Provider", type: "text", placeholder: "custom（ollama/lmstudio 禁止覆盖）" },
     { key: "model", label: "模型", type: "model-select", placeholder: "请先获取模型列表" },
-    { key: "wire_api", label: "Wire API", type: "select", options: codexWireApiOptions },
+    // 无 Wire API 字段：Codex 0.149+ 仅支持 Responses wire（chat wire 已移除），
+    // 其余协议由 silk 网关 prism 转换（writer 侧恒写 wire_api="responses"）
     { key: "base_url", label: "API 端点", type: "text", placeholder: "http://127.0.0.1:1877/v1" },
     { key: "api_key", label: "API Key", type: "secret", placeholder: "sk-silk-..." },
     { key: "model_reasoning_effort", label: "推理强度", type: "select", options: codexReasoningOptions },
@@ -189,7 +188,7 @@ const codexSpec: HarnessFormSpec = {
   ],
   toSettings(form) {
     const out = { ...rawConfig(form), ...object(form.advanced) };
-    for (const key of ["model_provider", "model", "wire_api", "base_url", "api_key", "model_reasoning_effort"]) setNested(out, key, string(form[key]).trim());
+    for (const key of ["model_provider", "model", "base_url", "api_key", "model_reasoning_effort"]) setNested(out, key, string(form[key]).trim());
     for (const key of ["model_context_window", "model_auto_compact_token_limit"]) {
       const n = Number(form[key]);
       if (Number.isInteger(n) && n > 0) out[key] = n;
@@ -203,7 +202,7 @@ const codexSpec: HarnessFormSpec = {
   fromSettings(config) {
     const advanced = { ...config };
     for (const key of ["model_provider", "model", "wire_api", "base_url", "api_key", "model_reasoning_effort", "model_context_window", "model_auto_compact_token_limit", "http_headers"]) delete advanced[key];
-    return withRaw(config, { model_provider: string(config.model_provider), model: string(config.model), wire_api: string(config.wire_api) || "responses", base_url: string(config.base_url), api_key: string(config.api_key), model_reasoning_effort: string(config.model_reasoning_effort), model_context_window: config.model_context_window ?? "", model_auto_compact_token_limit: config.model_auto_compact_token_limit ?? "", http_headers: cleanKeyValue(config.http_headers), advanced });
+    return withRaw(config, { model_provider: string(config.model_provider), model: string(config.model), base_url: string(config.base_url), api_key: string(config.api_key), model_reasoning_effort: string(config.model_reasoning_effort), model_context_window: config.model_context_window ?? "", model_auto_compact_token_limit: config.model_auto_compact_token_limit ?? "", http_headers: cleanKeyValue(config.http_headers), advanced });
   },
 };
 
@@ -304,6 +303,15 @@ export const harnessFormSpecs: Record<string, HarnessFormSpec> = {
   opencode: opencodeSpec,
   hermes: hermesSpec,
   gemini_cli: geminiSpec,
+};
+
+/**
+ * 官方直连卡（category=official）可填凭据字段：端点/模型锚定官方默认（不可改），
+ * 仅凭据开放填写；留空 = 使用 CLI 官方登录/默认。与后端 sanitize_official_settings 白名单对齐。
+ */
+export const officialCredentialFields: Record<string, Array<{ key: string; label: string }>> = {
+  claude_code: [{ key: "ANTHROPIC_AUTH_TOKEN", label: "Anthropic API Key" }],
+  gemini_cli: [{ key: "GEMINI_API_KEY", label: "Google API Key" }],
 };
 
 export function formSpecFor(agentType: string): HarnessFormSpec | undefined {

@@ -192,9 +192,20 @@ export interface GatewayKey {
 // 预设管理（cc-switch 复刻）
 // ---------------------------------------------------------------------------
 
+/** harness 原生协议能力项（单一事实来源在 Rust：AgentType::HARNESS_NATIVE_PROTOCOLS） */
+export interface AgentProtocolInfo {
+  /** silk 规范协议名（openai/responses/messages/gemini/bedrock 等） */
+  name: string;
+  /** 是否可由 silk 网关 prism 转换；false = 仅直连第三方端点可用 */
+  convert: boolean;
+}
+
 export interface AgentTypeInfo {
   id: string;
   name: string;
+  /** 该 harness 原生支持的协议能力：单协议 → 表单无需协议字段（silk 自动转换）；
+   *  多协议 → 表单保留协议选择器（opencode npm / hermes api_mode） */
+  protocols: AgentProtocolInfo[];
 }
 
 export interface Preset {

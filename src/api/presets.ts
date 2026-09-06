@@ -27,6 +27,14 @@ export const presetsApi = {
   switch: (agentType: string, presetId: string): Promise<PresetSwitchResult> =>
     invoke<PresetSwitchResult>("switch_preset", { agentType, presetId }),
 
+  /** OpenCode 累加模式独立启停：active=true 加入 opencode.json，false 移出；不清除其他激活项 */
+  setActive: (agentType: string, presetId: string, active: boolean): Promise<PresetSwitchResult> =>
+    invoke<PresetSwitchResult>("set_preset_active", { agentType, presetId, active }),
+
+  /** 官方直连行一键恢复默认（清空凭据，回到官方锚定形态） */
+  resetOfficial: (presetId: string): Promise<Preset> =>
+    invoke<Preset>("reset_official_preset", { presetId }),
+
   listAgentTypes: (): Promise<AgentTypeInfo[]> =>
     invoke<AgentTypeInfo[]>("list_agent_types"),
 

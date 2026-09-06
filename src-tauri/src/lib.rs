@@ -342,6 +342,8 @@ pub fn run() {
             commands::presets::update_preset,
             commands::presets::delete_preset,
             commands::presets::switch_preset,
+            commands::presets::set_preset_active,
+            commands::presets::reset_official_preset,
             commands::presets::list_agent_types,
             commands::presets::get_preset_defaults,
             commands::presets::update_preset_order,

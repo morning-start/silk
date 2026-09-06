@@ -102,6 +102,8 @@ export const api = {
   updatePreset: presetsApi.update,
   deletePreset: presetsApi.remove,
   switchPreset: presetsApi.switch,
+  setPresetActive: presetsApi.setActive,
+  resetOfficialPreset: presetsApi.resetOfficial,
   listAgentTypes: presetsApi.listAgentTypes,
   getPresetDefaults: presetsApi.getDefaults,
   updatePresetOrder: presetsApi.reorder,

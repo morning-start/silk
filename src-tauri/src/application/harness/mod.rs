@@ -63,6 +63,18 @@ pub trait HarnessWriter: Send + Sync {
         remove_keys: &[String],
     ) -> Result<(), String>;
 
+    /// 取消激活：从 live 配置中移除本 preset 对应的条目（对齐 cc-switch additive 应用的
+    /// “移出配置”）。默认 no-op；累加模式应用（opencode）实现为删除 provider.<id> 段，
+    /// 供多激活场景独立停用某个 preset 而不影响其他已激活项。
+    async fn remove_from_live(
+        &self,
+        home: &Path,
+        settings: &serde_json::Value,
+    ) -> Result<(), String> {
+        let _ = (home, settings);
+        Ok(())
+    }
+
     /// 从现有 live 配置提取可导入的 preset 片段。
     /// 一个 live 文件可能包含多个 provider，因此返回多个配置。
     fn extract_startup_settings(&self, live: &serde_json::Value) -> Vec<serde_json::Value> {

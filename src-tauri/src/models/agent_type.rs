@@ -42,4 +42,36 @@ impl AgentType {
     pub fn requires_restart(id: &str) -> bool {
         !matches!(id, "opencode" | "hermes")
     }
+
+    /// silk 网关 prism 可转换的协议全集（与 prism_wasm::map_provider 白名单一致）。
+    /// 命名的单一事实来源：各 harness 的能力表以此区分「可走网关自动转换」与「仅直连」。
+    pub const GATEWAY_CONVERTIBLE_PROTOCOLS: &'static [&'static str] =
+        &["openai", "responses", "messages", "gemini"];
+
+    /// 各 harness 原生协议能力（silk 规范名，即 CLI 对上位端点实际能说的 wire 协议）：
+    /// - 单协议 harness（claude_code/codex/gemini_cli）：协议由 CLI 固定，表单无需协议字段，
+    ///   silk 自动转换该协议到任意上游；
+    /// - 多协议 harness（opencode 经 npm SDK、hermes 经 api_mode）：表单保留协议选择器；
+    /// - bedrock 等不在 GATEWAY_CONVERTIBLE 内 = 仅直连第三方端点可用，silk 网关不转换。
+    pub const HARNESS_NATIVE_PROTOCOLS: &'static [(&'static str, &'static [&'static str])] = &[
+        ("claude_code", &["messages"]),
+        ("codex", &["responses"]),
+        ("opencode", &["openai", "responses", "messages", "gemini", "bedrock"]),
+        ("hermes", &["openai", "messages", "responses", "bedrock"]),
+        ("gemini_cli", &["gemini"]),
+    ];
+
+    /// 返回 harness 原生支持的协议集（未登记返回空）
+    pub fn native_protocols(agent_type: &str) -> &'static [&'static str] {
+        Self::HARNESS_NATIVE_PROTOCOLS
+            .iter()
+            .find(|(id, _)| *id == agent_type)
+            .map(|(_, protocols)| *protocols)
+            .unwrap_or(&[])
+    }
+
+    /// 该协议是否可由 silk 网关 prism 转换
+    pub fn is_gateway_convertible(protocol: &str) -> bool {
+        Self::GATEWAY_CONVERTIBLE_PROTOCOLS.contains(&protocol)
+    }
 }
