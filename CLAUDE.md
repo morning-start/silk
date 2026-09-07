@@ -10,7 +10,7 @@ bun run dev               # Vite dev server (port 1420)
 bun run build             # vue-tsc --noEmit && vite build
 bun run tauri dev         # 完整 Tauri 开发环境
 bun run tauri build       # 生产安装包 (.msi/.dmg/.deb)
-bun run bump:version 0.6.1 # 一键同步版本号 (scripts/bump-version.ts)
+bun run bump:version x.x.x # 一键同步版本号 (scripts/bump-version.ts)
 
 # src-tauri/ 目录下
 cargo check -p silk       # Rust 类型检查
