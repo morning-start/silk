@@ -981,6 +981,12 @@ mod tests {
     async fn imports_existing_opencode_providers_into_presets() {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.expect("memory database");
         sqlx::migrate!("./migrations").run(&pool).await.expect("schema");
+        // 迁移自带官方直连种子行（category=official：claude_code/codex/gemini_cli），
+        // 与 live 导入互不影响，需从导入断言中排除
+        let official = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM presets WHERE category = 'official'")
+            .fetch_one(&pool).await.expect("official seeds");
+        assert_eq!(official, 3);
+
         let home = std::env::temp_dir().join(format!("silk-startup-import-{}", uuid::Uuid::new_v4()));
         let config_path = home.join(".config").join("opencode").join("opencode.json");
         std::fs::create_dir_all(config_path.parent().expect("config parent")).expect("config directory");
@@ -988,12 +994,16 @@ mod tests {
 
         PresetService::import_existing_live_configs(&pool, &home).await.expect("startup import");
         PresetService::import_existing_live_configs(&pool, &home).await.expect("startup import repeats safely");
-        let rows = sqlx::query_as::<_, (String, String, i64)>("SELECT agent_type, settings_config, is_active FROM presets ORDER BY name")
-            .fetch_all(&pool).await.expect("imported presets");
+        // 只统计导入行（category=imported）：live 中 2 个 provider → 2 个 opencode 预设
+        let rows = sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT agent_type, settings_config, is_active FROM presets WHERE category = 'imported' ORDER BY name",
+        )
+        .fetch_all(&pool).await.expect("imported presets");
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| row.0 == "opencode"));
         assert!(rows.iter().any(|row| row.1.contains("relay")));
-        assert_eq!(rows.iter().filter(|row| row.2 == 1).count(), 0);
+        // opencode 累加模式：live 中的 provider 段天然处于激活态
+        assert_eq!(rows.iter().filter(|row| row.2 == 1).count(), 2);
 
         let _ = std::fs::remove_dir_all(home);
     }

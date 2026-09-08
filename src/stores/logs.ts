@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { api, type RequestLog } from "../api";
+import { logsApi } from "../api/logs";
+import type { RequestLog } from "../api";
 import { useAsyncOperation } from "../composables/useAsyncOperation";
 import { useSwrCache } from "../composables/useSwrCache";
 
@@ -22,7 +23,7 @@ export const useLogsStore = defineStore("logs", () => {
   async function fetchPage(pageNum: number) {
     const newOffset = (pageNum - 1) * limit.value;
     const result = await fetchOp.run(
-      () => api.listLogs(limit.value, newOffset),
+      () => logsApi.list(limit.value, newOffset),
       "获取日志失败"
     );
     if (result) {
@@ -36,7 +37,7 @@ export const useLogsStore = defineStore("logs", () => {
   async function fetchAll() {
     // 使用 SWR 检查缓存，首页数据存在且未过期时跳过请求
     const existing = await cache.fetchIfNeeded(
-      () => api.listLogs(limit.value, 0).then((r) => { total.value = r.total; return r.logs; })
+      () => logsApi.list(limit.value, 0).then((r) => { total.value = r.total; return r.logs; })
     );
     if (existing && existing.length > 0) {
       cache.data.value = existing;
@@ -63,13 +64,13 @@ export const useLogsStore = defineStore("logs", () => {
   }
 
   async function cleanup(beforeDays: number) {
-    await actionOp.runOrThrow(() => api.cleanupLogs(beforeDays), "清理失败");
+    await actionOp.runOrThrow(() => logsApi.cleanup(beforeDays), "清理失败");
     cache.clear();
     await fetchAll();
   }
 
   async function clearAll() {
-    await actionOp.runOrThrow(() => api.clearAllLogs(), "清空失败");
+    await actionOp.runOrThrow(() => logsApi.clearAll(), "清空失败");
     cache.clear();
     total.value = 0;
   }

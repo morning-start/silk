@@ -7,7 +7,9 @@ import {
   useMessage,
   useDialog,
 } from "naive-ui";
-import { api, type DashboardStats, type RequestLog } from "../api";
+import { statsApi } from "../api/stats";
+import { configApi } from "../api/config";
+import type { DashboardStats, RequestLog } from "../api";
 import { useGatewayStore } from "../stores/gateway";
 import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
 
@@ -30,9 +32,9 @@ async function loadData() {
   error.value = null;
   try {
     const [s, logs, key] = await Promise.all([
-      api.dashboardStats(),
-      api.recentRequests(10),
-      api.getBuiltinGatewayKey(),
+      statsApi.dashboard(),
+      statsApi.recentRequests(10),
+      configApi.getBuiltinGatewayKey(),
     ]);
     stats.value = s;
     recentLogs.value = logs;
@@ -73,7 +75,7 @@ async function resetGatewayKey() {
     negativeText: "取消",
     onPositiveClick: async () => {
       try {
-        const res = await api.resetBuiltinGatewayKey();
+        const res = await configApi.resetBuiltinGatewayKey();
         gatewayKey.value = res.plain_key;
         message.success("API Key 已刷新，请更新客户端配置");
       } catch (e: any) {

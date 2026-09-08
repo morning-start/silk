@@ -12,7 +12,8 @@ import {
   NIcon,
   type DataTableColumns,
 } from "naive-ui";
-import { api, type ProviderStats } from "../api";
+import { statsApi } from "../api/stats";
+import type { ProviderStats } from "../api";
 import { AlertCircleOutline } from "@vicons/ionicons5";
 
 const loading = ref(false);
@@ -71,7 +72,7 @@ async function loadData(days: number) {
   period.value = days;
   try {
     const [providers] = await Promise.all([
-      api.statsByProvider(10),
+      statsApi.byProvider(10),
     ]);
     providerStats.value = providers;
 

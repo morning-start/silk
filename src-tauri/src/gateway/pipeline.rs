@@ -29,6 +29,16 @@ impl StageError {
     }
 }
 
+/// 单次上游尝试的结局，供 `run_with_failover` 调度
+enum AttemptOutcome {
+    /// 上游成功（SSE 响应已在 dispatch_upstream 内构建），结束失败回退
+    Success(RequestContext),
+    /// 失败但当前 provider 仍有可用 Key，换 Key 后继续中层循环
+    RetryKey(RequestContext),
+    /// 当前 provider 的所有 Key 均已失败，换渠道
+    SwitchChannel(RequestContext),
+}
+
 #[derive(Clone)]
 pub struct GatewayPipeline {
     runtime: GatewayContext,
@@ -156,9 +166,111 @@ impl GatewayPipeline {
         self.run_with_failover(ctx).await
     }
 
+    /// 单次上游尝试：选 Key → 转换请求 → 插件钩子 → 分发 → 错误分类
+    ///
+    /// 返回 `AttemptOutcome` 供 `run_with_failover` 调度；`Err(StageError)` 表示
+    /// 不可重试错误或中间阶段（select / transform / plugin）失败，直接结束回退。
+    /// `failover_start` 仅用于日志统计（与回退总超时同源）。
+    async fn attempt_upstream(
+        &self,
+        mut ctx: RequestContext,
+        failover_start: std::time::Instant,
+    ) -> Result<AttemptOutcome, StageError> {
+        ctx = select_channel::run(ctx).await?;
+        ctx = transform_request::run(ctx).await?;
+
+        tracing::info!(
+            body_bytes = ctx.request_body.len(),
+            body_preview = %String::from_utf8_lossy(&ctx.request_body).chars().take(150).collect::<String>(),
+            "transform_request 完成，request_body 已更新"
+        );
+
+        // 执行插件 before_upstream 钩子
+        for plugin in &self.runtime.plugins {
+            ctx = plugin.before_upstream(ctx, &self.runtime).await?;
+        }
+
+        // dispatch_upstream 内部包含 Level 1（重试）
+        match dispatch_upstream::run(&self.runtime, ctx).await {
+            Ok(new_ctx) => {
+                // 成功！SSE 响应已在 dispatch_upstream 内构建
+                let mut ctx = new_ctx;
+                // 执行插件 after_upstream 钩子
+                for plugin in &self.runtime.plugins {
+                    ctx = plugin.after_upstream(ctx, &self.runtime).await?;
+                }
+                Ok(AttemptOutcome::Success(ctx))
+            }
+            Err(stage_err) => {
+                let error = stage_err.error;
+                // 记录失败的 Key
+                ctx = *stage_err.context;
+                ctx.total_retry_attempts += 1;
+                let failed_key = ctx.selected_api_key.clone();
+                if let Some(ref key) = failed_key {
+                    ctx.failed_keys.push(key.clone());
+                }
+                ctx.selected_api_key = None; // 避免复用
+
+                // 429/401/403/503 等明确错误不应换 Key 重试
+                if let GatewayError::UpstreamError { status, body } = &error {
+                    // 429 限流、401/403 认证失败、503 服务不可用：换 Key 无意义
+                    if *status == 429 || *status == 401 || *status == 403 || *status == 503 {
+                        let err_msg = body.get("error")
+                            .and_then(|e| e.get("message"))
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("未知错误");
+                        tracing::warn!(
+                            status = *status,
+                            error = %err_msg,
+                            "上游返回不可重试错误，直接失败"
+                        );
+                        return Err(StageError::new(ctx, GatewayError::UpstreamError {
+                            status: *status,
+                            body: body.clone(),
+                        }));
+                    }
+                }
+
+                tracing::info!(
+                    attempt = ctx.total_retry_attempts,
+                    elapsed_ms = failover_start.elapsed().as_millis(),
+                    "尝试失败，准备换 Key"
+                );
+
+                // 检查是否还有可用的 Key
+                let has_available_keys = ctx
+                    .provider
+                    .as_ref()
+                    .map(|provider| {
+                        provider.keys_vec().iter().any(|e| {
+                            e.enabled && !e.value.is_empty() && !ctx.failed_keys.contains(&e.value)
+                        })
+                    })
+                    .unwrap_or(false);
+
+                if has_available_keys {
+                    // Level 2：换 Key，继续中层循环
+                    Ok(AttemptOutcome::RetryKey(ctx))
+                } else {
+                    // 所有 Key 都试过了，记录 provider 失败
+                    let prov = ctx.provider.clone();
+                    if let Some(p) = prov {
+                        if !ctx.failed_providers.contains(&p.id) {
+                            ctx.failed_providers.push(p.id.clone());
+                        }
+                    }
+                    // 跳出中层循环，尝试换渠道
+                    Ok(AttemptOutcome::SwitchChannel(ctx))
+                }
+            }
+        }
+    }
+
     /// 带三级回退的核心处理逻辑
     ///
     /// 总超时15秒，最多尝试10次，防止无限重试。
+    /// 调度结构：Level 2 换 Key 由 `attempt_upstream` 决策，Level 3 换渠道在此处调度。
     async fn run_with_failover(
         &self,
         mut ctx: RequestContext,
@@ -229,100 +341,18 @@ impl GatewayPipeline {
                     ));
                 }
 
-                ctx = select_channel::run(ctx).await?;
-                ctx = transform_request::run(ctx).await?;
-
-                tracing::info!(
-                    body_bytes = ctx.request_body.len(),
-                    body_preview = %String::from_utf8_lossy(&ctx.request_body).chars().take(150).collect::<String>(),
-                    "transform_request 完成，request_body 已更新"
-                );
-
-                // 执行插件 before_upstream 钩子
-                for plugin in &self.runtime.plugins {
-                    ctx = plugin.before_upstream(ctx, &self.runtime).await?;
-                }
-
-                // dispatch_upstream 内部包含 Level 1（重试）
-                match dispatch_upstream::run(&self.runtime, ctx).await {
-                    Ok(new_ctx) => {
-                        // 成功！SSE 响应已在 dispatch_upstream 内构建
-                        let mut ctx = new_ctx;
-                        // 执行插件 after_upstream 钩子
-                        for plugin in &self.runtime.plugins {
-                            ctx = plugin.after_upstream(ctx, &self.runtime).await?;
-                        }
-                        return Ok(ctx);
+                // 单次上游尝试：选 Key → 转换 → 分发 → 错误分类（换 Key / 换渠道 / 失败）
+                match self.attempt_upstream(ctx, failover_start).await? {
+                    AttemptOutcome::Success(new_ctx) => return Ok(new_ctx),
+                    AttemptOutcome::RetryKey(new_ctx) => {
+                        // Level 2：换 Key，继续中层循环
+                        ctx = new_ctx;
+                        continue;
                     }
-                        Err(stage_err) => {
-                        let error = stage_err.error;
-                        // 记录失败的 Key
-                        ctx = *stage_err.context;
-                        ctx.total_retry_attempts += 1;
-                        let failed_key = ctx.selected_api_key.clone();
-                        if let Some(ref key) = failed_key {
-                            ctx.failed_keys.push(key.clone());
-                        }
-                        ctx.selected_api_key = None; // 避免复用
-
-                        // 429/401/403/503 等明确错误不应换 Key 重试
-                        let should_retry = match &error {
-                            GatewayError::UpstreamError { status, body } => {
-                                // 429 限流、401/403 认证失败、503 服务不可用：换 Key 无意义
-                                if *status == 429 || *status == 401 || *status == 403 || *status == 503 {
-                                    let err_msg = body.get("error")
-                                        .and_then(|e| e.get("message"))
-                                        .and_then(|m| m.as_str())
-                                        .unwrap_or("未知错误");
-                                    tracing::warn!(
-                                        status = *status,
-                                        error = %err_msg,
-                                        "上游返回不可重试错误，直接失败"
-                                    );
-                                    return Err(StageError::new(ctx, GatewayError::UpstreamError {
-                                        status: *status,
-                                        body: body.clone(),
-                                    }));
-                                }
-                                true
-                            }
-                            _ => true,
-                        };
-
-                        tracing::info!(
-                            attempt = ctx.total_retry_attempts,
-                            elapsed_ms = failover_start.elapsed().as_millis(),
-                            "尝试失败，准备换 Key"
-                        );
-
-                        if !should_retry {
-                            return Err(StageError::new(ctx, error));
-                        }
-
-                        // 检查是否还有可用的 Key
-                        let has_available_keys = ctx
-                            .provider
-                            .as_ref()
-                            .map(|provider| {
-                                provider.keys_vec().iter().any(|e| {
-                                    e.enabled && !e.value.is_empty() && !ctx.failed_keys.contains(&e.value)
-                                })
-                            })
-                            .unwrap_or(false);
-
-                        if has_available_keys {
-                            // Level 2：换 Key，继续中层循环
-                            continue;
-                        }
-
-                        // 所有 Key 都试过了，记录 provider 失败
-                        let prov = ctx.provider.clone();
-                        if let Some(p) = prov {
-                            if !ctx.failed_providers.contains(&p.id) {
-                                ctx.failed_providers.push(p.id.clone());
-                            }
-                        }
-                        break; // 跳出中层循环，尝试换渠道
+                    AttemptOutcome::SwitchChannel(new_ctx) => {
+                        // 跳出中层循环，尝试换渠道
+                        ctx = new_ctx;
+                        break;
                     }
                 }
             }

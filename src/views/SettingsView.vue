@@ -15,7 +15,7 @@ import {
 } from "naive-ui";
 import { useGatewayStore } from "../stores/gateway";
 import { storeToRefs } from "pinia";
-import { api } from "../api";
+import { configApi } from "../api/config";
 
 /**
  * 端口冲突校验
@@ -104,7 +104,7 @@ async function handleExportConfig() {
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (!filePath) return;
-    const result = await api.exportAppConfig({ file_path: filePath });
+    const result = await configApi.exportConfig({ file_path: filePath });
     message.success(`配置已导出到 ${result.file_path}`);
   } catch {
     message.error("导出配置失败");
@@ -119,7 +119,7 @@ async function handleBackupDatabase() {
       filters: [{ name: "SQLite", extensions: ["db"] }],
     });
     if (!filePath) return;
-    const result = await api.backupDatabase({ file_path: filePath });
+    const result = await configApi.backupDatabase({ file_path: filePath });
     message.success(`数据库已备份到 ${result.file_path}`);
   } catch {
     message.error("备份数据库失败");
@@ -142,7 +142,7 @@ async function handleRestoreDatabase() {
     });
     if (!filePath || Array.isArray(filePath)) return;
 
-    const result = await api.restoreDatabase({ file_path: filePath });
+    const result = await configApi.restoreDatabase({ file_path: filePath });
     message.success(`数据库已从 ${result.file_path} 恢复`);
     await gatewayStore.fetchStatus();
   } catch {
@@ -166,7 +166,7 @@ async function handleImportConfig() {
     });
     if (!filePath || Array.isArray(filePath)) return;
 
-    const result = await api.importAppConfig({ file_path: filePath });
+    const result = await configApi.importConfig({ file_path: filePath });
     message.success(`配置已从 ${result.file_path} 导入`);
     await gatewayStore.fetchStatus();
   } catch {

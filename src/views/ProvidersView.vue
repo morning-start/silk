@@ -18,7 +18,8 @@ import {
 } from "naive-ui";
 import { SearchOutline } from "@vicons/ionicons5";
 import { storeToRefs } from "pinia";
-import { api, type Provider, type ProviderHeaderEntry } from "../api";
+import { providersApi } from "../api/providers";
+import type { Provider, ProviderHeaderEntry } from "../api";
 import { copyWithFeedback } from "../utils/clipboard";
 import { healthStatusType } from "../utils/health";
 import AppFormModal from "../components/AppFormModal.vue";
@@ -235,7 +236,7 @@ async function fetchModels() {
   normalizeUrl();
   fetchingModels.value = true;
   try {
-    const models = await api.fetchProviderModels({
+    const models = await providersApi.fetchModels({
       api_base_url: formValue.value.api_base_url,
       api_key: apiKey,
       proxy_url: formValue.value.proxy_url || undefined,
@@ -253,7 +254,7 @@ async function fetchModels() {
 async function handleTest(row: Provider) {
   testingStates.value[row.id] = true;
   try {
-    const result = await api.testProvider(row.id);
+    const result = await providersApi.test(row.id);
     if (result.health_status === "healthy") {
       message.success(`连接成功 · ${result.response_time_ms}ms`);
     } else {

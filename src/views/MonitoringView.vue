@@ -12,7 +12,8 @@ import {
   NIcon,
   type DataTableColumns,
 } from "naive-ui";
-import { api, type HourlyStats, type ProviderStats } from "../api";
+import { statsApi } from "../api/stats";
+import type { HourlyStats, ProviderStats } from "../api";
 import { AlertCircleOutline } from "@vicons/ionicons5";
 
 const loading = ref(false);
@@ -45,8 +46,8 @@ async function loadData(hours: number) {
   timeRange.value = hours;
   try {
     const [hourly, providers] = await Promise.all([
-      api.hourlyStats(hours),
-      api.statsByProvider(10),
+      statsApi.hourly(hours),
+      statsApi.byProvider(10),
     ]);
     hourlyData.value = hourly;
     providerStats.value = providers;
