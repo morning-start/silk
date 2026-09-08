@@ -129,7 +129,7 @@ fn build_env_filter(
 ///
 /// 用法：
 /// ```rust
-/// let request_id = generate_request_id();
+/// let request_id = silk_lib::gateway::logging::generate_request_id();
 /// let span = tracing::info_span!("request", request_id = %request_id);
 /// let _guard = span.enter();
 /// // 后续所有日志自动携带 request_id
