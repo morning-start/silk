@@ -178,7 +178,11 @@ onErrorCaptured((err, _instance, info) => {
           </div>
         </template>
         <template v-else>
-          <router-view />
+          <router-view v-slot="{ Component }">
+            <transition name="page-fade" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </router-view>
         </template>
       </NLayoutContent>
 
@@ -292,6 +296,7 @@ onErrorCaptured((err, _instance, info) => {
   cursor: pointer;
   transition: all 150ms ease;
   font-family: inherit;
+  position: relative;
 }
 
 .sidebar-nav button:hover {
@@ -299,9 +304,22 @@ onErrorCaptured((err, _instance, info) => {
   color: var(--sidebar-active, #f8fafc);
 }
 
+/* 激活态：2px 左侧指示条 + 微tint，替代整块实心色块 */
 .sidebar-nav button.active {
-  background: var(--accent, #0891b2);
-  color: #ffffff;
+  background: var(--sidebar-active-bg, rgba(8, 145, 178, 0.08));
+  color: var(--sidebar-active-fg, #0e7490);
+  font-weight: 500;
+}
+
+.sidebar-nav button.active::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--sidebar-active-rail, #0891b2);
 }
 
 .sidebar-nav button svg {

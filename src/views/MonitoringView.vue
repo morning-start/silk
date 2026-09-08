@@ -65,7 +65,10 @@ onMounted(() => loadData(24));
   <div class="monitoring">
     <div class="toolbar">
       <div class="toolbar-left">
-        <h2 class="page-title">实时监控</h2>
+        <div class="page-head">
+          <h2 class="page-title">实时监控</h2>
+          <p class="page-desc">实时观察请求速率、耗时与状态分布</p>
+        </div>
       </div>
       <div class="toolbar-right">
         <NSpace>

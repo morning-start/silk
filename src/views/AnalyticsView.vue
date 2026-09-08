@@ -96,7 +96,10 @@ onMounted(() => loadData(30));
   <div class="analytics">
     <div class="toolbar">
       <div class="toolbar-left">
-        <h2 class="page-title">用量分析</h2>
+        <div class="page-head">
+          <h2 class="page-title">用量分析</h2>
+          <p class="page-desc">按时间维度查看各渠道请求量与耗时趋势</p>
+        </div>
       </div>
       <div class="toolbar-right">
         <NSpace>

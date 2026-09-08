@@ -280,7 +280,10 @@ onMounted(() => {
 
     <div class="toolbar">
       <div class="toolbar-left">
-        <h2 class="page-title">请求日志</h2>
+        <div class="page-head">
+          <h2 class="page-title">请求日志</h2>
+          <p class="page-desc">检索网关请求记录，支持导出与清理</p>
+        </div>
         <NTag size="small" type="info">共 {{ total.toLocaleString() }} 条</NTag>
       </div>
       <div class="toolbar-right">

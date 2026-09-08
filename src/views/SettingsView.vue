@@ -204,7 +204,10 @@ onMounted(() => {
   <div class="settings-page">
     <div class="toolbar">
       <div class="toolbar-left">
-        <h2 class="page-title">设置</h2>
+        <div class="page-head">
+          <h2 class="page-title">设置</h2>
+          <p class="page-desc">网关行为、数据管理与安全配置</p>
+        </div>
       </div>
       <div class="toolbar-right">
         <NButton type="primary" size="small" @click="handleSave" :loading="loading">保存更改</NButton>

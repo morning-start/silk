@@ -14,6 +14,15 @@
   --accent: #0891b2;
   --accent-hover: #0e7490;
   --accent-soft: rgba(8, 145, 178, 0.08);
+  /* 次要强调（信息/链接/选中态），与主强调互补，避免单色系 */
+  --accent-2: #6366f1;
+  --accent-2-hover: #4f46e5;
+  --accent-2-soft: rgba(99, 102, 241, 0.1);
+
+  /* 侧栏激活态（安静精确：2px 指示条 + 微tint） */
+  --sidebar-active-bg: rgba(8, 145, 178, 0.08);
+  --sidebar-active-fg: #0e7490;
+  --sidebar-active-rail: #0891b2;
 
   --font-mono: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
 
@@ -111,15 +120,18 @@ body {
 
 /* ===== NaiveUI card overrides ===== */
 .n-card {
-  transition: box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+/* 表面收敛：hairline 边框替代阴影，安静、仪器感 */
 .n-card:not(.n-card--bordered-true) {
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-soft, #e2e8f0) !important;
+  box-shadow: none;
 }
 
 .n-card:not(.n-card--bordered-true):hover {
-  box-shadow: var(--shadow);
+  border-color: var(--border, #cbd5e1) !important;
+  box-shadow: var(--shadow-sm);
 }
 
 /* ===== Data Table ===== */
@@ -136,6 +148,12 @@ body {
 
 .n-data-table .n-data-table-tr--striped {
   background: #fafbfc !important;
+}
+
+/* 数据表格行密度收紧，便于快速扫描 */
+.n-data-table .n-data-table-td {
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
 }
 
 /* ===== Tag ===== */
@@ -184,12 +202,18 @@ body.dark {
   --border: #242f41;
   --border-soft: #1e293b;
   --accent-soft: rgba(8, 145, 178, 0.15);
+  --accent-2: #818cf8;
+  --accent-2-hover: #a5b4fc;
+  --accent-2-soft: rgba(99, 102, 241, 0.18);
   --success-soft: rgba(16, 185, 129, 0.15);
   --warn-soft: rgba(245, 158, 11, 0.15);
   --danger-soft: rgba(239, 68, 68, 0.15);
   --sidebar-bg: #070a13;
   --sidebar-fg: #64748b;
   --sidebar-active: #f8fafc;
+  --sidebar-active-bg: rgba(34, 211, 238, 0.12);
+  --sidebar-active-fg: #67e8f9;
+  --sidebar-active-rail: #22d3ee;
   --sidebar-width: 240px;
   --topbar-bg: #0b0f19;
   --topbar-border: #1e293b;
@@ -215,7 +239,8 @@ body.dark .icon-btn {
 }
 
 body.dark .n-card:not(.n-card--bordered-true) {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border-soft, #1e293b) !important;
+  box-shadow: none;
 }
 
 body.dark .n-data-table th {
@@ -245,6 +270,16 @@ body.dark ::-webkit-scrollbar-thumb:hover {
 
 /* ===== Toolbar helpers ===== */
 .mb-16 { margin-bottom: 16px; }
+
+/* ===== 页面切换过渡（安静 150ms 淡入） ===== */
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition: opacity 150ms ease;
+}
+.page-fade-enter-from,
+.page-fade-leave-to {
+  opacity: 0;
+}
 
 /* ===== Empty State (各页面的空数据引导) ===== */
 .empty-state {
@@ -303,7 +338,8 @@ body.dark ::-webkit-scrollbar-thumb:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  gap: 16px;
 }
 .toolbar-left {
   display: flex;
@@ -315,9 +351,19 @@ body.dark ::-webkit-scrollbar-thumb:hover {
   align-items: center;
 }
 .page-title {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   margin: 0;
+  color: var(--fg, #0f172a);
+}
+
+.page-desc {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted, #64748b);
+  margin: 2px 0 0;
+  line-height: 1.5;
 }
 
 /* ===== Card ===== */
