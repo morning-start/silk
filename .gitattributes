@@ -1,0 +1,5 @@
+# 统一换行符：SQL 迁移文件强制 LF
+# 确保任何平台（含 Windows CI 的 core.autocrlf=true）检出内容与本地一致，
+# 避免 sqlx 迁移校验和不匹配导致启动崩溃
+# （"migration X was previously applied but has been modified"）
+*.sql text eol=lf

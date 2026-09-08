@@ -31,6 +31,12 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
+      # 禁用 CRLF 转换：保证迁移文件(.sql)在 Windows runner 上以 LF 检出，
+      # 与本地开发环境内嵌的迁移内容字节一致，避免 sqlx 迁移校验和不匹配
+      # （"migration X was previously applied but has been modified" 启动崩溃）
+      - name: Disable CRLF conversion
+        run: git config --global core.autocrlf false
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
