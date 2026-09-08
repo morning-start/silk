@@ -20,7 +20,9 @@ import {
 import {
   SearchOutline,
 } from "@vicons/ionicons5";
-import { api, type ModelMapping, type NewMappingChannel, type Provider } from "../api";
+import { modelMappingsApi } from "../api/model-mappings";
+import { providersApi } from "../api/providers";
+import type { ModelMapping, NewMappingChannel, Provider } from "../api";
 import { formatPrice, formatTokens } from "../utils/format";
 import { healthStatusLabel, healthStatusType } from "../utils/health";
 import AppFormModal from "../components/AppFormModal.vue";
@@ -120,8 +122,8 @@ async function loadData() {
   error.value = null;
   try {
     const [m, p] = await Promise.all([
-      api.listModelMappings(),
-      api.listProviders(),
+      modelMappingsApi.list(),
+      providersApi.list(),
     ]);
     mappings.value = m;
     allProviders.value = p;
@@ -193,7 +195,7 @@ function handleDelete(row: ModelMapping) {
     negativeText: "取消",
     onPositiveClick: async () => {
       try {
-        await api.deleteModelMapping(row.id);
+        await modelMappingsApi.remove(row.id);
         mappings.value = mappings.value.filter((m) => m.id !== row.id);
         message.success("删除成功");
       } catch {
@@ -228,12 +230,12 @@ async function handleSubmit() {
     };
 
     if (editingId.value) {
-      const updated = await api.updateModelMapping(editingId.value, payload as any);
+      const updated = await modelMappingsApi.update(editingId.value, payload as any);
       const idx = mappings.value.findIndex((m) => m.id === editingId.value);
       if (idx >= 0) mappings.value[idx] = updated;
       message.success("更新成功");
     } else {
-      const created = await api.createModelMapping(payload as any);
+      const created = await modelMappingsApi.create(payload as any);
       mappings.value.unshift(created);
       message.success("创建成功");
     }

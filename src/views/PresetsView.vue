@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { NButton, NInput, NInputNumber, NModal, NSelect, NTag, useDialog, useMessage } from "naive-ui";
-import { api, type AgentTypeInfo, type Preset, type ProviderModelInfo } from "../api";
+import { presetsApi } from "../api/presets";
+import { providersApi } from "../api/providers";
+import type { AgentTypeInfo, Preset, ProviderModelInfo } from "../api";
 import { formSpecFor, officialCredentialFields, type HarnessField, type HarnessFormSpec } from "../config/harnessForms";
 
 const message = useMessage();
@@ -86,7 +88,7 @@ async function saveOfficial() {
     if (value && value.trim()) env[key] = value.trim();
   }
   try {
-    await api.updatePreset(preset.id, { name: officialName.value.trim(), settings_config: { env } });
+    await presetsApi.update(preset.id, { name: officialName.value.trim(), settings_config: { env } });
     message.success("已更新官方配置");
     officialModal.value = false;
     await loadPresets();
@@ -102,7 +104,7 @@ function resetOfficial(preset: Preset) {
     negativeText: "取消",
     onPositiveClick: async () => {
       try {
-        await api.resetOfficialPreset(preset.id);
+        await presetsApi.resetOfficial(preset.id);
         message.success("已恢复官方默认");
         await loadPresets();
       } catch (error: any) {
@@ -164,7 +166,7 @@ const modelEndpointKey = computed(() => ({
 
 async function loadAgentTypes() {
   try {
-    agentTypes.value = await api.listAgentTypes();
+    agentTypes.value = await presetsApi.listAgentTypes();
     if (agentTypes.value.length > 0) activeTab.value = agentTypes.value[0].id;
   } catch (error: any) {
     message.error(error?.message || "加载 Agent 类型失败");
@@ -174,7 +176,7 @@ async function loadAgentTypes() {
 async function loadPresets() {
   loading.value = true;
   try {
-    presets.value = await api.listPresets(activeTab.value);
+    presets.value = await presetsApi.list(activeTab.value);
   } catch (error: any) {
     message.error(error?.message || "加载预设失败");
   } finally {
@@ -322,7 +324,7 @@ async function fetchModels() {
   modelsFetched.value = false;
   fetchedModels.value = [];
   try {
-    fetchedModels.value = await api.fetchProviderModels({ api_base_url: baseUrl.trim(), api_key: apiKey.trim(), timeout_seconds: 10 });
+    fetchedModels.value = await providersApi.fetchModels({ api_base_url: baseUrl.trim(), api_key: apiKey.trim(), timeout_seconds: 10 });
     modelsFetched.value = true;
     message[fetchedModels.value.length ? "success" : "warning"](fetchedModels.value.length ? `已获取 ${fetchedModels.value.length} 个模型` : "未获取到模型");
   } catch (error: any) {
@@ -338,7 +340,7 @@ async function openAdd() {
   fetchedModels.value = [];
   modelsFetched.value = false;
   try {
-    const defaults = await api.getPresetDefaults(activeTab.value);
+    const defaults = await presetsApi.getDefaults(activeTab.value);
     formValues.value = { ...defaults.values };
   } catch {
     formValues.value = {};
@@ -364,8 +366,8 @@ async function activate(preset: Preset) {
   const activating = !preset.is_active;
   try {
     const result = isOpenCode
-      ? await api.setPresetActive(activeTab.value, preset.id, activating)
-      : await api.switchPreset(activeTab.value, preset.id);
+      ? await presetsApi.setActive(activeTab.value, preset.id, activating)
+      : await presetsApi.switch(activeTab.value, preset.id);
     message.success(
       isOpenCode
         ? activating
@@ -403,10 +405,10 @@ async function save(activateAfter: boolean) {
   try {
     let savedId = editingId.value;
     if (savedId) {
-      await api.updatePreset(savedId, { name: formName.value.trim(), settings_config: settings });
+      await presetsApi.update(savedId, { name: formName.value.trim(), settings_config: settings });
       message.success("已更新");
     } else {
-      savedId = (await api.createPreset({ name: formName.value.trim(), agent_type: activeTab.value, settings_config: settings })).id;
+      savedId = (await presetsApi.create({ name: formName.value.trim(), agent_type: activeTab.value, settings_config: settings })).id;
       message.success("已创建");
     }
     showModal.value = false;
@@ -418,7 +420,7 @@ async function save(activateAfter: boolean) {
           // opencode 保存并激活 = 确保置为激活态（累加模式，不清除其他已激活项）。
           // 编辑已激活的 preset 时 update() 已同步 live，仅需在尚未激活时补置位。
           if (!preset.is_active) {
-            const result = await api.setPresetActive(activeTab.value, preset.id, true);
+            const result = await presetsApi.setActive(activeTab.value, preset.id, true);
             message.success(`已激活「${preset.name}」`);
             for (const warning of result.warnings) message.warning(warning);
             await loadPresets();
@@ -445,7 +447,7 @@ function remove(preset: Preset) {
     negativeText: "取消",
     onPositiveClick: async () => {
       try {
-        await api.deletePreset(preset.id);
+        await presetsApi.remove(preset.id);
         message.success("已删除");
         await loadPresets();
       } catch (error: any) {
@@ -470,7 +472,7 @@ function onDrop(target: Preset) {
   const official = reordered.filter(isOfficialPreset);
   const others = reordered.filter((preset) => !isOfficialPreset(preset));
   presets.value = [...official, ...others];
-  void api.updatePresetOrder(activeTab.value, others.map((preset) => preset.id)).catch(async (error: any) => {
+  void presetsApi.reorder(activeTab.value, others.map((preset) => preset.id)).catch(async (error: any) => {
     message.error(error?.message || "保存排序失败");
     await loadPresets();
   });

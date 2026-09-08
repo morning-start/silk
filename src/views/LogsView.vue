@@ -22,7 +22,8 @@ import {
 import { useLogsStore } from "../stores/logs";
 import { storeToRefs } from "pinia";
 import type { HourlyStats, ProviderStats, RequestLog } from "../api";
-import { api } from "../api";
+import { logsApi } from "../api/logs";
+import { statsApi } from "../api/stats";
 
 const logsStore = useLogsStore();
 const { logs, total, page, totalPages, loading, error } = storeToRefs(logsStore);
@@ -183,7 +184,7 @@ async function handleExportCsv() {
       filters: [{ name: "CSV", extensions: ["csv"] }],
     });
     if (!filePath) return;
-    const result = await api.exportLogsCsv({ limit: 10000, file_path: filePath });
+    const result = await logsApi.exportCsv({ limit: 10000, file_path: filePath });
     message.success(`已导出 ${result.exported_count} 条日志到 ${result.file_path}`);
   } catch {
     message.error("导出失败");
@@ -194,8 +195,8 @@ async function loadStats(hours = metricRange.value) {
   metricRange.value = hours;
   try {
     const [hourly, providers] = await Promise.all([
-      api.hourlyStats(hours),
-      api.statsByProvider(5),
+      statsApi.hourly(hours),
+      statsApi.byProvider(5),
     ]);
     hourlyData.value = hourly;
     providerStats.value = providers;

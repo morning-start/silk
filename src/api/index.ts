@@ -2,16 +2,6 @@
 // 领域 API 模块
 // ---------------------------------------------------------------------------
 
-import { invoke } from "@tauri-apps/api/core";
-import { gatewayApi } from "./gateway";
-import { providersApi } from "./providers";
-import { logsApi } from "./logs";
-import { statsApi } from "./stats";
-import { modelMappingsApi } from "./model-mappings";
-import { presetsApi } from "./presets";
-import { configApi } from "./config";
-import type { GatewaySettings } from "./types";
-
 // ---------------------------------------------------------------------------
 // 类型重导出
 // ---------------------------------------------------------------------------
@@ -40,74 +30,6 @@ export type {
   PresetDefaults,
   FileOperationResponse,
 } from "./types";
-
-// ---------------------------------------------------------------------------
-// 向后兼容的聚合 API（保持旧的方法名）
-// ---------------------------------------------------------------------------
-
-export const api = {
-  // Gateway
-  gatewayStatus: gatewayApi.status,
-  gatewayStart: gatewayApi.start,
-  gatewayStop: gatewayApi.stop,
-  gatewayRestart: gatewayApi.restart,
-  getGatewaySettings: () => invoke<GatewaySettings>("get_gateway_settings"),
-  updateGatewaySettings: gatewayApi.updateSettings,
-
-  // Providers
-  listProviders: providersApi.list,
-  getProvider: providersApi.get,
-  createProvider: providersApi.create,
-  updateProvider: providersApi.update,
-  deleteProvider: providersApi.remove,
-  testProvider: providersApi.test,
-  fetchProviderModels: providersApi.fetchModels,
-
-  // Logs
-  listLogs: (limit = 50, offset = 0) =>
-    logsApi.list(limit, offset),
-  cleanupLogs: logsApi.cleanup,
-  clearAllLogs: logsApi.clearAll,
-  exportLogsCsv: logsApi.exportCsv,
-
-  // Stats
-  dashboardStats: statsApi.dashboard,
-  recentRequests: statsApi.recentRequests,
-  statsByProvider: statsApi.byProvider,
-  hourlyStats: statsApi.hourly,
-
-  // Model Mappings
-  listModelMappings: modelMappingsApi.list,
-  getModelMapping: modelMappingsApi.get,
-  findModelMappingByName: modelMappingsApi.findByName,
-  createModelMapping: modelMappingsApi.create,
-  updateModelMapping: modelMappingsApi.update,
-  deleteModelMapping: modelMappingsApi.remove,
-  listAllModels: modelMappingsApi.listAllModels,
-
-  // Gateway Keys
-  getBuiltinGatewayKey: configApi.getBuiltinGatewayKey,
-  resetBuiltinGatewayKey: configApi.resetBuiltinGatewayKey,
-
-  // Config & Data
-  exportAppConfig: configApi.exportConfig,
-  importAppConfig: configApi.importConfig,
-  backupDatabase: configApi.backupDatabase,
-  restoreDatabase: configApi.restoreDatabase,
-
-  // Presets（cc-switch 复刻）
-  listPresets: presetsApi.list,
-  getPreset: presetsApi.get,
-  createPreset: presetsApi.create,
-  updatePreset: presetsApi.update,
-  deletePreset: presetsApi.remove,
-  switchPreset: presetsApi.switch,
-  setPresetActive: presetsApi.setActive,
-  resetOfficialPreset: presetsApi.resetOfficial,
-  listAgentTypes: presetsApi.listAgentTypes,
-  getPresetDefaults: presetsApi.getDefaults,
-  updatePresetOrder: presetsApi.reorder,
-} as const;
 
 // ---------------------------------------------------------------------------
 // 领域 API 独立导出（新代码推荐按需导入）
