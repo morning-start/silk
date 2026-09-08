@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   NButton,
   NCard,
+  NCheckbox,
   NForm,
   NFormItem,
   NGrid,
@@ -42,6 +43,30 @@ const searchQuery = ref("");
 const showModal = ref(false);
 const editingId = ref<string | null>(null);
 const fetchingModels = ref(false);
+/** 手动添加模型的输入值（/v1/models 无结果时的补充手段） */
+const newModel = ref("");
+/** 勾选待删除的模型 ID 集合 */
+const selectedModels = ref<string[]>([]);
+/** 模型列表搜索关键字（模糊：大小写不敏感 + 字符按序匹配） */
+const modelSearch = ref("");
+/** 过滤后的模型列表（全选/反选作用于过滤结果） */
+const filteredModels = computed(() => {
+  const q = modelSearch.value.trim().toLowerCase();
+  if (!q) return formValue.value.models;
+  return formValue.value.models.filter((model) => fuzzyMatch(model, q));
+});
+
+/** 模糊匹配：查询串所有字符按顺序出现在目标串中（含普通子串场景） */
+function fuzzyMatch(target: string, query: string): boolean {
+  const lower = target.toLowerCase();
+  let cursor = 0;
+  for (const ch of query) {
+    const idx = lower.indexOf(ch, cursor);
+    if (idx < 0) return false;
+    cursor = idx + 1;
+  }
+  return true;
+}
 const testingStates = ref<Record<string, boolean>>({});
 const keyVisibility = ref<boolean[]>([]);
 
@@ -111,6 +136,8 @@ function createDefaultHeader(): ProviderHeaderEntry {
 
 function resetForm() {
   editingId.value = null;
+  selectedModels.value = [];
+  modelSearch.value = "";
   keyVisibility.value = [false];
   formValue.value = {
     name: "",
@@ -139,6 +166,8 @@ function handleAdd() {
 
 function handleEdit(row: Provider) {
   editingId.value = row.id;
+  selectedModels.value = [];
+  modelSearch.value = "";
   keyVisibility.value = (row.keys && row.keys.length > 0)
     ? row.keys.map(() => false)
     : [false];
@@ -242,14 +271,73 @@ async function fetchModels() {
       proxy_url: formValue.value.proxy_url || undefined,
       timeout_seconds: formValue.value.timeout_seconds,
     });
-    formValue.value.models = models.map((model) => model.id);
-    message.success(models.length > 0 ? `获取到 ${models.length} 个模型` : "未返回模型列表");
+    // 清洗拉取结果：去重、剔除空 id，避免重复 :key 导致 DOM 复用错位（勾选状态串扰）
+    const fetched = [...new Set(models.map((model) => model.id).filter(Boolean))];
+    // 未保存时读取当前模型数组：不在数组中的新模型默认勾选，便于快速识别新增项
+    const prevModels = formValue.value.models;
+    formValue.value.models = fetched;
+    selectedModels.value = fetched.filter((model) => !prevModels.includes(model));
+    message.success(fetched.length > 0 ? `获取到 ${fetched.length} 个模型` : "未返回模型列表");
   } catch (e: any) {
     message.error(e?.message || "获取模型列表失败");
   } finally {
     fetchingModels.value = false;
   }
 }
+
+/** 手动添加模型：trim 去空白、非空校验、去重后追加 */
+function addModel() {
+  const model = newModel.value.trim();
+  if (!model) return;
+  if (formValue.value.models.includes(model)) {
+    message.warning("该模型已存在");
+    return;
+  }
+  formValue.value.models.push(model);
+  newModel.value = "";
+}
+
+/** 全选：勾选当前可见（含搜索过滤）的全部模型 */
+function selectAllModels() {
+  selectedModels.value = [...filteredModels.value];
+}
+
+/** 反选：翻转当前可见（含搜索过滤）的勾选集合 */
+function invertModels() {
+  selectedModels.value = filteredModels.value.filter(
+    (model) => !selectedModels.value.includes(model)
+  );
+}
+
+/** 删除选中的模型并清空勾选 */
+function deleteSelectedModels() {
+  formValue.value.models = formValue.value.models.filter(
+    (model) => !selectedModels.value.includes(model)
+  );
+  selectedModels.value = [];
+}
+
+/** 复选框勾选/取消勾选（来自复选框自身事件） */
+function setModelSelected(model: string, checked: boolean) {
+  const idx = selectedModels.value.indexOf(model);
+  if (checked && idx < 0) selectedModels.value.push(model);
+  if (!checked && idx >= 0) selectedModels.value.splice(idx, 1);
+}
+
+/** 行点击（模型名区域）切换选中 */
+function toggleModelSelected(model: string) {
+  const idx = selectedModels.value.indexOf(model);
+  if (idx >= 0) selectedModels.value.splice(idx, 1);
+  else selectedModels.value.push(model);
+}
+
+// 安全网：models 变化后把选中集修剪为 models 子集，任何路径都不会残留失效勾选
+watch(
+  () => formValue.value.models,
+  (list) => {
+    selectedModels.value = selectedModels.value.filter((model) => list.includes(model));
+  }
+);
 
 async function handleTest(row: Provider) {
   testingStates.value[row.id] = true;
@@ -509,19 +597,55 @@ onMounted(() => {
                 <NButton size="small" secondary :loading="fetchingModels" :disabled="!canFetchModels" @click="fetchModels">
                   获取模型
                 </NButton>
-                <span class="models-hint">使用第一个已启用且非空的 Key 请求 `/v1/models`。</span>
+                <span class="models-hint">使用第一个已启用且非空的 Key 请求 `/v1/models`，成功会覆盖下方列表。</span>
+                <template v-if="formValue.models.length > 0">
+                  <NInput
+                    v-model:value="modelSearch"
+                    placeholder="搜索模型"
+                    size="small"
+                    clearable
+                    class="model-search"
+                  />
+                  <div class="models-select-actions">
+                    <NButton size="tiny" quaternary @click="selectAllModels">全选</NButton>
+                    <NButton size="tiny" quaternary @click="invertModels">反选</NButton>
+                    <NButton size="tiny" quaternary type="error" :disabled="selectedModels.length === 0" @click="deleteSelectedModels">
+                      删除选中{{ selectedModels.length > 0 ? `（${selectedModels.length}）` : '' }}
+                    </NButton>
+                  </div>
+                </template>
               </div>
-              <div v-if="formValue.models.length > 0" class="model-list">
-                <span
-                  v-for="(model, index) in formValue.models"
-                  :key="model + '-' + index"
-                  class="model-pill"
-                  @click="formValue.models.splice(index, 1)"
-                >
-                  {{ model }} ×
-                </span>
+              <div v-if="formValue.models.length > 0">
+                <div v-if="filteredModels.length > 0" class="model-list">
+                  <label
+                    v-for="model in filteredModels"
+                    :key="model"
+                    class="model-check-row"
+                    @click="toggleModelSelected(model)"
+                  >
+                    <NCheckbox
+                      :checked="selectedModels.includes(model)"
+                      size="small"
+                      @click.stop
+                      @update:checked="(checked) => setModelSelected(model, checked)"
+                    />
+                    <span class="model-check-name">{{ model }}</span>
+                  </label>
+                </div>
+                <div v-else class="models-empty">无匹配模型</div>
               </div>
-              <div v-else class="models-empty">暂未获取模型列表</div>
+              <div v-else class="models-empty">暂无模型，可手动添加或点击「获取模型」</div>
+              <div class="model-add-row">
+                <NInput
+                  v-model:value="newModel"
+                  placeholder="手动输入模型 ID，回车添加"
+                  size="small"
+                  clearable
+                  :disabled="fetchingModels"
+                  @keyup.enter="addModel"
+                />
+                <NButton size="small" secondary :disabled="!newModel.trim()" @click="addModel">添加</NButton>
+              </div>
             </div>
           </NFormItem>
 
@@ -727,9 +851,44 @@ onMounted(() => {
 }
 
 .model-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 2px 12px;
+  margin-top: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.model-check-row {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius, 8px);
+  cursor: pointer;
+}
+
+.model-check-row:hover {
+  background: var(--hover-bg, #f8fafc);
+}
+
+.model-check-name {
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--fg, #0f172a);
+  word-break: break-all;
+}
+
+.model-search {
+  width: 160px;
+  margin-left: auto;
+}
+
+.models-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .model-pill {
@@ -747,6 +906,18 @@ onMounted(() => {
 .models-empty {
   font-size: 13px;
   color: var(--text-color-3, #94a3b8);
+}
+
+.model-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.model-add-row .n-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .form-hint {
