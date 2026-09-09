@@ -449,9 +449,11 @@ async fn auto_start_gateway_if_enabled(app: &mut tauri::App) -> Result<(), sqlx:
     };
 
     if should_auto_start {
-        start_existing_gateway(state.inner())
-            .await
-            .map_err(|err| sqlx::Error::Io(std::io::Error::other(err)))?;
+        if let Err(err) = start_existing_gateway(state.inner()).await {
+            // 网关自动启动失败（如端口被系统保留/占用）不应导致应用崩溃，
+            // 记录日志后正常打开 UI，用户可在设置页调整端口后手动启动。
+            tracing::error!(error = %err, "自动启动网关失败，请检查监听端口是否被系统保留或占用");
+        }
     }
 
     Ok(())

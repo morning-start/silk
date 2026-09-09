@@ -46,7 +46,19 @@ pub async fn spawn_gateway_server(
 ) -> Result<GatewayServerHandle, std::io::Error> {
     let settings = context.settings.read().await.clone();
     let addr = format!("{}:{}", settings.bind_host, settings.bind_port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| {
+        // Windows 上 os error 10013 通常表示端口落在系统排除范围
+        // （Hyper-V/WSL 动态保留），给出可操作的提示而非裸错误。
+        let hint = if cfg!(windows) && e.raw_os_error() == Some(10013) {
+            "（Windows 系统排除端口范围，可在设置中更换监听端口）"
+        } else {
+            "（可在设置中更换监听端口）"
+        };
+        std::io::Error::new(
+            e.kind(),
+            format!("绑定监听地址 {addr} 失败: {e} {hint}"),
+        )
+    })?;
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let app = build_router(context);
 
