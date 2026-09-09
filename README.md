@@ -4,7 +4,7 @@
   <img src="src-tauri/icons/icon.png" alt="Silk Logo" width="128" />
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.9.1-blue" alt="version" />
   <img src="https://img.shields.io/badge/Tauri-2.0-purple" alt="tauri" />
   <img src="https://img.shields.io/badge/license-AGPLv3-green" alt="license" />
 </p>
