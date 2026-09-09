@@ -84,7 +84,11 @@ async function handleSave() {
       proxy_url: formValue.value.proxy_url.trim() || null,
     };
     await gatewayStore.updateSettings(payload);
-    message.success("设置已保存");
+    if (status.value?.running) {
+      message.success("设置已保存，网关已自动重启");
+    } else {
+      message.info("设置已保存。网关当前未运行，请点击顶栏「启动网关」按钮手动启动");
+    }
   } catch {
     message.error("保存失败");
   }
