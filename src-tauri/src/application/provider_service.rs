@@ -444,7 +444,7 @@ fn validate_strategy(strategy: Option<&str>) -> Result<(), ServiceError> {
     if let Some(strategy) = strategy {
         if !matches!(
             strategy,
-            "round_robin" | "weighted" | "failover" | "least_conn"
+            "round_robin" | "weighted" | "least_conn"
         ) {
             return bad_request("Key 选择策略无效");
         }

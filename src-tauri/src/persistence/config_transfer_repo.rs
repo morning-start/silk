@@ -246,9 +246,9 @@ async fn insert_model_mapping_channels(
         sqlx::query(
             r#"
             INSERT INTO model_mapping_channels (
-                id, mapping_id, provider_id, selected_models, enabled, created_at
+                id, mapping_id, provider_id, selected_models, enabled, weight, created_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             "#,
         )
         .bind(&channel.id)
@@ -256,6 +256,7 @@ async fn insert_model_mapping_channels(
         .bind(&channel.provider_id)
         .bind(&channel.selected_models)
         .bind(channel.enabled)
+        .bind(channel.weight)
         .bind(channel.created_at)
         .execute(&mut **tx)
         .await?;

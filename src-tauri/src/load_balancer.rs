@@ -1,9 +1,21 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// 可负载均衡的条目 trait
 pub trait LoadBalancedItem {
     fn weight(&self) -> i64;
     fn enabled(&self) -> bool;
+}
+
+/// 跨请求共享的负载均衡状态
+///
+/// LoadBalancer 每次请求都会重建（items 从 DB 读取），但
+/// current_weights 需要跨请求持久才能让轮询类策略真正生效。
+/// 网关将每个 mapping / provider 对应的状态缓存为 Arc，供各请求复用。
+#[derive(Debug, Default)]
+pub struct LoadBalancerState {
+    /// 平滑加权轮询的当前权重（与启用条目列表对齐，跨请求持久）
+    current_weights: Mutex<Vec<i64>>,
 }
 
 /// 负载均衡策略
@@ -12,7 +24,6 @@ pub enum LoadBalanceStrategy {
     RoundRobin,
     Weighted,
     LeastConn,
-    Failover,
 }
 
 impl LoadBalanceStrategy {
@@ -20,7 +31,6 @@ impl LoadBalanceStrategy {
         match s {
             "weighted" => Self::Weighted,
             "least_conn" => Self::LeastConn,
-            "failover" => Self::Failover,
             "round_robin" => Self::RoundRobin,
             other => {
                 tracing::warn!("未知负载均衡策略 '{other}'，默认使用 RoundRobin");
@@ -34,7 +44,6 @@ impl LoadBalanceStrategy {
             Self::RoundRobin => "round_robin",
             Self::Weighted => "weighted",
             Self::LeastConn => "least_conn",
-            Self::Failover => "failover",
         }
     }
 }
@@ -44,6 +53,8 @@ impl LoadBalanceStrategy {
 pub struct LoadBalancer<T> {
     items: Vec<T>,
     strategy: LoadBalanceStrategy,
+    /// 跨请求共享状态（网关提供时轮询类策略真正生效）
+    shared: Option<Arc<LoadBalancerState>>,
     counter: AtomicU64,
     /// 每个条目的活跃连接数（仅 LeastConn 策略使用）
     active_conns: Vec<AtomicU64>,
@@ -56,6 +67,24 @@ impl<T: LoadBalancedItem + Clone> LoadBalancer<T> {
         Self {
             items,
             strategy,
+            shared: None,
+            counter: AtomicU64::new(0),
+            active_conns,
+        }
+    }
+
+    /// 携带跨请求共享状态创建（网关请求路径使用，轮询状态持久生效）
+    pub fn with_shared_state(
+        items: Vec<T>,
+        strategy: LoadBalanceStrategy,
+        shared: Arc<LoadBalancerState>,
+    ) -> Self {
+        let n = items.len();
+        let active_conns = (0..n).map(|_| AtomicU64::new(0)).collect();
+        Self {
+            items,
+            strategy,
+            shared: Some(shared),
             counter: AtomicU64::new(0),
             active_conns,
         }
@@ -67,6 +96,7 @@ impl<T: LoadBalancedItem + Clone> LoadBalancer<T> {
         self.strategy = strategy;
         self.counter.store(0, Ordering::Relaxed);
         self.active_conns = (0..n).map(|_| AtomicU64::new(0)).collect();
+        // 共享状态的 current_weights 由 select 按需对齐长度，此处不重置
     }
 
     pub fn is_empty(&self) -> bool {
@@ -90,10 +120,34 @@ impl<T: LoadBalancedItem + Clone> LoadBalancer<T> {
         }
 
         match self.strategy {
-            LoadBalanceStrategy::RoundRobin => {
-                let idx = self.counter.fetch_add(1, Ordering::Relaxed);
-                Some(enabled[(idx as usize) % enabled.len()].1)
-            }
+            LoadBalanceStrategy::RoundRobin => match &self.shared {
+                // 平滑加权轮询：每轮所有条目 current += weight，取最大者，选中后 -= total
+                Some(state) => {
+                    let mut weights = state.current_weights.lock().unwrap();
+                    if weights.len() != enabled.len() {
+                        weights.resize(enabled.len(), 0);
+                    }
+                    let total_weight: i64 = enabled.iter().map(|(_, i)| i.weight().max(1)).sum();
+                    for (i, (_, item)) in enabled.iter().enumerate() {
+                        weights[i] += item.weight().max(1);
+                    }
+                    let mut best = 0usize;
+                    let mut best_weight = i64::MIN;
+                    for (i, w) in weights.iter().enumerate() {
+                        if *w > best_weight {
+                            best_weight = *w;
+                            best = i;
+                        }
+                    }
+                    weights[best] -= total_weight;
+                    Some(enabled[best].1)
+                }
+                // 无共享状态时退化为普通轮询（测试等一次性场景）
+                None => {
+                    let idx = self.counter.fetch_add(1, Ordering::Relaxed);
+                    Some(enabled[(idx as usize) % enabled.len()].1)
+                }
+            },
             LoadBalanceStrategy::Weighted => {
                 let total_weight: i64 = enabled.iter().map(|(_, i)| i.weight().max(1)).sum();
                 let rng = rand::random::<u64>();
@@ -120,7 +174,6 @@ impl<T: LoadBalancedItem + Clone> LoadBalancer<T> {
                 }
                 Some(&self.items[best_idx])
             }
-            LoadBalanceStrategy::Failover => enabled.first().map(|(_, item)| *item),
         }
     }
 

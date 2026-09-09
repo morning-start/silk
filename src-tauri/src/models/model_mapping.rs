@@ -66,6 +66,13 @@ pub struct NewMappingChannel {
     /// 该渠道选中的远程模型名列表（空数组 = 使用 mapping 的 model_name）
     pub selected_models: Option<Vec<String>>,
     pub enabled: Option<bool>,
+    /// 负载均衡权重（默认 1）
+    #[serde(default = "default_channel_weight")]
+    pub weight: i64,
+}
+
+fn default_channel_weight() -> i64 {
+    1
 }
 
 /// 模型映射关联渠道（DB 行）
@@ -77,6 +84,8 @@ pub struct ModelMappingChannel {
     /// JSON 数组
     pub selected_models: String,
     pub enabled: i64,
+    /// 负载均衡权重
+    pub weight: i64,
     pub created_at: chrono::NaiveDateTime,
 }
 
@@ -100,6 +109,8 @@ pub struct MappingChannelInfo {
     /// 该渠道选中的远程模型名列表
     pub selected_models: Vec<String>,
     pub enabled: bool,
+    /// 负载均衡权重
+    pub weight: i64,
 }
 
 impl ModelMapping {

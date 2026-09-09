@@ -1,5 +1,5 @@
 use crate::crypto::decrypt;
-use crate::gateway::context::RequestContext;
+use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
 use crate::load_balancer::{LoadBalanceStrategy, LoadBalancer};
@@ -9,7 +9,7 @@ use crate::models::ProviderKeyEntry;
 ///
 /// 在模型池/Provider 已确定后，按 Provider 自身的 key 负载均衡策略选择一个上游 API Key。
 /// 已失败的 Key（在 ctx.failed_keys 中）会被跳过。
-pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> {
+pub async fn run(runtime: &GatewayContext, mut ctx: RequestContext) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
     let provider = ctx.provider.as_ref().ok_or_else(|| {
         StageError::new(
@@ -42,7 +42,8 @@ pub async fn run(mut ctx: RequestContext) -> Result<RequestContext, StageError> 
     // 按 Provider 的策略从可用 Key 中选一个
     let strategy = LoadBalanceStrategy::parse(&provider.key_strategy);
     let items: Vec<_> = available.iter().map(|e| (*e).clone()).collect();
-    let balancer = LoadBalancer::new(items, strategy);
+    let state = runtime.load_balancer_state(&format!("provider:{}", provider.id));
+    let balancer = LoadBalancer::with_shared_state(items, strategy, state);
     let selected = balancer.select().ok_or_else(|| {
         StageError::new(
             error_ctx.clone(),

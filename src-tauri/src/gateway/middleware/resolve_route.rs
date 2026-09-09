@@ -24,11 +24,12 @@ const PROTOCOL_ADAPTER_MAP: &[(&str, &str)] = &[
 #[derive(Clone)]
 struct ChannelItem {
     provider_id: String,
+    weight: i64,
 }
 
 impl LoadBalancedItem for ChannelItem {
     fn weight(&self) -> i64 {
-        1
+        self.weight.max(1)
     }
     fn enabled(&self) -> bool {
         true
@@ -128,10 +129,11 @@ async fn try_model_mapping_route(
     ctx.channels_available = channels.iter().map(|c| c.provider_id.clone()).collect();
 
     // 候选选择：负载均衡
-    let (selected_id, selected_models) = match select_via_load_balancer(&channels, &mapping.strategy) {
-        Some(s) => s,
-        None => return Ok(None),
-    };
+    let (selected_id, selected_models) =
+        match select_via_load_balancer(runtime, &mapping.id, &channels, &mapping.strategy) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
 
     // 应用选中渠道的模型覆盖
     apply_model_override(&mut ctx, &request_model, &selected_models);
@@ -222,15 +224,21 @@ async fn try_path_based_default(
 
 /// 从模型映射渠道中通过负载均衡选择一条渠道
 fn select_via_load_balancer(
+    runtime: &GatewayContext,
+    mapping_id: &str,
     channels: &[ModelMappingChannel],
     strategy: &str,
 ) -> Option<(String, Vec<String>)> {
     let strategy = LoadBalanceStrategy::parse(strategy);
     let items: Vec<ChannelItem> = channels
         .iter()
-        .map(|c| ChannelItem { provider_id: c.provider_id.clone() })
+        .map(|c| ChannelItem {
+            provider_id: c.provider_id.clone(),
+            weight: c.weight,
+        })
         .collect();
-    let balancer = LoadBalancer::new(items, strategy);
+    let state = runtime.load_balancer_state(&format!("mapping:{mapping_id}"));
+    let balancer = LoadBalancer::with_shared_state(items, strategy, state);
     let selected = balancer.select()?;
 
     let selected_models = channels

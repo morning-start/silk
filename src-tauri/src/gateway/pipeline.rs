@@ -176,7 +176,7 @@ impl GatewayPipeline {
         mut ctx: RequestContext,
         failover_start: std::time::Instant,
     ) -> Result<AttemptOutcome, StageError> {
-        ctx = select_channel::run(ctx).await?;
+        ctx = select_channel::run(&self.runtime, ctx).await?;
         ctx = transform_request::run(ctx).await?;
 
         tracing::info!(

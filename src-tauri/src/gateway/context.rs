@@ -8,6 +8,7 @@ use tokio::sync::{oneshot, RwLock};
 
 use crate::gateway::header_config::HeaderConfig;
 use crate::gateway::middleware::rate_limit::RateLimitState;
+use crate::load_balancer::LoadBalancerState;
 use crate::models::{GatewaySettings, Provider};
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,8 @@ pub struct GatewayContext {
     pub plugins: Vec<Arc<dyn crate::gateway::plugin::GatewayPlugin>>,
     /// 限流状态（全局共享，配置可热更新）
     pub rate_limit_state: RateLimitState,
+    /// 负载均衡共享状态（key: "mapping:{id}" / "provider:{id}"，跨请求持久轮询计数器）
+    pub load_balancer_states: Arc<Mutex<HashMap<String, Arc<LoadBalancerState>>>>,
 }
 
 impl GatewayContext {
@@ -74,7 +77,16 @@ impl GatewayContext {
             header_config: HeaderConfig::default(),
             plugins,
             rate_limit_state,
+            load_balancer_states: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// 获取/创建指定 key 的负载均衡共享状态（轮询计数器跨请求持久）
+    pub fn load_balancer_state(&self, key: &str) -> Arc<LoadBalancerState> {
+        let mut map = self.load_balancer_states.lock().unwrap();
+        map.entry(key.to_string())
+            .or_insert_with(|| Arc::new(LoadBalancerState::default()))
+            .clone()
     }
 
     /// 获取流式 HTTP 客户端：渠道配置了代理（provider.proxy_url）时优先使用

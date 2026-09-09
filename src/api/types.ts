@@ -147,12 +147,14 @@ export interface MappingChannelInfo {
   provider_health: string | null;
   selected_models: string[];
   enabled: boolean;
+  weight: number;
 }
 
 export interface NewMappingChannel {
   provider_id: string;
   selected_models?: string[];
   enabled?: boolean;
+  weight?: number;
 }
 
 export interface ModelMapping {

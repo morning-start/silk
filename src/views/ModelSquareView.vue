@@ -17,10 +17,8 @@ import {
   useMessage,
   useDialog,
 } from "naive-ui";
-import {
-  SearchOutline,
-} from "@vicons/ionicons5";
-import { modelMappingsApi } from "../api/model-mappings";
+import { SearchOutline } from "@vicons/ionicons5";
+import { modelMappingsApi, type CreateModelMappingPayload } from "../api/model-mappings";
 import { providersApi } from "../api/providers";
 import type { ModelMapping, NewMappingChannel, Provider } from "../api";
 import { formatPrice, formatTokens } from "../utils/format";
@@ -40,22 +38,44 @@ const showModal = ref(false);
 const editingId = ref<string | null>(null);
 
 // 表单数据
-const formValue = ref({
-  model_name: "",
-  strategy: "round_robin",
-  // 步骤①：选中的渠道 ID 列表
-  selectedProviderIds: [] as string[],
-  // 步骤②：每个渠道选中的模型列表 { provider_id → model[] }
-  selectedModelsMap: {} as Record<string, string[]>,
-  max_input_tokens: null as number | null,
-  max_context_tokens: null as number | null,
-  max_output_tokens: null as number | null,
-  input_price_per_1m: null as number | null,
-  output_price_per_1m: null as number | null,
-  capabilities: [] as string[],
-  description: "",
-  enabled: true,
-});
+function createEmptyForm() {
+  return {
+    model_name: "",
+    strategy: "round_robin",
+    // 步骤①：选中的渠道 ID 列表
+    selectedProviderIds: [] as string[],
+    // 步骤②：每个渠道选中的模型列表 { provider_id → model[] }
+    selectedModelsMap: {} as Record<string, string[]>,
+    // 每个渠道的负载均衡权重（默认 1，仅加权轮询/加权随机生效）
+    channelWeights: {} as Record<string, number>,
+    max_context_tokens: null as number | null,
+    max_output_tokens: null as number | null,
+    input_price_per_1m: null as number | null,
+    output_price_per_1m: null as number | null,
+    capabilities: [] as string[],
+    description: "",
+    enabled: true,
+  };
+}
+
+const formValue = ref(createEmptyForm());
+
+// 加权类策略才展示权重输入（最少连接无需加权）
+const isWeightedStrategy = computed(
+  () => formValue.value.strategy === "round_robin" || formValue.value.strategy === "weighted"
+);
+
+// 某渠道的权重（默认 1）
+function channelWeightOf(providerId: string): number {
+  return formValue.value.channelWeights[providerId] || 1;
+}
+
+// 设置渠道权重（保留原 map 引用以触发响应式）
+function setChannelWeight(providerId: string, value: number | null) {
+  const weights = { ...formValue.value.channelWeights };
+  weights[providerId] = value && value > 0 ? value : 1;
+  formValue.value.channelWeights = weights;
+}
 
 // 步骤②：模型模糊搜索关键字
 const modelSearchKeyword = ref("");
@@ -69,11 +89,13 @@ const selectedProviders = computed(() =>
 const channelModels = computed(() => {
   const kw = modelSearchKeyword.value.trim().toLowerCase();
   return selectedProviders.value.map((p) => {
-    const models = (p.models || []).filter((m) => !kw || m.toLowerCase().includes(kw));
+    const all = p.models || [];
+    const models = all.filter((m) => !kw || m.toLowerCase().includes(kw));
     return {
       provider_id: p.id,
       provider_name: p.name,
       models,
+      total: all.length,
       selectedModels: formValue.value.selectedModelsMap[p.id] || [],
     };
   });
@@ -92,17 +114,98 @@ function toggleModel(providerId: string, model: string) {
   formValue.value.selectedModelsMap = map;
 }
 
-const capabilityOptions = [
-  { label: "思考", value: "thinking" },
-  { label: "识图", value: "vision" },
-  { label: "文本", value: "text" },
-  { label: "代码", value: "code" },
-  { label: "生图", value: "image_gen" },
-  { label: "语音", value: "audio" },
+// 切换选中/取消某个渠道（取消时同时清理其已选模型和权重）
+function toggleProvider(providerId: string, checked: boolean) {
+  if (checked) {
+    formValue.value.selectedProviderIds.push(providerId);
+    if (formValue.value.channelWeights[providerId] === undefined) {
+      formValue.value.channelWeights[providerId] = 1;
+    }
+  } else {
+    formValue.value.selectedProviderIds = formValue.value.selectedProviderIds.filter((id) => id !== providerId);
+    const map = { ...formValue.value.selectedModelsMap };
+    delete map[providerId];
+    formValue.value.selectedModelsMap = map;
+    const weights = { ...formValue.value.channelWeights };
+    delete weights[providerId];
+    formValue.value.channelWeights = weights;
+  }
+}
+
+// 切换选中/取消某个模型能力
+function toggleCapability(value: string, checked: boolean) {
+  if (checked) {
+    formValue.value.capabilities.push(value);
+  } else {
+    formValue.value.capabilities = formValue.value.capabilities.filter((c) => c !== value);
+  }
+}
+
+// 某渠道已选中的模型列表
+function selectedModelsOf(providerId: string): string[] {
+  return formValue.value.selectedModelsMap[providerId] || [];
+}
+
+// 完整标签映射（含已下线的 code，兼容旧数据展示）
+const capabilityLabelMap: Record<string, string> = {
+  thinking: "思考",
+  vision: "识图",
+  text: "文本",
+  code: "代码",
+  image_gen: "生图",
+  audio: "语音",
+};
+
+// 模型能力选项（当前可勾选的能力子集，从标签映射派生，避免重复维护 label）
+const capabilityOptions = ["thinking", "vision", "text", "image_gen", "audio"].map((value) => ({
+  value,
+  label: capabilityLabelMap[value],
+}));
+
+// 档位标签 → token 数：k = ×1024，M = ×1024²（如 "128k" → 131072，"1M" → 1048576）
+function tokenFromLabel(label: string): number {
+  const unit = label.slice(-1).toLowerCase();
+  const num = Number(label.slice(0, -1));
+  if (unit === "m") return Math.round(num * 1024 * 1024);
+  if (unit === "k") return Math.round(num * 1024);
+  return Math.round(num);
+}
+
+// 上下文 / 最大输出 快捷档位配置（点击填入，再点取消）
+type TokenFieldKey = "max_context_tokens" | "max_output_tokens";
+
+interface TokenFieldConfig {
+  key: TokenFieldKey;
+  label: string;
+  options: { label: string; value: number }[];
+}
+
+const tokenFields: TokenFieldConfig[] = [
+  {
+    key: "max_context_tokens",
+    label: "上下文",
+    options: ["128k", "256k", "512k", "1M"].map((label) => ({
+      label,
+      value: tokenFromLabel(label),
+    })),
+  },
+  {
+    key: "max_output_tokens",
+    label: "最大输出",
+    options: ["16k", "32k", "64k", "128k"].map((label) => ({
+      label,
+      value: tokenFromLabel(label),
+    })),
+  },
 ];
 
+function toggleTokenValue(key: TokenFieldKey, value: number) {
+  const form = formValue.value;
+  form[key] = form[key] === value ? null : value;
+}
+
 function capabilityLabel(val: string): string {
-  return capabilityOptions.find((c) => c.value === val)?.label || val;
+  return capabilityLabelMap[val] || val;
 }
 
 function capabilityColor(val: string): string {
@@ -136,20 +239,7 @@ async function loadData() {
 
 function resetForm() {
   editingId.value = null;
-  formValue.value = {
-    model_name: "",
-    strategy: "round_robin",
-    selectedProviderIds: [],
-    selectedModelsMap: {},
-    max_input_tokens: null,
-    max_context_tokens: null,
-    max_output_tokens: null,
-    input_price_per_1m: null,
-    output_price_per_1m: null,
-    capabilities: [],
-    description: "",
-    enabled: true,
-  };
+  formValue.value = createEmptyForm();
   modelSearchKeyword.value = "";
 }
 
@@ -160,21 +250,23 @@ function handleAdd() {
 
 function handleEdit(row: ModelMapping) {
   editingId.value = row.id;
-  // 从 channels 回填 selectedProviderIds 和 selectedModelsMap
+  // 从 channels 回填 selectedProviderIds / selectedModelsMap / channelWeights
   const providerIds: string[] = [];
   const modelsMap: Record<string, string[]> = {};
+  const weightsMap: Record<string, number> = {};
   for (const c of row.channels || []) {
     providerIds.push(c.provider_id);
     if (c.selected_models && c.selected_models.length > 0) {
       modelsMap[c.provider_id] = c.selected_models;
     }
+    weightsMap[c.provider_id] = c.weight || 1;
   }
   formValue.value = {
     model_name: row.model_name,
     strategy: row.strategy || "round_robin",
     selectedProviderIds: providerIds,
     selectedModelsMap: modelsMap,
-    max_input_tokens: row.max_input_tokens,
+    channelWeights: weightsMap,
     max_context_tokens: row.max_context_tokens,
     max_output_tokens: row.max_output_tokens,
     input_price_per_1m: row.input_price_per_1m,
@@ -212,13 +304,13 @@ async function handleSubmit() {
       return {
         provider_id: pid,
         selected_models: selectedModels && selectedModels.length > 0 ? selectedModels : undefined,
+        weight: channelWeightOf(pid),
       };
     });
 
-    const payload = {
+    const payload: CreateModelMappingPayload = {
       model_name: formValue.value.model_name,
       strategy: formValue.value.strategy,
-      max_input_tokens: formValue.value.max_input_tokens,
       max_context_tokens: formValue.value.max_context_tokens,
       max_output_tokens: formValue.value.max_output_tokens,
       input_price_per_1m: formValue.value.input_price_per_1m,
@@ -230,12 +322,12 @@ async function handleSubmit() {
     };
 
     if (editingId.value) {
-      const updated = await modelMappingsApi.update(editingId.value, payload as any);
+      const updated = await modelMappingsApi.update(editingId.value, payload);
       const idx = mappings.value.findIndex((m) => m.id === editingId.value);
       if (idx >= 0) mappings.value[idx] = updated;
       message.success("更新成功");
     } else {
-      const created = await modelMappingsApi.create(payload as any);
+      const created = await modelMappingsApi.create(payload);
       mappings.value.unshift(created);
       message.success("创建成功");
     }
@@ -400,16 +492,7 @@ watch(
                   type="checkbox"
                   class="channel-checkbox"
                   :checked="formValue.selectedProviderIds.includes(p.id)"
-                  @change="(e: any) => {
-                    if (e.target.checked) {
-                      formValue.selectedProviderIds.push(p.id);
-                    } else {
-                      formValue.selectedProviderIds = formValue.selectedProviderIds.filter(id => id !== p.id);
-                      const map = { ...formValue.selectedModelsMap };
-                      delete map[p.id];
-                      formValue.selectedModelsMap = map;
-                    }
-                  }"
+                  @change="(e: any) => toggleProvider(p.id, e.target.checked)"
                 />
                 <div class="channel-info">
                   <span class="channel-name">{{ p.name }}</span>
@@ -443,7 +526,17 @@ watch(
             <div v-for="grp in channelModels" :key="grp.provider_id" class="channel-model-group">
               <div class="cmg-header">
                 <span class="cmg-name">{{ grp.provider_name }}</span>
-                <span class="cmg-count">已选 {{ (formValue.selectedModelsMap[grp.provider_id] || []).length }}/{{ (selectedProviders.find(p => p.id === grp.provider_id)?.models || []).length }}</span>
+                <span class="cmg-count">已选 {{ selectedModelsOf(grp.provider_id).length }}/{{ grp.total }}</span>
+                <span v-if="isWeightedStrategy" class="cmg-weight">
+                  <span class="cmg-weight-label">权重</span>
+                  <NInputNumber
+                    :value="channelWeightOf(grp.provider_id)"
+                    :min="1"
+                    size="small"
+                    style="width: 72px"
+                    @update:value="(v) => setChannelWeight(grp.provider_id, v)"
+                  />
+                </span>
               </div>
               <div v-if="grp.models.length === 0" class="cmg-empty">无匹配模型</div>
               <div v-else class="cmg-list">
@@ -451,11 +544,11 @@ watch(
                   v-for="m in grp.models"
                   :key="grp.provider_id + '-' + m"
                   class="cmg-item"
-                  :class="{ selected: (formValue.selectedModelsMap[grp.provider_id] || []).includes(m) }"
+                  :class="{ selected: selectedModelsOf(grp.provider_id).includes(m) }"
                   @click="toggleModel(grp.provider_id, m)"
                 >
                   <div class="cmg-check">
-                    <span class="cmg-check-icon">{{ (formValue.selectedModelsMap[grp.provider_id] || []).includes(m) ? '✓' : '' }}</span>
+                    <span class="cmg-check-icon">{{ selectedModelsOf(grp.provider_id).includes(m) ? '✓' : '' }}</span>
                   </div>
                   <span class="cmg-model">{{ m }}</span>
                   <span class="cmg-remark">外部视为 {{ formValue.model_name || '同模型名' }}</span>
@@ -473,23 +566,28 @@ watch(
           <NSelect
             v-model:value="formValue.strategy"
             :options="[
-              { label: '轮询 (Round Robin)', value: 'round_robin' },
-              { label: '加权轮询 (Weighted)', value: 'weighted' },
+              { label: '加权轮询 (Weighted Round Robin)', value: 'round_robin' },
+              { label: '加权随机 (Weighted Random)', value: 'weighted' },
               { label: '最少连接 (Least Conn)', value: 'least_conn' },
-              { label: '故障转移 (Failover)', value: 'failover' },
             ]"
           />
         </NFormItem>
 
         <div class="form-row">
-          <NFormItem label="最大输入" style="flex: 1">
-            <NInputNumber v-model:value="formValue.max_input_tokens" placeholder="128K" :min="0" style="width: 100%" />
-          </NFormItem>
-          <NFormItem label="上下文" style="flex: 1">
-            <NInputNumber v-model:value="formValue.max_context_tokens" placeholder="128K" :min="0" style="width: 100%" />
-          </NFormItem>
-          <NFormItem label="最大输出" style="flex: 1">
-            <NInputNumber v-model:value="formValue.max_output_tokens" placeholder="4K" :min="0" style="width: 100%" />
+          <NFormItem v-for="field in tokenFields" :key="field.key" :label="field.label" style="flex: 1">
+            <div class="token-field">
+              <NInputNumber v-model:value="formValue[field.key]" placeholder="请输入数值，留空则使用最佳默认值" :min="0" style="width: 100%" />
+              <div class="token-options">
+                <button
+                  v-for="opt in field.options"
+                  :key="opt.value"
+                  type="button"
+                  class="token-option"
+                  :class="{ active: formValue[field.key] === opt.value }"
+                  @click="toggleTokenValue(field.key, opt.value)"
+                >{{ opt.label }}</button>
+              </div>
+            </div>
           </NFormItem>
         </div>
 
@@ -510,10 +608,7 @@ watch(
           <div class="cap-checkboxes">
             <label v-for="cap in capabilityOptions" :key="cap.value" class="cap-checkbox">
               <input type="checkbox" :value="cap.value" :checked="formValue.capabilities.includes(cap.value)"
-                @change="(e: any) => {
-                  if (e.target.checked) formValue.capabilities.push(cap.value);
-                  else formValue.capabilities = formValue.capabilities.filter((c) => c !== cap.value);
-                }"
+                @change="(e: any) => toggleCapability(cap.value, e.target.checked)"
               />
               {{ cap.label }}
             </label>
@@ -743,6 +838,18 @@ watch(
   color: var(--text-color-3, #94a3b8);
 }
 
+.cmg-weight {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.cmg-weight-label {
+  font-size: 12px;
+  color: var(--text-color-2, #64748b);
+}
+
 .cmg-empty {
   padding: 12px;
   font-size: 13px;
@@ -826,6 +933,43 @@ watch(
   gap: 4px;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* 上下文 / 最大输出 快捷档位 */
+.token-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.token-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.token-option {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  background: transparent;
+  color: var(--text-color-2, #64748b);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.token-option:hover {
+  border-color: var(--accent, #0891b2);
+  color: var(--accent, #0891b2);
+}
+
+.token-option.active {
+  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
+  border-color: var(--accent, #0891b2);
+  color: var(--accent, #0891b2);
+  font-weight: 500;
 }
 
 

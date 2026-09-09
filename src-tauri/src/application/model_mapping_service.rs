@@ -234,6 +234,9 @@ fn validate_channels(channels: Option<&[NewMappingChannel]>) -> Result<(), Servi
         }) {
             return bad_request("模型池渠道模型名不能为空");
         }
+        if channels.iter().any(|channel| channel.weight <= 0) {
+            return bad_request("模型池渠道权重必须大于 0");
+        }
     }
     Ok(())
 }
@@ -242,7 +245,7 @@ fn validate_strategy(strategy: Option<&str>) -> Result<(), ServiceError> {
     if let Some(strategy) = strategy {
         if !matches!(
             strategy,
-            "round_robin" | "weighted" | "least_conn" | "failover"
+            "round_robin" | "weighted" | "least_conn"
         ) {
             return bad_request("模型池策略无效");
         }

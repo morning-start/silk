@@ -13,7 +13,7 @@ pub struct Provider {
     pub models: String,
     /// API Key 列表（JSON 数组），格式 [{"name":"主密钥","value":"<encrypted>","enabled":true}]
     pub keys: String,
-    /// 密钥选择策略: round_robin / weighted / failover
+    /// 密钥选择策略: round_robin / weighted / least_conn
     pub key_strategy: String,
     pub api_base_url: String,
     pub proxy_url: Option<String>,

@@ -78,9 +78,8 @@ const protocolOptions = [
 ];
 
 const keyStrategyOptions = [
-  { label: "轮询", value: "round_robin" },
-  { label: "加权轮询", value: "weighted" },
-  { label: "顺序故障转移", value: "failover" },
+  { label: "加权轮询", value: "round_robin" },
+  { label: "加权随机", value: "weighted" },
   { label: "最少连接", value: "least_conn" },
 ];
 

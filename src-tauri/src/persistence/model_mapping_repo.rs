@@ -203,7 +203,7 @@ impl ModelMappingRepo {
             r#"
             SELECT mmc.id, mmc.mapping_id, mmc.provider_id,
                    p.name as provider_name, p.protocols, p.models, p.health_status,
-                   mmc.selected_models, mmc.enabled
+                   mmc.selected_models, mmc.enabled, mmc.weight
             FROM model_mapping_channels mmc
             JOIN providers p ON p.id = mmc.provider_id
             WHERE mmc.mapping_id = ?1
@@ -233,6 +233,7 @@ impl ModelMappingRepo {
                 provider_health: row.get("health_status"),
                 selected_models,
                 enabled: row.get::<i64, _>("enabled") != 0,
+                weight: row.get::<i64, _>("weight"),
             });
         }
         Ok(result)
@@ -280,8 +281,8 @@ impl ModelMappingRepo {
                 defaults::to_json(&channel.selected_models.as_deref().unwrap_or(&[]));
             sqlx::query(
                 r#"
-                INSERT INTO model_mapping_channels (id, mapping_id, provider_id, selected_models, enabled, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                INSERT INTO model_mapping_channels (id, mapping_id, provider_id, selected_models, enabled, weight, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                 "#,
             )
             .bind(id)
@@ -289,6 +290,7 @@ impl ModelMappingRepo {
             .bind(&channel.provider_id)
             .bind(selected_models)
             .bind(enabled)
+            .bind(channel.weight.max(1))
             .bind(now)
             .execute(&mut *conn)
             .await?;
