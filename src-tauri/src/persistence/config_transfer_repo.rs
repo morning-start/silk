@@ -206,11 +206,11 @@ async fn insert_model_mappings(
             r#"
             INSERT INTO model_mappings (
                 id, model_name, max_input_tokens, max_context_tokens, max_output_tokens,
-                input_price_per_1m, output_price_per_1m, capabilities, description,
+                capabilities, description,
                 vendor, knowledge_cutoff, model_family, reference_url,
                 strategy, enabled, created_at, updated_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             "#,
         )
         .bind(&mapping.id)
@@ -218,8 +218,6 @@ async fn insert_model_mappings(
         .bind(mapping.max_input_tokens)
         .bind(mapping.max_context_tokens)
         .bind(mapping.max_output_tokens)
-        .bind(mapping.input_price_per_1m)
-        .bind(mapping.output_price_per_1m)
         .bind(&mapping.capabilities)
         .bind(&mapping.description)
         .bind(&mapping.vendor)
@@ -246,9 +244,9 @@ async fn insert_model_mapping_channels(
         sqlx::query(
             r#"
             INSERT INTO model_mapping_channels (
-                id, mapping_id, provider_id, selected_models, enabled, weight, created_at
+                id, mapping_id, provider_id, selected_models, enabled, created_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             "#,
         )
         .bind(&channel.id)
@@ -256,7 +254,6 @@ async fn insert_model_mapping_channels(
         .bind(&channel.provider_id)
         .bind(&channel.selected_models)
         .bind(channel.enabled)
-        .bind(channel.weight)
         .bind(channel.created_at)
         .execute(&mut **tx)
         .await?;

@@ -20,20 +20,49 @@ const PROTOCOL_ADAPTER_MAP: &[(&str, &str)] = &[
     ("gemini", "gemini"),
 ];
 
-/// 用于负载均衡选渠道的轻量条目
+/// 用于负载均衡的候选条目（渠道 × 选中模型 展开，模型级权重）
 #[derive(Clone)]
-struct ChannelItem {
+struct RouteItem {
     provider_id: String,
+    /// 选中的远程模型名（空 = 使用请求原模型名）
+    model: String,
     weight: i64,
 }
 
-impl LoadBalancedItem for ChannelItem {
+impl LoadBalancedItem for RouteItem {
     fn weight(&self) -> i64 {
         self.weight.max(1)
     }
     fn enabled(&self) -> bool {
         true
     }
+}
+
+/// 将渠道列表展开为模型级候选条目（渠道 × 选中模型）
+fn expand_route_items(channels: &[ModelMappingChannel]) -> Vec<RouteItem> {
+    channels
+        .iter()
+        .flat_map(|c| {
+            let models = c.selected_models_vec();
+            if models.is_empty() {
+                // 空模型列表 = 使用 mapping 的 model_name（请求原模型名），权重 1
+                vec![RouteItem {
+                    provider_id: c.provider_id.clone(),
+                    model: String::new(),
+                    weight: 1,
+                }]
+            } else {
+                models
+                    .into_iter()
+                    .map(|m| RouteItem {
+                        provider_id: c.provider_id.clone(),
+                        model: m.name,
+                        weight: m.weight,
+                    })
+                    .collect()
+            }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -129,14 +158,14 @@ async fn try_model_mapping_route(
     ctx.channels_available = channels.iter().map(|c| c.provider_id.clone()).collect();
 
     // 候选选择：负载均衡
-    let (selected_id, selected_models) =
+    let (selected_id, selected_model) =
         match select_via_load_balancer(runtime, &mapping.id, &channels, &mapping.strategy) {
             Some(s) => s,
             None => return Ok(None),
         };
 
     // 应用选中渠道的模型覆盖
-    apply_model_override(&mut ctx, &request_model, &selected_models);
+    apply_model_override(&mut ctx, &request_model, &selected_model);
 
     // 上下文填充：加载 provider，推断协议
     let provider = load_provider_with_cache(runtime, &selected_id, error_ctx).await?;
@@ -222,32 +251,20 @@ async fn try_path_based_default(
 
 // ===== 阶段2：候选选择（从候选中选一个 Provider） =====
 
-/// 从模型映射渠道中通过负载均衡选择一条渠道
+/// 从模型映射渠道中通过负载均衡选择一个渠道和模型
 fn select_via_load_balancer(
     runtime: &GatewayContext,
     mapping_id: &str,
     channels: &[ModelMappingChannel],
     strategy: &str,
-) -> Option<(String, Vec<String>)> {
+) -> Option<(String, String)> {
     let strategy = LoadBalanceStrategy::parse(strategy);
-    let items: Vec<ChannelItem> = channels
-        .iter()
-        .map(|c| ChannelItem {
-            provider_id: c.provider_id.clone(),
-            weight: c.weight,
-        })
-        .collect();
+    let items = expand_route_items(channels);
     let state = runtime.load_balancer_state(&format!("mapping:{mapping_id}"));
     let balancer = LoadBalancer::with_shared_state(items, strategy, state);
     let selected = balancer.select()?;
 
-    let selected_models = channels
-        .iter()
-        .find(|c| c.provider_id == selected.provider_id)
-        .map(|c| c.selected_models_vec())
-        .unwrap_or_default();
-
-    Some((selected.provider_id.clone(), selected_models))
+    Some((selected.provider_id.clone(), selected.model.clone()))
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +294,7 @@ pub async fn try_next_channel(
         return None;
     };
 
-    // 重新计算远程模型覆盖（每个渠道可能有不同的 selected_models）
+    // 重新计算远程模型覆盖（每个渠道可能有不同的 selected_models，回退时按权重选模型）
     let original_model = ctx
         .get_parsed_body()
         .and_then(|json| json.get("model")?.as_str().map(|s| s.to_string()));
@@ -290,7 +307,19 @@ pub async fn try_next_channel(
                     ModelMappingRepo::find_enabled_channels(&runtime.pool, &mapping.id).await
                 {
                     if let Some(channel) = channels.iter().find(|c| c.provider_id == next_provider_id) {
-                        apply_model_override(&mut ctx, original_model, &channel.selected_models_vec());
+                        // 在该渠道内按策略（含权重）重新选模型
+                        let strategy = LoadBalanceStrategy::parse(&mapping.strategy);
+                        let items = expand_route_items(std::slice::from_ref(channel));
+                        let state = runtime.load_balancer_state(&format!(
+                            "mapping:{}:channel:{}",
+                            mapping.id, next_provider_id
+                        ));
+                        let balancer = LoadBalancer::with_shared_state(items, strategy, state);
+                        let selected_model = balancer
+                            .select()
+                            .map(|item| item.model.clone())
+                            .unwrap_or_default();
+                        apply_model_override(&mut ctx, original_model, &selected_model);
                     }
                 }
             }
@@ -409,23 +438,22 @@ async fn load_provider_with_cache(
 fn apply_model_override(
     ctx: &mut RequestContext,
     original_model: &str,
-    selected_models: &[String],
+    selected_model: &str,
 ) {
     // 恢复为原始客户端请求体，清除可能在上一次尝试中设置的覆盖
     ctx.request_body = ctx.client_body.clone();
     ctx.parsed_body = None;
     ctx.remote_model_override = None;
 
-    if !selected_models.contains(&original_model.to_string()) {
-        if let Some(remote_model) = selected_models.first() {
-            if let Some(mut json) = ctx.get_parsed_body().cloned() {
-                if let Some(obj) = json.as_object_mut() {
-                    obj.insert("model".to_string(), serde_json::Value::String(remote_model.clone()));
-                    let _ = ctx.update_body(json);
-                }
+    // 选中模型为空（渠道未勾选模型）= 使用请求原模型名，无需覆盖
+    if !selected_model.is_empty() && selected_model != original_model {
+        if let Some(mut json) = ctx.get_parsed_body().cloned() {
+            if let Some(obj) = json.as_object_mut() {
+                obj.insert("model".to_string(), serde_json::Value::String(selected_model.to_string()));
+                let _ = ctx.update_body(json);
             }
-            ctx.remote_model_override = Some(remote_model.clone());
         }
+        ctx.remote_model_override = Some(selected_model.to_string());
     }
 }
 

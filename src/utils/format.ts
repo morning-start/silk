@@ -6,12 +6,6 @@ export function formatMs(ms: number | null): string {
   return `${(ms / 60000).toFixed(1)}m`;
 }
 
-/** 格式化每百万 token 的价格 */
-export function formatPrice(val: number | null): string {
-  if (val == null) return "-";
-  return `$${val}/1M`;
-}
-
 /** 格式化 token 数量：>=1000 折算为 K */
 export function formatTokens(val: number | null): string {
   if (val == null) return "-";

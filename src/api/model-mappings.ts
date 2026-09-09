@@ -11,8 +11,6 @@ export interface CreateModelMappingPayload {
   max_input_tokens?: number | null;
   max_context_tokens?: number | null;
   max_output_tokens?: number | null;
-  input_price_per_1m?: number | null;
-  output_price_per_1m?: number | null;
   capabilities?: string[];
   description?: string;
   enabled?: boolean;
@@ -25,8 +23,6 @@ export interface UpdateModelMappingPayload {
   max_input_tokens?: number | null;
   max_context_tokens?: number | null;
   max_output_tokens?: number | null;
-  input_price_per_1m?: number | null;
-  output_price_per_1m?: number | null;
   capabilities?: string[];
   description?: string;
   enabled?: boolean;

@@ -20,6 +20,7 @@ export type {
   MappingChannelInfo,
   NewMappingChannel,
   ModelMapping,
+  SelectedModel,
   GatewayKey,
   ModelListingItem,
   AgentTypeInfo,

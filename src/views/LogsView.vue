@@ -220,8 +220,6 @@ const totalTokensInRange = computed(() =>
   hourlyData.value.reduce((sum, item) => sum + item.total_tokens, 0)
 );
 
-const estimatedCostInRange = computed(() => totalTokensInRange.value / 1_000_000 * 3);
-
 const activeProvidersInRange = computed(() =>
   providerStats.value.filter((item) => item.request_count > 0).length
 );
@@ -240,7 +238,7 @@ onMounted(() => {
 
 <template>
   <div class="logs-page">
-    <NGrid :x-gap="16" :y-gap="16" :cols="5" class="mb-16">
+    <NGrid :x-gap="16" :y-gap="16" :cols="4" class="mb-16">
       <NGi>
         <NCard :bordered="false" class="metric-card">
           <div class="stat-label">请求数 ({{ metricRange }}h)</div>
@@ -260,13 +258,6 @@ onMounted(() => {
           <div class="stat-label">Token 消耗</div>
           <div class="stat-value accent">{{ (totalTokensInRange / 1000).toFixed(1) }}<span class="stat-unit">K</span></div>
           <div class="stat-sub">最近 {{ metricRange }} 小时</div>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard :bordered="false" class="metric-card">
-          <div class="stat-label">估算费用</div>
-          <div class="stat-value">${{ estimatedCostInRange.toFixed(2) }}</div>
-          <div class="stat-sub">按 $3/1M tokens</div>
         </NCard>
       </NGi>
       <NGi>

@@ -1,6 +1,19 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+/// 渠道中选中的远程模型（带负载均衡权重）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SelectedModel {
+    pub name: String,
+    /// 负载均衡权重（默认 1）
+    #[serde(default = "default_model_weight")]
+    pub weight: i64,
+}
+
+fn default_model_weight() -> i64 {
+    1
+}
+
 /// 模型映射（模型池）
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct ModelMapping {
@@ -9,8 +22,6 @@ pub struct ModelMapping {
     pub max_input_tokens: Option<i64>,
     pub max_context_tokens: Option<i64>,
     pub max_output_tokens: Option<i64>,
-    pub input_price_per_1m: Option<f64>,
-    pub output_price_per_1m: Option<f64>,
     /// 能力标签 JSON 数组
     pub capabilities: String,
     pub description: String,
@@ -32,8 +43,6 @@ pub struct NewModelMapping {
     pub max_input_tokens: Option<i64>,
     pub max_context_tokens: Option<i64>,
     pub max_output_tokens: Option<i64>,
-    pub input_price_per_1m: Option<f64>,
-    pub output_price_per_1m: Option<f64>,
     pub capabilities: Option<Vec<String>>,
     pub description: Option<String>,
     pub strategy: Option<String>,
@@ -49,8 +58,6 @@ pub struct UpdateModelMapping {
     pub max_input_tokens: Option<i64>,
     pub max_context_tokens: Option<i64>,
     pub max_output_tokens: Option<i64>,
-    pub input_price_per_1m: Option<f64>,
-    pub output_price_per_1m: Option<f64>,
     pub capabilities: Option<Vec<String>>,
     pub description: Option<String>,
     pub strategy: Option<String>,
@@ -63,16 +70,9 @@ pub struct UpdateModelMapping {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewMappingChannel {
     pub provider_id: String,
-    /// 该渠道选中的远程模型名列表（空数组 = 使用 mapping 的 model_name）
-    pub selected_models: Option<Vec<String>>,
+    /// 该渠道选中的远程模型列表（带权重，空数组 = 使用 mapping 的 model_name）
+    pub selected_models: Option<Vec<SelectedModel>>,
     pub enabled: Option<bool>,
-    /// 负载均衡权重（默认 1）
-    #[serde(default = "default_channel_weight")]
-    pub weight: i64,
-}
-
-fn default_channel_weight() -> i64 {
-    1
 }
 
 /// 模型映射关联渠道（DB 行）
@@ -81,18 +81,31 @@ pub struct ModelMappingChannel {
     pub id: String,
     pub mapping_id: String,
     pub provider_id: String,
-    /// JSON 数组
+    /// JSON 数组（[{name, weight}] 或兼容旧版纯字符串数组）
     pub selected_models: String,
     pub enabled: i64,
-    /// 负载均衡权重
-    pub weight: i64,
     pub created_at: chrono::NaiveDateTime,
 }
 
 impl ModelMappingChannel {
-    pub fn selected_models_vec(&self) -> Vec<String> {
-        serde_json::from_str(&self.selected_models).unwrap_or_default()
+    /// 解析选中的模型列表（兼容旧版纯字符串数组，旧数据 weight 默认 1）
+    pub fn selected_models_vec(&self) -> Vec<SelectedModel> {
+        parse_selected_models(&self.selected_models)
     }
+}
+
+/// 解析渠道 selected_models JSON：支持 [{name, weight}] 与旧版 ["name"] 两种格式
+pub fn parse_selected_models(json: &str) -> Vec<SelectedModel> {
+    if let Ok(models) = serde_json::from_str::<Vec<SelectedModel>>(json) {
+        return models;
+    }
+    if let Ok(names) = serde_json::from_str::<Vec<String>>(json) {
+        return names
+            .into_iter()
+            .map(|name| SelectedModel { name, weight: 1 })
+            .collect();
+    }
+    Vec::new()
 }
 
 /// 关联渠道 + 渠道详情（用于响应）
@@ -106,11 +119,9 @@ pub struct MappingChannelInfo {
     pub provider_models: Vec<String>, // 渠道的全部模型
     pub provider_models_count: i64,
     pub provider_health: Option<String>,
-    /// 该渠道选中的远程模型名列表
-    pub selected_models: Vec<String>,
+    /// 该渠道选中的远程模型列表（带权重）
+    pub selected_models: Vec<SelectedModel>,
     pub enabled: bool,
-    /// 负载均衡权重
-    pub weight: i64,
 }
 
 impl ModelMapping {

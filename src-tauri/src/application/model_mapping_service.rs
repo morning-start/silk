@@ -19,8 +19,6 @@ pub struct ModelMappingResponse {
     pub max_input_tokens: Option<i64>,
     pub max_context_tokens: Option<i64>,
     pub max_output_tokens: Option<i64>,
-    pub input_price_per_1m: Option<f64>,
-    pub output_price_per_1m: Option<f64>,
     pub capabilities: Vec<String>,
     pub description: String,
     pub enabled: bool,
@@ -39,8 +37,6 @@ impl ModelMappingResponse {
             max_input_tokens: m.max_input_tokens,
             max_context_tokens: m.max_context_tokens,
             max_output_tokens: m.max_output_tokens,
-            input_price_per_1m: m.input_price_per_1m,
-            output_price_per_1m: m.output_price_per_1m,
             capabilities,
             description: m.description,
             enabled: m.enabled != 0,
@@ -61,8 +57,6 @@ pub struct CreateModelMappingPayload {
     pub max_input_tokens: Option<i64>,
     pub max_context_tokens: Option<i64>,
     pub max_output_tokens: Option<i64>,
-    pub input_price_per_1m: Option<f64>,
-    pub output_price_per_1m: Option<f64>,
     pub capabilities: Option<Vec<String>>,
     pub description: Option<String>,
     pub strategy: Option<String>,
@@ -76,8 +70,6 @@ pub struct UpdateModelMappingPayload {
     pub max_input_tokens: Option<i64>,
     pub max_context_tokens: Option<i64>,
     pub max_output_tokens: Option<i64>,
-    pub input_price_per_1m: Option<f64>,
-    pub output_price_per_1m: Option<f64>,
     pub capabilities: Option<Vec<String>>,
     pub description: Option<String>,
     pub strategy: Option<String>,
@@ -142,8 +134,6 @@ pub async fn create(
         max_input_tokens: payload.max_input_tokens,
         max_context_tokens: payload.max_context_tokens,
         max_output_tokens: payload.max_output_tokens,
-        input_price_per_1m: payload.input_price_per_1m,
-        output_price_per_1m: payload.output_price_per_1m,
         capabilities: payload.capabilities,
         description: payload.description,
         strategy: payload.strategy,
@@ -170,8 +160,6 @@ pub async fn update(
         max_input_tokens: payload.max_input_tokens,
         max_context_tokens: payload.max_context_tokens,
         max_output_tokens: payload.max_output_tokens,
-        input_price_per_1m: payload.input_price_per_1m,
-        output_price_per_1m: payload.output_price_per_1m,
         capabilities: payload.capabilities,
         description: payload.description,
         strategy: payload.strategy,
@@ -194,8 +182,6 @@ fn validate_create_payload(payload: &CreateModelMappingPayload) -> Result<(), Se
     validate_positive_i64(payload.max_input_tokens, "最大输入 Token")?;
     validate_positive_i64(payload.max_context_tokens, "最大上下文 Token")?;
     validate_positive_i64(payload.max_output_tokens, "最大输出 Token")?;
-    validate_non_negative_f64(payload.input_price_per_1m, "输入价格")?;
-    validate_non_negative_f64(payload.output_price_per_1m, "输出价格")?;
     validate_channels(payload.channels.as_deref())?;
     Ok(())
 }
@@ -208,8 +194,6 @@ fn validate_update_payload(payload: &UpdateModelMappingPayload) -> Result<(), Se
     validate_positive_i64(payload.max_input_tokens, "最大输入 Token")?;
     validate_positive_i64(payload.max_context_tokens, "最大上下文 Token")?;
     validate_positive_i64(payload.max_output_tokens, "最大输出 Token")?;
-    validate_non_negative_f64(payload.input_price_per_1m, "输入价格")?;
-    validate_non_negative_f64(payload.output_price_per_1m, "输出价格")?;
     validate_channels(payload.channels.as_deref())?;
     Ok(())
 }
@@ -229,13 +213,19 @@ fn validate_channels(channels: Option<&[NewMappingChannel]>) -> Result<(), Servi
             channel
                 .selected_models
                 .as_ref()
-                .map(|models| models.iter().any(|model| model.trim().is_empty()))
+                .map(|models| models.iter().any(|model| model.name.trim().is_empty()))
                 .unwrap_or(false)
         }) {
             return bad_request("模型池渠道模型名不能为空");
         }
-        if channels.iter().any(|channel| channel.weight <= 0) {
-            return bad_request("模型池渠道权重必须大于 0");
+        if channels.iter().any(|channel| {
+            channel
+                .selected_models
+                .as_ref()
+                .map(|models| models.iter().any(|model| model.weight <= 0))
+                .unwrap_or(false)
+        }) {
+            return bad_request("模型池渠道模型权重必须大于 0");
         }
     }
     Ok(())
@@ -262,18 +252,10 @@ fn validate_positive_i64(value: Option<i64>, field: &str) -> Result<(), ServiceE
     Ok(())
 }
 
-fn validate_non_negative_f64(value: Option<f64>, field: &str) -> Result<(), ServiceError> {
-    if let Some(value) = value {
-        if !value.is_finite() || value < 0.0 {
-            return bad_request(&format!("{field}不能为负数"));
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod validation_tests {
     use super::*;
+    use crate::models::SelectedModel;
 
     #[test]
     fn validate_mapping_rejects_empty_name_and_channels() {
@@ -288,7 +270,7 @@ mod validation_tests {
         let mut payload = valid_create_payload();
         payload.channels = Some(vec![NewMappingChannel {
             provider_id: " ".to_string(),
-            selected_models: Some(vec!["gpt-4o".to_string()]),
+            selected_models: Some(vec![SelectedModel { name: "gpt-4o".to_string(), weight: 1 }]),
             enabled: Some(true),
         }]);
         assert_bad_request(validate_create_payload(&payload));
@@ -301,10 +283,6 @@ mod validation_tests {
         assert_bad_request(validate_create_payload(&payload));
 
         let mut payload = valid_create_payload();
-        payload.input_price_per_1m = Some(-0.01);
-        assert_bad_request(validate_create_payload(&payload));
-
-        let mut payload = valid_create_payload();
         payload.strategy = Some("random".to_string());
         assert_bad_request(validate_create_payload(&payload));
     }
@@ -314,7 +292,7 @@ mod validation_tests {
         let mut payload = valid_create_payload();
         payload.channels = Some(vec![NewMappingChannel {
             provider_id: "provider-1".to_string(),
-            selected_models: Some(vec![" ".to_string()]),
+            selected_models: Some(vec![SelectedModel { name: " ".to_string(), weight: 1 }]),
             enabled: Some(true),
         }]);
         assert_bad_request(validate_create_payload(&payload));
@@ -331,15 +309,13 @@ mod validation_tests {
             max_input_tokens: Some(128000),
             max_context_tokens: Some(128000),
             max_output_tokens: Some(4096),
-            input_price_per_1m: Some(5.0),
-            output_price_per_1m: Some(15.0),
             capabilities: Some(vec!["vision".to_string()]),
             description: Some("test".to_string()),
             strategy: Some("round_robin".to_string()),
             enabled: Some(true),
             channels: Some(vec![NewMappingChannel {
                 provider_id: "provider-1".to_string(),
-                selected_models: Some(vec!["gpt-4o".to_string()]),
+                selected_models: Some(vec![SelectedModel { name: "gpt-4o".to_string(), weight: 1 }]),
                 enabled: Some(true),
             }]),
         }

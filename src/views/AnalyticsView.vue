@@ -51,20 +51,11 @@ const columns: DataTableColumns<ProviderStats> = [
       return h("span", { class: "num" }, row.avg_duration_ms + "ms");
     },
   },
-  {
-    title: "估算费用",
-    key: "total_tokens",
-    render(row) {
-      const estimatedCost = (row.total_tokens / 1000000 * 3).toFixed(2);
-      return h("span", { class: "num" }, `$${estimatedCost}`);
-    },
-  },
 ];
 
 const totalTokens = ref(0);
 const totalRequests = ref(0);
 const avgResp = ref(0);
-const totalCost = ref(0);
 
 async function loadData(days: number) {
   loading.value = true;
@@ -81,7 +72,6 @@ async function loadData(days: number) {
     avgResp.value = providers.length > 0
       ? Math.round(providers.reduce((s, p) => s + p.avg_duration_ms, 0) / providers.length)
       : 0;
-    totalCost.value = providers.reduce((s, p) => s + (p.total_tokens / 1000000 * 3), 0);
   } catch (e: any) {
     error.value = e.message || "加载用量数据失败";
   } finally {
@@ -144,19 +134,12 @@ onMounted(() => loadData(30));
             <div class="stat-sub">整体延迟</div>
           </NCard>
         </NGi>
-        <NGi>
-          <NCard :bordered="false" class="stat-card">
-            <div class="stat-label">总费用（估算）</div>
-            <div class="stat-value accent">${{ totalCost.toFixed(2) }}</div>
-            <div class="stat-sub">按 $3/1M tokens 估算</div>
-          </NCard>
-        </NGi>
       </NGrid>
 
       <NCard title="Token 消耗趋势" :bordered="false" class="mb-16 section-card" size="small">
         <div class="chart-area">
           <div class="chart-placeholder">
-            <NText depth="3">时序图表区域 · {{ period }}天 Token 消耗与费用趋势</NText>
+            <NText depth="3">时序图表区域 · {{ period }}天 Token 消耗趋势</NText>
           </div>
         </div>
       </NCard>

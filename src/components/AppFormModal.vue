@@ -31,7 +31,9 @@ function close() {
     :segmented="{ footer: true }"
     @update:show="(value) => emit('update:show', value)"
   >
-    <slot />
+    <div class="app-form-modal-body">
+      <slot />
+    </div>
 
     <template #footer>
       <div class="modal-footer">
@@ -47,6 +49,13 @@ function close() {
 </template>
 
 <style scoped>
+/* 内容区限高滚动：表单内容较多时（如向导）弹窗不再无限长高 */
+.app-form-modal-body {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;

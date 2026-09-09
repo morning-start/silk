@@ -2,8 +2,8 @@ use sqlx::Row;
 use sqlx::SqlitePool;
 
 use crate::models::{
-    MappingChannelInfo, ModelMapping, ModelMappingChannel, NewMappingChannel, NewModelMapping,
-    UpdateModelMapping,
+    parse_selected_models, MappingChannelInfo, ModelMapping, ModelMappingChannel, NewMappingChannel,
+    NewModelMapping, UpdateModelMapping,
 };
 use crate::persistence::defaults;
 
@@ -27,11 +27,10 @@ impl ModelMappingRepo {
             INSERT INTO model_mappings (
                 id, model_name,
                 max_input_tokens, max_context_tokens, max_output_tokens,
-                input_price_per_1m, output_price_per_1m,
                 capabilities, description,
                 strategy, enabled, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *
             "#,
         )
@@ -40,8 +39,6 @@ impl ModelMappingRepo {
         .bind(new.max_input_tokens)
         .bind(new.max_context_tokens)
         .bind(new.max_output_tokens)
-        .bind(new.input_price_per_1m)
-        .bind(new.output_price_per_1m)
         .bind(capabilities)
         .bind(new.description.as_deref().unwrap_or(""))
         .bind(strategy)
@@ -138,13 +135,11 @@ impl ModelMappingRepo {
                 max_input_tokens = COALESCE($3, max_input_tokens),
                 max_context_tokens = COALESCE($4, max_context_tokens),
                 max_output_tokens = COALESCE($5, max_output_tokens),
-                input_price_per_1m = COALESCE($6, input_price_per_1m),
-                output_price_per_1m = COALESCE($7, output_price_per_1m),
-                capabilities = COALESCE($8, capabilities),
-                description = COALESCE($9, description),
-                strategy = COALESCE($10, strategy),
-                enabled = COALESCE($11, enabled),
-                updated_at = $12
+                capabilities = COALESCE($6, capabilities),
+                description = COALESCE($7, description),
+                strategy = COALESCE($8, strategy),
+                enabled = COALESCE($9, enabled),
+                updated_at = $10
             WHERE id = $1
             RETURNING *
             "#,
@@ -154,8 +149,6 @@ impl ModelMappingRepo {
         .bind(update.max_input_tokens)
         .bind(update.max_context_tokens)
         .bind(update.max_output_tokens)
-        .bind(update.input_price_per_1m)
-        .bind(update.output_price_per_1m)
         .bind(capabilities.as_deref())
         .bind(update.description.as_deref())
         .bind(update.strategy.as_deref())
@@ -203,7 +196,7 @@ impl ModelMappingRepo {
             r#"
             SELECT mmc.id, mmc.mapping_id, mmc.provider_id,
                    p.name as provider_name, p.protocols, p.models, p.health_status,
-                   mmc.selected_models, mmc.enabled, mmc.weight
+                   mmc.selected_models, mmc.enabled
             FROM model_mapping_channels mmc
             JOIN providers p ON p.id = mmc.provider_id
             WHERE mmc.mapping_id = ?1
@@ -220,8 +213,8 @@ impl ModelMappingRepo {
                 serde_json::from_str(row.get::<&str, _>("protocols")).unwrap_or_default();
             let models: Vec<String> =
                 serde_json::from_str(row.get::<&str, _>("models")).unwrap_or_default();
-            let selected_models: Vec<String> =
-                serde_json::from_str(row.get::<&str, _>("selected_models")).unwrap_or_default();
+            let selected_models =
+                parse_selected_models(row.get::<&str, _>("selected_models"));
             result.push(MappingChannelInfo {
                 id: row.get("id"),
                 mapping_id: row.get("mapping_id"),
@@ -233,7 +226,6 @@ impl ModelMappingRepo {
                 provider_health: row.get("health_status"),
                 selected_models,
                 enabled: row.get::<i64, _>("enabled") != 0,
-                weight: row.get::<i64, _>("weight"),
             });
         }
         Ok(result)
@@ -281,8 +273,8 @@ impl ModelMappingRepo {
                 defaults::to_json(&channel.selected_models.as_deref().unwrap_or(&[]));
             sqlx::query(
                 r#"
-                INSERT INTO model_mapping_channels (id, mapping_id, provider_id, selected_models, enabled, weight, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                INSERT INTO model_mapping_channels (id, mapping_id, provider_id, selected_models, enabled, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                 "#,
             )
             .bind(id)
@@ -290,7 +282,6 @@ impl ModelMappingRepo {
             .bind(&channel.provider_id)
             .bind(selected_models)
             .bind(enabled)
-            .bind(channel.weight.max(1))
             .bind(now)
             .execute(&mut *conn)
             .await?;

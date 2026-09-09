@@ -136,6 +136,12 @@ export interface HourlyStats {
 // 模型映射相关类型
 // ---------------------------------------------------------------------------
 
+// 渠道中选中的远程模型（带负载均衡权重）
+export interface SelectedModel {
+  name: string;
+  weight: number;
+}
+
 export interface MappingChannelInfo {
   id: string;
   mapping_id: string;
@@ -145,16 +151,14 @@ export interface MappingChannelInfo {
   provider_models: string[];
   provider_models_count: number;
   provider_health: string | null;
-  selected_models: string[];
+  selected_models: SelectedModel[];
   enabled: boolean;
-  weight: number;
 }
 
 export interface NewMappingChannel {
   provider_id: string;
-  selected_models?: string[];
+  selected_models?: SelectedModel[];
   enabled?: boolean;
-  weight?: number;
 }
 
 export interface ModelMapping {
@@ -164,8 +168,6 @@ export interface ModelMapping {
   max_input_tokens: number | null;
   max_context_tokens: number | null;
   max_output_tokens: number | null;
-  input_price_per_1m: number | null;
-  output_price_per_1m: number | null;
   capabilities: string[];
   description: string;
   enabled: boolean;

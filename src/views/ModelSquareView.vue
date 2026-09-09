@@ -14,14 +14,16 @@ import {
   NGrid,
   NGi,
   NIcon,
+  NSteps,
+  NStep,
   useMessage,
   useDialog,
 } from "naive-ui";
 import { SearchOutline } from "@vicons/ionicons5";
 import { modelMappingsApi, type CreateModelMappingPayload } from "../api/model-mappings";
 import { providersApi } from "../api/providers";
-import type { ModelMapping, NewMappingChannel, Provider } from "../api";
-import { formatPrice, formatTokens } from "../utils/format";
+import type { ModelMapping, NewMappingChannel, Provider, SelectedModel } from "../api";
+import { formatTokens } from "../utils/format";
 import { healthStatusLabel, healthStatusType } from "../utils/health";
 import AppFormModal from "../components/AppFormModal.vue";
 import AppPageShell from "../components/AppPageShell.vue";
@@ -42,16 +44,10 @@ function createEmptyForm() {
   return {
     model_name: "",
     strategy: "round_robin",
-    // 步骤①：选中的渠道 ID 列表
-    selectedProviderIds: [] as string[],
-    // 步骤②：每个渠道选中的模型列表 { provider_id → model[] }
-    selectedModelsMap: {} as Record<string, string[]>,
-    // 每个渠道的负载均衡权重（默认 1，仅加权轮询/加权随机生效）
-    channelWeights: {} as Record<string, number>,
+    // 每个渠道选中的模型列表 { provider_id → SelectedModel[] }（勾选了模型的渠道即参与）
+    selectedModelsMap: {} as Record<string, SelectedModel[]>,
     max_context_tokens: null as number | null,
     max_output_tokens: null as number | null,
-    input_price_per_1m: null as number | null,
-    output_price_per_1m: null as number | null,
     capabilities: [] as string[],
     description: "",
     enabled: true,
@@ -60,76 +56,108 @@ function createEmptyForm() {
 
 const formValue = ref(createEmptyForm());
 
+// 参与渠道 = 已勾选了模型的渠道（由 selectedModelsMap 派生，无需单独勾选）
+const selectedProviderIds = computed(() =>
+  Object.keys(formValue.value.selectedModelsMap).filter(
+    (pid) => (formValue.value.selectedModelsMap[pid] || []).length > 0
+  )
+);
+
+// 渠道模型区展开状态（默认收起，点击渠道头部展开/收起）
+const expandedProviderIds = ref<Record<string, boolean>>({});
+
+function toggleExpand(providerId: string) {
+  expandedProviderIds.value = {
+    ...expandedProviderIds.value,
+    [providerId]: !expandedProviderIds.value[providerId],
+  };
+}
+
+// 向导当前步骤：0=基础配置（名称+渠道+模型） 1=权重与参数
+const currentStep = ref(0);
+
+// 步骤 0 通过后允许进入下一步（名称 + 至少一个渠道勾选了模型）
+const step0Valid = computed(
+  () => !!formValue.value.model_name.trim() && selectedProviderIds.value.length > 0
+);
+
+function nextStep() {
+  if (currentStep.value === 0 && !step0Valid.value) return;
+  if (currentStep.value < 1) currentStep.value += 1;
+}
+
+function prevStep() {
+  if (currentStep.value > 0) currentStep.value -= 1;
+}
+
 // 加权类策略才展示权重输入（最少连接无需加权）
 const isWeightedStrategy = computed(
   () => formValue.value.strategy === "round_robin" || formValue.value.strategy === "weighted"
 );
 
-// 某渠道的权重（默认 1）
-function channelWeightOf(providerId: string): number {
-  return formValue.value.channelWeights[providerId] || 1;
+// 某渠道已选中的模型列表（带权重）
+function selectedModelsOf(providerId: string): SelectedModel[] {
+  return formValue.value.selectedModelsMap[providerId] || [];
 }
 
-// 设置渠道权重（保留原 map 引用以触发响应式）
-function setChannelWeight(providerId: string, value: number | null) {
-  const weights = { ...formValue.value.channelWeights };
-  weights[providerId] = value && value > 0 ? value : 1;
-  formValue.value.channelWeights = weights;
-}
-
-// 步骤②：模型模糊搜索关键字
-const modelSearchKeyword = ref("");
-
-// 已选渠道的提供者信息（供模型步骤使用）
-const selectedProviders = computed(() =>
-  allProviders.value.filter((p) => formValue.value.selectedProviderIds.includes(p.id))
-);
-
-// 按渠道分组的模型（供步骤②展示）
-const channelModels = computed(() => {
-  const kw = modelSearchKeyword.value.trim().toLowerCase();
-  return selectedProviders.value.map((p) => {
-    const all = p.models || [];
-    const models = all.filter((m) => !kw || m.toLowerCase().includes(kw));
-    return {
-      provider_id: p.id,
-      provider_name: p.name,
-      models,
-      total: all.length,
-      selectedModels: formValue.value.selectedModelsMap[p.id] || [],
-    };
-  });
-});
-
-// 切换选中/取消某个渠道的某个模型
-function toggleModel(providerId: string, model: string) {
+// 设置模型权重（最小 1）
+function setModelWeight(providerId: string, model: string, value: number | null) {
   const map = { ...formValue.value.selectedModelsMap };
-  if (!map[providerId]) map[providerId] = [];
-  const idx = map[providerId].indexOf(model);
-  if (idx >= 0) {
-    map[providerId] = map[providerId].filter((m) => m !== model);
-  } else {
-    map[providerId] = [...map[providerId], model];
-  }
+  const models = (map[providerId] || []).map((m) =>
+    m.name === model ? { ...m, weight: value && value > 0 ? value : 1 } : m
+  );
+  map[providerId] = models;
   formValue.value.selectedModelsMap = map;
 }
 
-// 切换选中/取消某个渠道（取消时同时清理其已选模型和权重）
-function toggleProvider(providerId: string, checked: boolean) {
-  if (checked) {
-    formValue.value.selectedProviderIds.push(providerId);
-    if (formValue.value.channelWeights[providerId] === undefined) {
-      formValue.value.channelWeights[providerId] = 1;
+// 模型模糊搜索关键字（筛选时匹配渠道自动展开）
+const modelSearchKeyword = ref("");
+
+// 是否处于筛选状态（关键字非空）
+const isFiltering = computed(() => modelSearchKeyword.value.trim().length > 0);
+
+// 已选渠道的提供者信息（供权重步骤展示）
+const selectedProviders = computed(() =>
+  allProviders.value.filter((p) => selectedProviderIds.value.includes(p.id))
+);
+
+// 各渠道过滤搜索词后的模型列表（缓存，避免模板中重复过滤计算）
+const channelFilteredModels = computed(() => {
+  const kw = modelSearchKeyword.value.trim().toLowerCase();
+  const map: Record<string, string[]> = {};
+  for (const p of allProviders.value) {
+    const all = p.models || [];
+    map[p.id] = kw ? all.filter((m) => m.toLowerCase().includes(kw)) : all;
+  }
+  return map;
+});
+
+// 某渠道过滤搜索词后的模型列表（查表）
+function channelModelsOf(providerId: string): string[] {
+  return channelFilteredModels.value[providerId] || [];
+}
+
+// 某渠道的某模型是否已选中
+function isModelSelected(providerId: string, model: string): boolean {
+  return selectedModelsOf(providerId).some((sm) => sm.name === model);
+}
+
+// 切换选中/取消某个渠道的某个模型（选中时默认权重 1；取消到空时该渠道不再参与）
+function toggleModel(providerId: string, model: string) {
+  const map = { ...formValue.value.selectedModelsMap };
+  if (!map[providerId]) map[providerId] = [];
+  const idx = map[providerId].findIndex((m) => m.name === model);
+  if (idx >= 0) {
+    const rest = map[providerId].filter((m) => m.name !== model);
+    if (rest.length === 0) {
+      delete map[providerId];
+    } else {
+      map[providerId] = rest;
     }
   } else {
-    formValue.value.selectedProviderIds = formValue.value.selectedProviderIds.filter((id) => id !== providerId);
-    const map = { ...formValue.value.selectedModelsMap };
-    delete map[providerId];
-    formValue.value.selectedModelsMap = map;
-    const weights = { ...formValue.value.channelWeights };
-    delete weights[providerId];
-    formValue.value.channelWeights = weights;
+    map[providerId] = [...map[providerId], { name: model, weight: 1 }];
   }
+  formValue.value.selectedModelsMap = map;
 }
 
 // 切换选中/取消某个模型能力
@@ -139,11 +167,6 @@ function toggleCapability(value: string, checked: boolean) {
   } else {
     formValue.value.capabilities = formValue.value.capabilities.filter((c) => c !== value);
   }
-}
-
-// 某渠道已选中的模型列表
-function selectedModelsOf(providerId: string): string[] {
-  return formValue.value.selectedModelsMap[providerId] || [];
 }
 
 // 完整标签映射（含已下线的 code，兼容旧数据展示）
@@ -241,6 +264,8 @@ function resetForm() {
   editingId.value = null;
   formValue.value = createEmptyForm();
   modelSearchKeyword.value = "";
+  expandedProviderIds.value = {};
+  currentStep.value = 0;
 }
 
 function handleAdd() {
@@ -250,32 +275,34 @@ function handleAdd() {
 
 function handleEdit(row: ModelMapping) {
   editingId.value = row.id;
-  // 从 channels 回填 selectedProviderIds / selectedModelsMap / channelWeights
-  const providerIds: string[] = [];
-  const modelsMap: Record<string, string[]> = {};
-  const weightsMap: Record<string, number> = {};
+  // 从 channels 回填 selectedModelsMap（勾选了模型的渠道即参与，由 computed 派生）
+  const modelsMap: Record<string, SelectedModel[]> = {};
   for (const c of row.channels || []) {
-    providerIds.push(c.provider_id);
     if (c.selected_models && c.selected_models.length > 0) {
-      modelsMap[c.provider_id] = c.selected_models;
+      modelsMap[c.provider_id] = c.selected_models.map((m) => ({
+        name: m.name,
+        weight: m.weight || 1,
+      }));
     }
-    weightsMap[c.provider_id] = c.weight || 1;
   }
   formValue.value = {
     model_name: row.model_name,
     strategy: row.strategy || "round_robin",
-    selectedProviderIds: providerIds,
     selectedModelsMap: modelsMap,
-    channelWeights: weightsMap,
     max_context_tokens: row.max_context_tokens,
     max_output_tokens: row.max_output_tokens,
-    input_price_per_1m: row.input_price_per_1m,
-    output_price_per_1m: row.output_price_per_1m,
     capabilities: row.capabilities || [],
     description: row.description || "",
     enabled: row.enabled,
   };
+  // 编辑时默认展开已勾选了模型的渠道（用户可直接看到已选内容）
+  const expanded: Record<string, boolean> = {};
+  for (const pid of Object.keys(modelsMap)) {
+    expanded[pid] = true;
+  }
+  expandedProviderIds.value = expanded;
   modelSearchKeyword.value = "";
+  currentStep.value = 0;
   showModal.value = true;
 }
 
@@ -299,22 +326,17 @@ function handleDelete(row: ModelMapping) {
 
 async function handleSubmit() {
   try {
-    const channels: NewMappingChannel[] = formValue.value.selectedProviderIds.map((pid) => {
-      const selectedModels = formValue.value.selectedModelsMap[pid];
-      return {
-        provider_id: pid,
-        selected_models: selectedModels && selectedModels.length > 0 ? selectedModels : undefined,
-        weight: channelWeightOf(pid),
-      };
-    });
+    // selectedProviderIds 已保证每个渠道都有选中模型
+    const channels: NewMappingChannel[] = selectedProviderIds.value.map((pid) => ({
+      provider_id: pid,
+      selected_models: selectedModelsOf(pid),
+    }));
 
     const payload: CreateModelMappingPayload = {
       model_name: formValue.value.model_name,
       strategy: formValue.value.strategy,
       max_context_tokens: formValue.value.max_context_tokens,
       max_output_tokens: formValue.value.max_output_tokens,
-      input_price_per_1m: formValue.value.input_price_per_1m,
-      output_price_per_1m: formValue.value.output_price_per_1m,
       capabilities: formValue.value.capabilities.length > 0 ? formValue.value.capabilities : undefined,
       description: formValue.value.description || undefined,
       enabled: formValue.value.enabled,
@@ -338,10 +360,11 @@ async function handleSubmit() {
 }
 
 // 卡片显示渠道的选中模型摘要
-function channelModelSummary(selected: string[]): string {
+function channelModelSummary(selected: SelectedModel[]): string {
   if (!selected || selected.length === 0) return "";
-  if (selected.length <= 2) return selected.join(", ");
-  return `${selected.slice(0, 2).join(", ")} +${selected.length - 2}`;
+  const names = selected.map((m) => m.name);
+  if (names.length <= 2) return names.join(", ");
+  return `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
 }
 
 onMounted(loadData);
@@ -432,16 +455,6 @@ watch(
             </template>
           </div>
 
-          <div class="mc-pricing" v-if="item.input_price_per_1m || item.output_price_per_1m">
-            <span v-if="item.input_price_per_1m">
-              输入 <span class="num">{{ formatPrice(item.input_price_per_1m) }}</span>
-            </span>
-            <span class="sep" v-if="item.input_price_per_1m && item.output_price_per_1m">·</span>
-            <span v-if="item.output_price_per_1m">
-              输出 <span class="num">{{ formatPrice(item.output_price_per_1m) }}</span>
-            </span>
-          </div>
-
           <div class="mc-caps" v-if="item.capabilities && item.capabilities.length > 0">
             <NTag
               v-for="cap in item.capabilities"
@@ -467,158 +480,195 @@ watch(
         v-model:show="showModal"
         :title="editingId ? '编辑模型映射' : '新增模型映射'"
         width="640px"
-        :submit-text="editingId ? '保存修改' : '确认添加'"
-        :submit-disabled="!formValue.model_name || formValue.selectedProviderIds.length === 0"
         @submit="handleSubmit"
       >
-        <NForm :model="formValue" label-placement="left" label-width="90">
-        <NFormItem label="模型名称" required>
-          <NInput v-model:value="formValue.model_name" placeholder="例如：gpt-4、claude-3-opus" />
-        </NFormItem>
+        <NSteps :current="currentStep" size="small" style="margin-bottom: 16px">
+          <NStep title="基础配置" description="名称、渠道与模型" />
+          <NStep title="权重与参数" description="模型权重与规格" />
+        </NSteps>
 
-        <NFormItem label="关联渠道">
-          <div style="width: 100%">
-            <div v-if="allProviders.length === 0" style="font-size: 13px; color: #94a3b8; padding: 8px 0">
-              暂无可用渠道，请先在「渠道管理」中添加
-            </div>
-            <div v-else class="channel-list">
-              <label
-                v-for="p in allProviders"
-                :key="p.id"
-                class="channel-item"
-                :class="{ selected: formValue.selectedProviderIds.includes(p.id) }"
-              >
-                <input
-                  type="checkbox"
-                  class="channel-checkbox"
-                  :checked="formValue.selectedProviderIds.includes(p.id)"
-                  @change="(e: any) => toggleProvider(p.id, e.target.checked)"
-                />
-                <div class="channel-info">
-                  <span class="channel-name">{{ p.name }}</span>
-                  <span class="channel-protocols">
-                    <NTag v-for="proto in (p.protocols || [])" :key="proto" size="tiny" round style="margin-right: 2px">
-                      {{ proto }}
-                    </NTag>
-                  </span>
-                  <span class="channel-models">{{ (p.models || []).length }} 模型</span>
-                  <NTag size="tiny" :type="healthStatusType(p.health_status)" round>
-                    {{ healthStatusLabel(p.health_status) }}
-                  </NTag>
-                </div>
-              </label>
-            </div>
-          </div>
-        </NFormItem>
+        <Transition name="step-fade" mode="out-in">
+          <NForm :key="currentStep" :model="formValue" label-placement="left" label-width="90">
+            <!-- 步骤 0：基础配置（名称 + 渠道 + 模型） -->
+            <template v-if="currentStep === 0">
+              <NFormItem label="模型名称" required>
+                <NInput v-model:value="formValue.model_name" placeholder="例如：gpt-4、claude-3-opus" />
+              </NFormItem>
 
-        <NFormItem v-if="selectedProviders.length > 0" label="选择模型">
-          <div style="width: 100%; display: flex; flex-direction: column; gap: 10px">
-            <NInput
-              v-model:value="modelSearchKeyword"
-              placeholder="搜索模型名，点击模型切换选中..."
-              clearable
-            >
-              <template #prefix>
-                <NIcon><SearchOutline /></NIcon>
-              </template>
-            </NInput>
+              <NFormItem label="渠道与模型">
+                <div style="width: 100%; display: flex; flex-direction: column; gap: 10px">
+                  <NInput
+                    v-model:value="modelSearchKeyword"
+                    placeholder="搜索模型名，点击模型切换选中..."
+                    clearable
+                  >
+                    <template #prefix>
+                      <NIcon><SearchOutline /></NIcon>
+                    </template>
+                  </NInput>
 
-            <div v-for="grp in channelModels" :key="grp.provider_id" class="channel-model-group">
-              <div class="cmg-header">
-                <span class="cmg-name">{{ grp.provider_name }}</span>
-                <span class="cmg-count">已选 {{ selectedModelsOf(grp.provider_id).length }}/{{ grp.total }}</span>
-                <span v-if="isWeightedStrategy" class="cmg-weight">
-                  <span class="cmg-weight-label">权重</span>
-                  <NInputNumber
-                    :value="channelWeightOf(grp.provider_id)"
-                    :min="1"
-                    size="small"
-                    style="width: 72px"
-                    @update:value="(v) => setChannelWeight(grp.provider_id, v)"
-                  />
-                </span>
-              </div>
-              <div v-if="grp.models.length === 0" class="cmg-empty">无匹配模型</div>
-              <div v-else class="cmg-list">
-                <div
-                  v-for="m in grp.models"
-                  :key="grp.provider_id + '-' + m"
-                  class="cmg-item"
-                  :class="{ selected: selectedModelsOf(grp.provider_id).includes(m) }"
-                  @click="toggleModel(grp.provider_id, m)"
-                >
-                  <div class="cmg-check">
-                    <span class="cmg-check-icon">{{ selectedModelsOf(grp.provider_id).includes(m) ? '✓' : '' }}</span>
+                  <div v-if="allProviders.length === 0" style="font-size: 13px; color: #94a3b8; padding: 8px 0">
+                    暂无可用渠道，请先在「渠道管理」中添加
                   </div>
-                  <span class="cmg-model">{{ m }}</span>
-                  <span class="cmg-remark">外部视为 {{ formValue.model_name || '同模型名' }}</span>
+
+                  <div v-else class="channel-list">
+                    <div
+                      v-for="p in allProviders"
+                      :key="p.id"
+                      class="channel-item"
+                      :class="{
+                        selected: selectedProviderIds.includes(p.id),
+                        'no-match': isFiltering && channelModelsOf(p.id).length === 0,
+                      }"
+                    >
+                      <div class="channel-item-head" @click="toggleExpand(p.id)">
+                        <span class="channel-arrow" :class="{ expanded: expandedProviderIds[p.id] }">▸</span>
+                        <div class="channel-info">
+                          <span class="channel-name">{{ p.name }}</span>
+                          <span class="channel-protocols">
+                            <NTag v-for="proto in (p.protocols || [])" :key="proto" size="tiny" round style="margin-right: 2px">
+                              {{ proto }}
+                            </NTag>
+                          </span>
+                          <span class="channel-models">{{ (p.models || []).length }} 模型</span>
+                          <NTag size="tiny" :type="healthStatusType(p.health_status)" round>
+                            {{ healthStatusLabel(p.health_status) }}
+                          </NTag>
+                        </div>
+                        <span
+                          v-if="selectedProviderIds.includes(p.id)"
+                          class="channel-expand-hint"
+                        >已选 {{ selectedModelsOf(p.id).length }} 个</span>
+                      </div>
+
+                      <!-- 该渠道的模型勾选区（点击头部展开/收起；筛选时匹配渠道自动展开） -->
+                      <div v-if="expandedProviderIds[p.id] || (isFiltering && channelModelsOf(p.id).length > 0)" class="cmg-list">
+                        <div
+                          v-for="m in channelModelsOf(p.id)"
+                          :key="p.id + '-' + m"
+                          class="cmg-item"
+                          :class="{ selected: isModelSelected(p.id, m) }"
+                          @click="toggleModel(p.id, m)"
+                        >
+                          <div class="cmg-check">
+                            <span class="cmg-check-icon">{{ isModelSelected(p.id, m) ? '✓' : '' }}</span>
+                          </div>
+                          <span class="cmg-model">{{ m }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </NFormItem>
 
-            <div v-if="channelModels.length === 0 && modelSearchKeyword" style="font-size:13px;color:#94a3b8;padding:8px 0">
-              无匹配模型
+              <NFormItem label="负载策略">
+                <NSelect
+                  v-model:value="formValue.strategy"
+                  :options="[
+                    { label: '加权轮询 (Weighted Round Robin)', value: 'round_robin' },
+                    { label: '加权随机 (Weighted Random)', value: 'weighted' },
+                    { label: '最少连接 (Least Conn)', value: 'least_conn' },
+                  ]"
+                />
+              </NFormItem>
+            </template>
+
+            <!-- 步骤 2：权重与参数 -->
+            <template v-else>
+              <NFormItem v-if="isWeightedStrategy" label="模型权重">
+                <div style="width: 100%; display: flex; flex-direction: column; gap: 10px">
+                  <div
+                    v-for="grp in selectedProviders"
+                    :key="grp.id"
+                    class="channel-model-group"
+                  >
+                    <div class="cmg-header">
+                      <span class="cmg-name">{{ grp.name }}</span>
+                      <span class="cmg-count">已选 {{ selectedModelsOf(grp.id).length }} 个模型</span>
+                    </div>
+                    <div v-if="selectedModelsOf(grp.id).length === 0" class="cmg-empty">
+                      该渠道未选择模型（将使用模型映射的同名模型，权重 1）
+                    </div>
+                    <div v-else class="cmg-list">
+                      <div v-for="sm in selectedModelsOf(grp.id)" :key="grp.id + '-' + sm.name" class="cmg-item weight-item">
+                        <span class="cmg-model">{{ sm.name }}</span>
+                        <span class="cmg-weight">
+                          <span class="cmg-weight-label">权重</span>
+                          <NInputNumber
+                            :value="sm.weight"
+                            :min="1"
+                            size="small"
+                            style="width: 72px"
+                            @update:value="(v) => setModelWeight(grp.id, sm.name, v)"
+                          />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div style="font-size: 12px; color: #94a3b8">
+                    权重决定流量分配比例，默认 1；数值越大，被选中的概率/频次越高。
+                  </div>
+                </div>
+              </NFormItem>
+
+              <div class="form-row">
+                <NFormItem v-for="field in tokenFields" :key="field.key" :label="field.label" style="flex: 1">
+                  <div class="token-field">
+                    <NInputNumber v-model:value="formValue[field.key]" placeholder="请输入数值，留空则使用最佳默认值" :min="0" style="width: 100%" />
+                    <div class="token-options">
+                      <button
+                        v-for="opt in field.options"
+                        :key="opt.value"
+                        type="button"
+                        class="token-option"
+                        :class="{ active: formValue[field.key] === opt.value }"
+                        @click="toggleTokenValue(field.key, opt.value)"
+                      >{{ opt.label }}</button>
+                    </div>
+                  </div>
+                </NFormItem>
+              </div>
+
+              <NFormItem label="描述">
+                <NInput v-model:value="formValue.description" placeholder="模型描述，如 '最新 GPT-4 模型，支持多模态'" type="textarea" :rows="2" />
+              </NFormItem>
+
+              <NFormItem label="模型能力">
+                <div class="cap-checkboxes">
+                  <label v-for="cap in capabilityOptions" :key="cap.value" class="cap-checkbox">
+                    <input type="checkbox" :value="cap.value" :checked="formValue.capabilities.includes(cap.value)"
+                      @change="(e: any) => toggleCapability(cap.value, e.target.checked)"
+                    />
+                    {{ cap.label }}
+                  </label>
+                </div>
+              </NFormItem>
+
+              <NFormItem label="启用">
+                <NSwitch v-model:value="formValue.enabled" />
+              </NFormItem>
+            </template>
+          </NForm>
+        </Transition>
+
+        <template #footer>
+          <div class="modal-footer">
+            <NButton @click="showModal = false">取消</NButton>
+            <div class="modal-footer-right">
+              <NButton v-if="currentStep > 0" @click="prevStep">上一步</NButton>
+              <template v-if="currentStep < 1">
+                <NButton type="primary" :disabled="!step0Valid" @click="nextStep">
+                  下一步
+                </NButton>
+              </template>
+              <template v-else>
+                <NButton type="primary" :disabled="!step0Valid" @click="handleSubmit">
+                  {{ editingId ? '保存修改' : '确认添加' }}
+                </NButton>
+              </template>
             </div>
           </div>
-        </NFormItem>
-
-        <NFormItem label="负载策略">
-          <NSelect
-            v-model:value="formValue.strategy"
-            :options="[
-              { label: '加权轮询 (Weighted Round Robin)', value: 'round_robin' },
-              { label: '加权随机 (Weighted Random)', value: 'weighted' },
-              { label: '最少连接 (Least Conn)', value: 'least_conn' },
-            ]"
-          />
-        </NFormItem>
-
-        <div class="form-row">
-          <NFormItem v-for="field in tokenFields" :key="field.key" :label="field.label" style="flex: 1">
-            <div class="token-field">
-              <NInputNumber v-model:value="formValue[field.key]" placeholder="请输入数值，留空则使用最佳默认值" :min="0" style="width: 100%" />
-              <div class="token-options">
-                <button
-                  v-for="opt in field.options"
-                  :key="opt.value"
-                  type="button"
-                  class="token-option"
-                  :class="{ active: formValue[field.key] === opt.value }"
-                  @click="toggleTokenValue(field.key, opt.value)"
-                >{{ opt.label }}</button>
-              </div>
-            </div>
-          </NFormItem>
-        </div>
-
-        <div class="form-row">
-          <NFormItem label="输入价格" style="flex: 1">
-            <NInputNumber v-model:value="formValue.input_price_per_1m" placeholder="$30/1M" :min="0" style="width: 100%" />
-          </NFormItem>
-          <NFormItem label="输出价格" style="flex: 1">
-            <NInputNumber v-model:value="formValue.output_price_per_1m" placeholder="$60/1M" :min="0" style="width: 100%" />
-          </NFormItem>
-        </div>
-
-        <NFormItem label="描述">
-          <NInput v-model:value="formValue.description" placeholder="模型描述，如 '最新 GPT-4 模型，支持多模态'" type="textarea" :rows="2" />
-        </NFormItem>
-
-        <NFormItem label="模型能力">
-          <div class="cap-checkboxes">
-            <label v-for="cap in capabilityOptions" :key="cap.value" class="cap-checkbox">
-              <input type="checkbox" :value="cap.value" :checked="formValue.capabilities.includes(cap.value)"
-                @change="(e: any) => toggleCapability(cap.value, e.target.checked)"
-              />
-              {{ cap.label }}
-            </label>
-          </div>
-        </NFormItem>
-
-        <NFormItem label="启用">
-          <NSwitch v-model:value="formValue.enabled" />
-        </NFormItem>
-        </NForm>
+        </template>
       </AppFormModal>
     </template>
   </AppPageShell>
@@ -721,15 +771,6 @@ watch(
   gap: 2px;
 }
 
-.mc-pricing {
-  font-size: 12px;
-  color: var(--text-color-2, #64748b);
-  margin-bottom: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-}
-
 .sep {
   color: var(--border-color, #e2e8f0);
   margin: 0 4px;
@@ -755,36 +796,89 @@ watch(
 .channel-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 240px;
+  gap: 8px;
+  max-height: 280px;
   overflow-y: auto;
+  /* 禁止子项被 flex 压缩（否则超出容器高度时行会被压扁裁切，而不是滚动） */
+  align-items: stretch;
 }
 
 .channel-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  flex-direction: column;
+  flex-shrink: 0;
   border-radius: 8px;
   border: 1px solid var(--border-color, #e2e8f0);
-  cursor: pointer;
   transition: all 0.15s;
+  overflow: hidden;
+  background: var(--card-bg, #ffffff);
 }
 
-.channel-item:hover {
-  background: var(--hover-color, #f8fafc);
-}
-
-.channel-item.selected {
-  border-color: var(--accent, #0891b2);
-  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
-}
-
-.channel-checkbox {
-  width: 16px;
-  height: 16px;
+/* 渠道头部行（信息展示，点击展开/收起模型区） */
+.channel-item-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 42px;
   cursor: pointer;
-  accent-color: var(--accent, #0891b2);
+  transition: background 0.12s;
+  user-select: none;
+}
+
+.channel-item-head:hover {
+  background: var(--hover-bg, #f8fafc);
+}
+
+/* 展开箭头（收起时右指，展开时旋转下指） */
+.channel-arrow {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.channel-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+/* 头部右侧：已选模型数量 */
+.channel-expand-hint {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent, #0891b2);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* 筛选无匹配渠道：压缩为矮条，淡化提示无匹配（无需文字说明） */
+.channel-item.no-match {
+  opacity: 0.45;
+  border-color: var(--border-color, #e2e8f0);
+}
+
+.channel-item.no-match .channel-item-head {
+  padding: 6px 12px;
+  min-height: 0;
+  cursor: default;
+}
+
+.channel-item.no-match .channel-item-head:hover {
+  background: transparent;
+}
+
+.channel-item.no-match .channel-info {
+  gap: 4px;
+}
+
+/* 勾选渠道后内嵌的模型勾选区 */
+.channel-item .cmg-list {
+  border-top: 1px solid var(--border-color, #e2e8f0);
+  background: var(--surface-alt, #f1f5f9);
+}
+
+.channel-item .cmg-item {
+  padding-left: 20px;
 }
 
 .channel-info {
@@ -824,7 +918,7 @@ watch(
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: #f8fafc;
+  background: var(--surface-alt, #f1f5f9);
   border-bottom: 1px solid var(--border-color, #e2e8f0);
 }
 
@@ -853,7 +947,7 @@ watch(
 .cmg-empty {
   padding: 12px;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--text-color-3, #94a3b8);
   text-align: center;
 }
 
@@ -869,7 +963,7 @@ watch(
   padding: 8px 12px;
   cursor: pointer;
   transition: background 0.12s;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
 }
 
 .cmg-item:last-child {
@@ -877,7 +971,7 @@ watch(
 }
 
 .cmg-item:hover {
-  background: #f8fafc;
+  background: var(--hover-bg, #f8fafc);
 }
 
 .cmg-item.selected {
@@ -915,12 +1009,6 @@ watch(
   flex: 1;
 }
 
-.cmg-remark {
-  font-size: 11px;
-  color: var(--text-color-3, #94a3b8);
-}
-
-
 .cap-checkboxes {
   display: flex;
   flex-wrap: wrap;
@@ -933,6 +1021,42 @@ watch(
   gap: 4px;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* 向导底部按钮（覆盖 AppFormModal 默认 footer） */
+.modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 右侧导航按钮组（上一步/下一步/确认） */
+.modal-footer-right {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 步骤切换过渡 */
+.step-fade-enter-active,
+.step-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.step-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.step-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* 步骤 1：权重行 */
+.weight-item {
+  justify-content: space-between;
 }
 
 /* 上下文 / 最大输出 快捷档位 */
@@ -971,8 +1095,4 @@ watch(
   color: var(--accent, #0891b2);
   font-weight: 500;
 }
-
-
-
-
 </style>
