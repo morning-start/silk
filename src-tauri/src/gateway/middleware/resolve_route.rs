@@ -1,7 +1,7 @@
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
-use crate::load_balancer::{LoadBalanceStrategy, LoadBalancedItem, LoadBalancer};
+use crate::schedulers::load_balancer::{LoadBalanceStrategy, LoadBalancedItem, LoadBalancer};
 use crate::models::{ModelMappingChannel, Provider};
 use crate::persistence::{ModelMappingRepo, ProviderRepo};
 

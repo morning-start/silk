@@ -1,9 +1,9 @@
+pub mod schedulers;
 pub mod application;
 pub mod commands;
 pub mod crypto;
 pub mod error;
 pub mod gateway;
-pub mod load_balancer;
 pub mod models;
 pub mod persistence;
 pub mod protocol;

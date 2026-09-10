@@ -2,6 +2,7 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::response::Response;
 
+use crate::schedulers::failover::{AttemptOutcome, FailoverError, FailoverPolicy, FailoverScheduler};
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::logging;
@@ -27,16 +28,6 @@ impl StageError {
             error,
         }
     }
-}
-
-/// 单次上游尝试的结局，供 `run_with_failover` 调度
-enum AttemptOutcome {
-    /// 上游成功（SSE 响应已在 dispatch_upstream 内构建），结束失败回退
-    Success(RequestContext),
-    /// 失败但当前 provider 仍有可用 Key，换 Key 后继续中层循环
-    RetryKey(RequestContext),
-    /// 当前 provider 的所有 Key 均已失败，换渠道
-    SwitchChannel(RequestContext),
 }
 
 #[derive(Clone)]
@@ -163,19 +154,19 @@ impl GatewayPipeline {
         }
 
         // 失败回退循环
-        self.run_with_failover(ctx).await
+        self.run_failover(ctx).await
     }
 
     /// 单次上游尝试：选 Key → 转换请求 → 插件钩子 → 分发 → 错误分类
     ///
-    /// 返回 `AttemptOutcome` 供 `run_with_failover` 调度；`Err(StageError)` 表示
+    /// 返回 `AttemptOutcome` 供调度器决策；`Err(StageError)` 表示
     /// 不可重试错误或中间阶段（select / transform / plugin）失败，直接结束回退。
     /// `failover_start` 仅用于日志统计（与回退总超时同源）。
     async fn attempt_upstream(
         &self,
         mut ctx: RequestContext,
         failover_start: std::time::Instant,
-    ) -> Result<AttemptOutcome, StageError> {
+    ) -> Result<AttemptOutcome<RequestContext>, StageError> {
         ctx = select_channel::run(&self.runtime, ctx).await?;
         ctx = transform_request::run(ctx).await?;
 
@@ -254,8 +245,8 @@ impl GatewayPipeline {
                     .unwrap_or(false);
 
                 if has_available_keys {
-                    // Level 2：换 Key，继续中层循环
-                    Ok(AttemptOutcome::RetryKey(ctx))
+                    // 同级重试：换 Key 后再试一次
+                    Ok(AttemptOutcome::Retry(ctx))
                 } else {
                     // 所有 Key 都试过了，记录 provider 失败
                     let prov = ctx.provider.clone();
@@ -264,119 +255,65 @@ impl GatewayPipeline {
                             ctx.failed_providers.push(p.id.clone());
                         }
                     }
-                    // 跳出中层循环，尝试换渠道
-                    Ok(AttemptOutcome::SwitchChannel(ctx))
+                    // 升级：换渠道
+                    Ok(AttemptOutcome::Escalate(ctx))
                 }
             }
         }
     }
 
-    /// 带三级回退的核心处理逻辑
+    /// 带三级回退的核心处理逻辑（委托 schedulers::failover::FailoverScheduler）
     ///
-    /// 总超时15秒，最多尝试10次，防止无限重试。
-    /// 调度结构：Level 2 换 Key 由 `attempt_upstream` 决策，Level 3 换渠道在此处调度。
-    async fn run_with_failover(
+    /// 策略参数：总超时 15 秒、最多尝试 10 次。
+    /// 业务只提供两个闭包：attempt（一次完整尝试 + 换 Key/换渠道决策）、
+    /// next_channel（升级换渠道），调度器统一负责循环、超时与次数上限。
+    async fn run_failover(
         &self,
-        mut ctx: RequestContext,
+        ctx: RequestContext,
     ) -> Result<RequestContext, StageError> {
-        let failover_start = std::time::Instant::now();
-        let total_timeout = std::time::Duration::from_secs(15);
-        let max_total_attempts: u32 = 10;
+        let scheduler = FailoverScheduler::new(FailoverPolicy {
+            max_attempts: 10,
+            total_timeout: std::time::Duration::from_secs(15),
+        });
 
-        // 外层循环：换渠道（Level 3）
-        loop {
-            // 总超时检查
-            if failover_start.elapsed() > total_timeout {
+        match scheduler
+            .run(
+                ctx,
+                |ctx, failover_start| self.attempt_upstream(ctx, failover_start),
+                |ctx| async move {
+                    resolve_route::try_next_channel(&self.runtime, ctx.clone()).await
+                },
+            )
+            .await
+        {
+            Ok(ctx) => Ok(ctx),
+            Err(FailoverError::Aborted(error)) => Err(error),
+            Err(FailoverError::Timeout(ctx)) => {
                 tracing::warn!(
-                    elapsed_ms = failover_start.elapsed().as_millis(),
+                    elapsed_ms = ctx.elapsed_ms(),
                     attempts = ctx.total_retry_attempts,
                     "失败回退总超时"
                 );
-                return Err(StageError::new(
+                Err(StageError::new(
                     ctx,
-                    GatewayError::Internal(format!(
-                        "请求超时：失败回退超过{}秒",
-                        total_timeout.as_secs()
-                    )),
-                ));
+                    GatewayError::Internal("请求超时：失败回退超过15秒".to_string()),
+                ))
             }
-
-            // 总尝试次数检查
-            if ctx.total_retry_attempts >= max_total_attempts {
+            Err(FailoverError::TooManyAttempts(ctx)) => {
                 let attempts = ctx.total_retry_attempts;
                 tracing::warn!(
                     attempts = attempts,
                     "失败回退达到最大尝试次数"
                 );
-                return Err(StageError::new(
+                Err(StageError::new(
                     ctx,
-                    GatewayError::Internal(format!(
-                        "请求失败：已尝试{}次仍不成功",
-                        attempts
-                    )),
-                ));
+                    GatewayError::Internal(format!("请求失败：已尝试{attempts}次仍不成功")),
+                ))
             }
-
-            // 清理上次渠道的 Key 失败记录
-            ctx.failed_keys.clear();
-
-            // 中层循环：换 Key（Level 2）
-            loop {
-                // 总超时检查
-                if failover_start.elapsed() > total_timeout {
-                    return Err(StageError::new(
-                        ctx,
-                        GatewayError::Internal(format!(
-                            "请求超时：失败回退超过{}秒",
-                            total_timeout.as_secs()
-                        )),
-                    ));
-                }
-
-                // 总尝试次数检查
-                if ctx.total_retry_attempts >= max_total_attempts {
-                    let attempts = ctx.total_retry_attempts;
-                    return Err(StageError::new(
-                        ctx,
-                        GatewayError::Internal(format!(
-                            "请求失败：已尝试{}次仍不成功",
-                            attempts
-                        )),
-                    ));
-                }
-
-                // 单次上游尝试：选 Key → 转换 → 分发 → 错误分类（换 Key / 换渠道 / 失败）
-                match self.attempt_upstream(ctx, failover_start).await? {
-                    AttemptOutcome::Success(new_ctx) => return Ok(new_ctx),
-                    AttemptOutcome::RetryKey(new_ctx) => {
-                        // Level 2：换 Key，继续中层循环
-                        ctx = new_ctx;
-                        continue;
-                    }
-                    AttemptOutcome::SwitchChannel(new_ctx) => {
-                        // 跳出中层循环，尝试换渠道
-                        ctx = new_ctx;
-                        break;
-                    }
-                }
-            }
-
-            // Level 3：换渠道（从 channels_available 选下一个）
-            if !ctx.channels_available.is_empty() {
-                // clone 用于失败回退场景，正常路径无额外开销
-                if let Some(new_ctx) =
-                    resolve_route::try_next_channel(&self.runtime, ctx.clone()).await
-                {
-                    ctx = new_ctx;
-                    continue; // 外层循环，用新渠道重新尝试
-                }
-            }
-
-            // 所有渠道 + 所有 Key 都失败
-            return Err(StageError::new(
+            Err(FailoverError::NoChannelLeft(ctx)) => Err(StageError::new(
                 ctx,
                 GatewayError::Internal("所有渠道和 Key 均已失败".to_string()),
-            ));
+            )),
         }
     }
 }

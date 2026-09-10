@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::CryptoError;
 use crate::error::{bad_request, require_db, require_found, validate_non_empty, ServiceError};
-use crate::load_balancer::{LoadBalanceStrategy, LoadBalancer};
+use crate::schedulers::load_balancer::{LoadBalanceStrategy, LoadBalancer};
 use crate::models::{NewProvider, Provider, ProviderHeaderEntry, ProviderKeyEntry, UpdateProvider};
 use crate::persistence::ProviderRepo;
 use crate::AppState;

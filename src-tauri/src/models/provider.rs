@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::load_balancer::LoadBalancedItem;
+use crate::schedulers::load_balancer::LoadBalancedItem;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct Provider {

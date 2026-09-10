@@ -2,7 +2,7 @@ use crate::crypto::decrypt;
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
 use crate::gateway::pipeline::StageError;
-use crate::load_balancer::{LoadBalanceStrategy, LoadBalancer};
+use crate::schedulers::load_balancer::{LoadBalanceStrategy, LoadBalancer};
 use crate::models::ProviderKeyEntry;
 
 /// 渠道映射中间件

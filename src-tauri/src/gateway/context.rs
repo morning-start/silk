@@ -8,7 +8,7 @@ use tokio::sync::{oneshot, RwLock};
 
 use crate::gateway::header_config::HeaderConfig;
 use crate::gateway::middleware::rate_limit::RateLimitState;
-use crate::load_balancer::LoadBalancerState;
+use crate::schedulers::load_balancer::LoadBalancerState;
 use crate::models::{GatewaySettings, Provider};
 
 // ---------------------------------------------------------------------------
