@@ -203,14 +203,18 @@ impl GatewayPipeline {
             }
             Err(stage_err) => {
                 let error = stage_err.error;
-                // 记录失败的 Key
+                // 记录失败的 Key（存加密态，与 select_channel 的密文比对一致）
                 ctx = *stage_err.context;
                 ctx.total_retry_attempts += 1;
-                let failed_key = ctx.selected_api_key.clone();
+                let failed_key = ctx
+                    .selected_key_encrypted
+                    .clone()
+                    .or_else(|| ctx.selected_api_key.clone());
                 if let Some(ref key) = failed_key {
                     ctx.failed_keys.push(key.clone());
                 }
                 ctx.selected_api_key = None; // 避免复用
+                ctx.selected_key_encrypted = None;
 
                 // 429/401/403/503 等明确错误不应换 Key 重试
                 if let GatewayError::UpstreamError { status, body } = &error {

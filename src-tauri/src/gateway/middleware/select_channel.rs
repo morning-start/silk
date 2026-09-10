@@ -58,6 +58,8 @@ pub async fn run(runtime: &GatewayContext, mut ctx: RequestContext) -> Result<Re
             GatewayError::Internal(format!("解密 API Key 失败: {e}")),
         )
     })?;
+    // 同时记录加密态，供失败回退时写入 failed_keys（与后续密文比对一致）
+    ctx.selected_key_encrypted = Some(selected.value.clone());
     ctx.selected_api_key = Some(decrypted);
     ctx.channel_key_name = Some(selected.name.clone());
     Ok(ctx)

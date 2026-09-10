@@ -334,6 +334,7 @@ pub async fn try_next_channel(
     // 重置 Key 相关的失败记录（新渠道从头开始试 Key）
     ctx.failed_keys.clear();
     ctx.selected_api_key = None;
+    ctx.selected_key_encrypted = None;
 
     Some(ctx)
 }

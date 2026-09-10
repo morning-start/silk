@@ -195,3 +195,106 @@ impl<T: LoadBalancedItem + Clone> LoadBalancer<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Debug)]
+    struct TestItem {
+        id: &'static str,
+        weight: i64,
+        enabled: bool,
+    }
+
+    impl LoadBalancedItem for TestItem {
+        fn weight(&self) -> i64 {
+            self.weight
+        }
+        fn enabled(&self) -> bool {
+            self.enabled
+        }
+    }
+
+    fn items(spec: &[(&'static str, i64)]) -> Vec<TestItem> {
+        spec.iter()
+            .map(|(id, weight)| TestItem {
+                id: *id,
+                weight: *weight,
+                enabled: true,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn smooth_weighted_round_robin_respects_weights() {
+        // 权重 3:1:1，平滑加权轮询每 5 次一个完整周期：A B A C A
+        let balancer = LoadBalancer::with_shared_state(
+            items(&[("A", 3), ("B", 1), ("C", 1)]),
+            LoadBalanceStrategy::RoundRobin,
+            Arc::new(LoadBalancerState::default()),
+        );
+        let mut counts = std::collections::HashMap::new();
+        for _ in 0..10 {
+            let item = balancer.select().unwrap();
+            *counts.entry(item.id).or_insert(0) += 1;
+        }
+        assert_eq!(counts.get("A"), Some(&6));
+        assert_eq!(counts.get("B"), Some(&2));
+        assert_eq!(counts.get("C"), Some(&2));
+    }
+
+    #[test]
+    fn weighted_random_prefers_high_weight() {
+        // 权重 [1,1,1,100]，高权重 Key 应被绝大多数请求选中（期望 ~97%）
+        let balancer = LoadBalancer::new(
+            items(&[("A", 1), ("B", 1), ("C", 1), ("D", 100)]),
+            LoadBalanceStrategy::Weighted,
+        );
+        let mut heavy = 0;
+        for _ in 0..2000 {
+            let item = balancer.select().unwrap();
+            if item.id == "D" {
+                heavy += 1;
+            }
+        }
+        assert!(heavy > 1800, "高权重 Key 选中次数过低: {heavy}");
+    }
+
+    #[test]
+    fn least_conn_ignores_weight() {
+        // 权重不影响最少连接选择：A 已有活跃连接时选中 B
+        let balancer = LoadBalancer::new(
+            items(&[("A", 100), ("B", 1)]),
+            LoadBalanceStrategy::LeastConn,
+        );
+        let a_ref = balancer.select().unwrap();
+        assert_eq!(a_ref.id, "A");
+        balancer.connection_started(a_ref);
+        let picked = balancer.select().unwrap();
+        assert_eq!(picked.id, "B");
+    }
+
+    #[test]
+    fn round_robin_without_shared_state_alternates() {
+        // 无共享状态退化为普通轮询（忽略权重）
+        let balancer = LoadBalancer::new(
+            items(&[("A", 5), ("B", 1)]),
+            LoadBalanceStrategy::RoundRobin,
+        );
+        let first = balancer.select().unwrap().id;
+        let second = balancer.select().unwrap().id;
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn select_returns_none_when_all_disabled() {
+        let items = vec![TestItem {
+            id: "A",
+            weight: 1,
+            enabled: false,
+        }];
+        let balancer = LoadBalancer::new(items, LoadBalanceStrategy::Weighted);
+        assert!(balancer.select().is_none());
+    }
+}

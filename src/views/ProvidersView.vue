@@ -125,6 +125,13 @@ const canSubmit = computed(
     hasEnabledKey.value,
 );
 
+// 加权轮询 / 加权随机都使用 weight 字段，最少连接不使用
+const isWeightedStrategy = computed(
+  () =>
+    formValue.value.key_strategy === "round_robin" ||
+    formValue.value.key_strategy === "weighted",
+);
+
 function createDefaultKey(name = "默认"): ProviderKeyForm {
   return { name, value: "", enabled: true, weight: 1 };
 }
@@ -536,14 +543,40 @@ onMounted(() => {
             </NFormItem>
           </div>
 
-          <NFormItem label="API Keys" required>
+          <NFormItem label-placement="top" label-style="width: 100%">
+            <template #label>
+              <div class="key-title">
+                <span class="key-title-name">API Keys <span class="key-title-required">*</span></span>
+                <NButton size="small" secondary @click="addKey">+ 添加密钥</NButton>
+                <span class="key-hint">本地个人中转站可直接查看和复制已保存的渠道 Key。</span>
+              </div>
+            </template>
             <div class="key-list">
+              <div v-if="isWeightedStrategy" class="key-row key-row-head">
+                <span class="key-head-weight">权重</span>
+                <span class="key-head-name">名称</span>
+                <span class="key-head-value">API Key</span>
+              </div>
               <div v-for="(key, index) in formValue.keys" :key="index" class="key-row">
-                <NInput v-model:value="key.name" placeholder="名称" style="width: 120px" />
+                <NInputNumber
+                  v-if="isWeightedStrategy"
+                  v-model:value="key.weight"
+                  :min="1"
+                  :max="100"
+                  :show-button="false"
+                  style="width: 34px; flex: none"
+                  placeholder="权重"
+                />
+                <NInput
+                  v-model:value="key.name"
+                  placeholder="名称"
+                  style="width: 120px; flex: none"
+                />
                 <NInput
                   v-model:value="key.value"
                   :type="keyVisibility[index] ? 'text' : 'password'"
                   placeholder="sk-..."
+                  style="flex: 1; min-width: 0"
                 />
                 <NButton quaternary size="small" @click="toggleKeyVisibility(index)">
                   {{ keyVisibility[index] ? "隐藏" : "显示" }}
@@ -551,23 +584,11 @@ onMounted(() => {
                 <NButton quaternary size="small" @click="copyKeyValue(key.value)">
                   复制
                 </NButton>
-                <NInputNumber
-                  v-if="formValue.key_strategy === 'weighted'"
-                  v-model:value="key.weight"
-                  :min="1"
-                  :max="100"
-                  style="width: 100px"
-                  placeholder="权重"
-                />
                 <div class="key-enabled">
                   <span>启用</span>
                   <NSwitch v-model:value="key.enabled" size="small" />
                 </div>
                 <NButton quaternary circle type="error" @click="removeKey(index)">×</NButton>
-              </div>
-              <div class="key-actions">
-                <NButton size="small" secondary @click="addKey">+ 添加密钥</NButton>
-                <span class="key-hint">本地个人中转站可直接查看和复制已保存的渠道 Key。</span>
               </div>
             </div>
           </NFormItem>
@@ -775,6 +796,27 @@ onMounted(() => {
   gap: 10px;
 }
 
+.key-row-head {
+  font-size: 12px;
+  color: var(--text-color-3, #94a3b8);
+  padding-bottom: 2px;
+}
+
+.key-head-weight {
+  flex: none;
+  width: 34px;
+}
+
+.key-head-name {
+  flex: none;
+  width: 120px;
+}
+
+.key-head-value {
+  flex: 1;
+  min-width: 0;
+}
+
 .key-enabled {
   display: flex;
   align-items: center;
@@ -783,12 +825,21 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.key-actions {
+.key-title {
   display: flex;
-  justify-content: flex-start;
   align-items: center;
   gap: 10px;
+  width: 100%;
   flex-wrap: wrap;
+}
+
+.key-title-name {
+  font-weight: 500;
+}
+
+.key-title-required {
+  color: var(--error-color, #d03050);
+  margin-left: 2px;
 }
 
 .key-hint {
@@ -932,6 +983,10 @@ onMounted(() => {
   .header-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .key-row-head {
+    display: none;
   }
 
   .key-enabled,

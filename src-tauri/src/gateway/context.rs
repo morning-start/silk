@@ -244,6 +244,8 @@ pub struct RequestContextInner {
     pub auth_key_name: Option<String>,
     /// 渠道映射选中的上游 API Key
     pub selected_api_key: Option<String>,
+    /// 选中的上游 Key 的加密存储值（失败回退时写入 failed_keys，与密文比对一致）
+    pub selected_key_encrypted: Option<String>,
     /// 渠道映射选中的 Key 名称
     pub channel_key_name: Option<String>,
     /// 适配器指定的上游 URL（覆盖原始请求 URI）
@@ -377,6 +379,7 @@ impl RequestContext {
                 remote_model_override: None,
                 auth_key_name: None,
                 selected_api_key: None,
+                selected_key_encrypted: None,
                 channel_key_name: None,
                 upstream_url: None,
                 upstream_method: None,
