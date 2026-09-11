@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, onErrorCaptured } from "vue";
+import { computed, onMounted, ref, onErrorCaptured, type Component } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { getVersion } from "@tauri-apps/api/app";
 import {
@@ -9,12 +9,20 @@ import {
   NLayoutContent,
   NLayoutFooter,
   NIcon,
+  NButton,
   useMessage,
 } from "naive-ui";
 import {
   PowerOutline,
   ReloadOutline,
   StopOutline,
+  GridOutline,
+  ServerOutline,
+  CubeOutline,
+  LayersOutline,
+  DocumentTextOutline,
+  SettingsOutline,
+  InformationCircleOutline,
 } from "@vicons/ionicons5";
 import { useGatewayStore } from "./stores/gateway";
 
@@ -25,6 +33,52 @@ const router = useRouter();
 const route = useRoute();
 const gatewayStore = useGatewayStore();
 const message = useMessage();
+
+interface NavItem {
+  label: string;
+  path: string;
+  icon: Component;
+  /** 仅命中自身路径 */
+  exact?: boolean;
+  /** 命中路径前缀（如 /providers/xxx） */
+  prefix?: boolean;
+}
+
+interface NavGroup {
+  title?: string;
+  items: NavItem[];
+}
+
+/** 侧栏导航：分组声明，避免模板里重复 7 段同样的按钮 */
+const navGroups: NavGroup[] = [
+  {
+    items: [
+      { label: "仪表盘", path: "/dashboard", exact: true, icon: GridOutline },
+    ],
+  },
+  {
+    title: "核心工作流",
+    items: [
+      { label: "渠道", path: "/providers", prefix: true, icon: ServerOutline },
+      { label: "模型", path: "/model-square", exact: true, icon: CubeOutline },
+      { label: "预设", path: "/presets", exact: true, icon: LayersOutline },
+      { label: "日志", path: "/logs", exact: true, icon: DocumentTextOutline },
+    ],
+  },
+  {
+    title: "系统",
+    items: [
+      { label: "设置", path: "/settings", exact: true, icon: SettingsOutline },
+      { label: "关于", path: "/about", exact: true, icon: InformationCircleOutline },
+    ],
+  },
+];
+
+function isActive(item: NavItem) {
+  if (item.prefix) return route.path.startsWith(item.path);
+  if (item.exact) return route.path === item.path;
+  return route.path.startsWith(item.path);
+}
 
 function handleNav(path: string) {
   router.push(path);
@@ -84,122 +138,116 @@ onErrorCaptured((err, _instance, info) => {
 
 <template>
   <NLayout class="app-layout" has-sider>
-    <!-- Sidebar -->
-    <NLayoutSider
-      :width="240"
-      :native-scrollbar="false"
-      class="app-sidebar"
-      bordered
-    >
+    <!-- ============ Sidebar ============ -->
+    <NLayoutSider :width="236" :native-scrollbar="false" class="app-sidebar" bordered>
       <div class="sidebar-inner">
         <div class="sidebar-brand">
-          <h1><span class="logo-dot"></span> Silk Gateway</h1>
-          <p>本地 AI 网关控制台</p>
+          <div class="brand-mark"></div>
+          <div class="brand-text">
+            <span class="brand-name">Silk</span>
+            <span class="brand-sub">本地 AI 网关</span>
+          </div>
         </div>
 
-        <div class="sidebar-menu-wrap">
-          <nav class="sidebar-nav">
-            <button :class="{ active: route.path === '/dashboard' }" @click="handleNav('/dashboard')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>仪表盘
+        <nav class="sidebar-nav">
+          <template v-for="(group, gi) in navGroups" :key="gi">
+            <div v-if="group.title" class="nav-section">{{ group.title }}</div>
+            <button
+              v-for="item in group.items"
+              :key="item.path"
+              class="nav-item"
+              :class="{ active: isActive(item) }"
+              @click="handleNav(item.path)"
+            >
+              <NIcon :size="16" :component="item.icon" />
+              <span>{{ item.label }}</span>
             </button>
-            <div class="sidebar-section">核心工作流</div>
-            <button :class="{ active: route.path.startsWith('/providers') }" @click="handleNav('/providers')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>渠道
-            </button>
-            <button :class="{ active: route.path === '/model-square' }" @click="handleNav('/model-square')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模型
-            </button>
-            <button :class="{ active: route.path === '/presets' }" @click="handleNav('/presets')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>预设
-            </button>
-            <button :class="{ active: route.path === '/logs' }" @click="handleNav('/logs')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>日志
-            </button>
-            <div class="sidebar-section">系统</div>
-            <button :class="{ active: route.path === '/settings' }" @click="handleNav('/settings')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置
-            </button>
-            <button :class="{ active: route.path === '/about' }" @click="handleNav('/about')">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>关于
-            </button>
-          </nav>
-        </div>
+          </template>
+        </nav>
 
-        <div class="sidebar-footer">gateway.silk.io · v{{ appVersion }}</div>
+        <div class="sidebar-footer">
+          <span class="footer-dot" :class="{ online: isRunning }"></span>
+          <span class="footer-text">v{{ appVersion || "0.0.0" }}</span>
+        </div>
       </div>
     </NLayoutSider>
 
-    <!-- Main Content -->
+    <!-- ============ Main ============ -->
     <NLayout class="main-area">
-      <!-- Topbar -->
       <NLayoutHeader bordered class="app-topbar">
         <div class="topbar-inner">
-          <div class="topbar-title">
-            <span class="topbar-title-text">{{ route.meta?.title || '仪表盘' }}</span>
+          <div class="topbar-heading">
+            <span class="topbar-kicker">SILK / LOCAL GATEWAY</span>
+            <span class="topbar-title">{{ route.meta?.title || "仪表盘" }}</span>
           </div>
+
           <div class="topbar-actions">
-            <span class="status-dot" :class="{ running: isRunning }"></span>
-            <span class="status-text">
-              <span class="status-protocol">gateway://</span>{{ bindAddress }}
-              <span class="status-badge" :class="isRunning ? 'status-badge--online' : 'status-badge--offline'">
-                {{ isRunning ? '运行中' : '已停止' }}
-              </span>
-            </span>
+            <div class="status-pill" :class="{ online: isRunning }">
+              <span class="status-dot"></span>
+              <span class="status-addr">{{ bindAddress }}</span>
+              <span class="status-sep"></span>
+              <span class="status-label">{{ isRunning ? "运行中" : "已停止" }}</span>
+            </div>
+
             <template v-if="isRunning">
-              <button class="icon-btn" @click="restartGateway" title="重启网关">
-                <NIcon size="16"><ReloadOutline /></NIcon>
+              <button class="icon-btn" title="重启网关" @click="restartGateway">
+                <NIcon :size="15"><ReloadOutline /></NIcon>
               </button>
-              <button class="icon-btn icon-btn--danger" @click="stopGateway" title="停用">
-                <NIcon size="16"><StopOutline /></NIcon>
-              </button>
-            </template>
-            <template v-else>
-              <button class="icon-btn" @click="startGateway" title="启动网关">
-                <NIcon size="16"><PowerOutline /></NIcon>
+              <button class="icon-btn icon-btn--danger" title="停止网关" @click="stopGateway">
+                <NIcon :size="15"><StopOutline /></NIcon>
               </button>
             </template>
-            <button class="icon-btn icon-btn--theme" @click="toggleTheme" :title="isDark ? '切换浅色' : '切换深色'">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="width:16px;height:16px">
-                <template v-if="isDark">
-                  <circle cx="12" cy="12" r="5"/>
-                  <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-                </template>
-                <template v-else>
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-                </template>
-              </svg>
+            <button v-else class="icon-btn icon-btn--go" title="启动网关" @click="startGateway">
+              <NIcon :size="15"><PowerOutline /></NIcon>
+            </button>
+
+            <button
+              class="icon-btn"
+              :title="isDark ? '切换浅色' : '切换深色'"
+              @click="toggleTheme"
+            >
+              <NIcon :size="15">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                  <template v-if="isDark">
+                    <circle cx="12" cy="12" r="4.2" />
+                    <path d="M12 2.5v2M12 19.5v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2.5 12h2M19.5 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                  </template>
+                  <template v-else>
+                    <path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a6.8 6.8 0 0 0 9.7 9.7z" />
+                  </template>
+                </svg>
+              </NIcon>
             </button>
           </div>
         </div>
       </NLayoutHeader>
 
-      <!-- Content -->
-      <NLayoutContent content-style="padding: 28px;" class="app-content">
-        <template v-if="errorInfo">
-          <div class="error-boundary">
-            <div class="error-boundary-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="url(#err-grad)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <defs><linearGradient id="err-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#06b6d4"/><stop offset="100%" stop-color="#6366f1"/></linearGradient></defs>
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
-            </div>
-            <h3 class="error-boundary-title">页面渲染出错</h3>
-            <p class="error-boundary-message">{{ errorInfo.message }}</p>
-            <NButton type="primary" @click="errorInfo = null">重试</NButton>
+      <NLayoutContent class="app-content" content-style="padding: 24px 28px;">
+        <div v-if="errorInfo" class="error-boundary">
+          <div class="error-boundary-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7.8v5M12 16.2h.01" />
+            </svg>
           </div>
-        </template>
-        <template v-else>
-          <router-view v-slot="{ Component }">
-            <transition name="page-fade" mode="out-in">
-              <component :is="Component" />
-            </transition>
-          </router-view>
-        </template>
+          <h3 class="error-boundary-title">页面渲染出错</h3>
+          <p class="error-boundary-message">{{ errorInfo.message }}</p>
+          <NButton type="primary" size="small" @click="errorInfo = null">重试</NButton>
+        </div>
+
+        <router-view v-else v-slot="{ Component }">
+          <transition name="page-fade" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
       </NLayoutContent>
 
-      <!-- Main Footer -->
       <NLayoutFooter bordered class="main-footer">
-        Silk Gateway v{{ appVersion }} · 纯本地私有化多模型中转网关 · 零云端上传数据
+        <span>Silk v{{ appVersion }}</span>
+        <span class="footer-sep">·</span>
+        <span>纯本地私有化多模型中转网关</span>
+        <span class="footer-sep">·</span>
+        <span>数据不出本机</span>
       </NLayoutFooter>
     </NLayout>
   </NLayout>
@@ -207,12 +255,9 @@ onErrorCaptured((err, _instance, info) => {
 
 <style scoped>
 /* ================================================================
-   Layout — 外层容器
+   Layout
    ================================================================ */
-.app-layout {
-  height: 100vh;
-}
-
+.app-layout,
 .main-area {
   height: 100vh;
 }
@@ -223,7 +268,8 @@ onErrorCaptured((err, _instance, info) => {
   min-height: 100%;
 }
 
-.main-area :deep(.n-layout-header) {
+.main-area :deep(.n-layout-header),
+.main-area :deep(.n-layout-footer) {
   flex-shrink: 0;
 }
 
@@ -233,277 +279,326 @@ onErrorCaptured((err, _instance, info) => {
 }
 
 /* ================================================================
-   Sidebar — 深色主题，flex column 布局
+   Sidebar — 极简深色侧栏
    ================================================================ */
 .app-sidebar {
-  background: var(--sidebar-bg, #0f172a) !important;
-  border-right: 1px solid rgba(148, 163, 184, 0.12) !important;
+  background: var(--sidebar-bg) !important;
+  border-right: 1px solid var(--sidebar-border) !important;
 }
 
 .sidebar-inner {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background:
-    radial-gradient(420px 260px at 20% -10%, rgba(6, 182, 212, 0.16), transparent 60%),
-    radial-gradient(360px 280px at 100% 40%, rgba(99, 102, 241, 0.1), transparent 60%);
 }
 
 .sidebar-brand {
-  padding: 24px 20px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  flex-shrink: 0;
-}
-
-.sidebar-brand h1 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--sidebar-active, #f8fafc);
-  letter-spacing: -0.02em;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0;
-}
-
-.sidebar-brand h1 .logo-dot {
-  width: 10px;
-  height: 10px;
-  background: var(--gradient, linear-gradient(135deg, #06b6d4, #6366f1));
-  border-radius: 3px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--sidebar-border);
   flex-shrink: 0;
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
 }
 
-.sidebar-brand p {
-  font-size: 11px;
-  color: var(--sidebar-fg, #94a3b8);
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  margin: 4px 0 0 0;
-  opacity: 0.8;
+.brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--gradient);
+  flex-shrink: 0;
+  position: relative;
 }
 
-.sidebar-menu-wrap {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 0 rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.brand-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sidebar-active);
+  letter-spacing: -0.01em;
+}
+
+.brand-sub {
+  font-size: 10px;
+  color: var(--sidebar-fg);
+  letter-spacing: 0.02em;
 }
 
 .sidebar-nav {
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 8px 12px;
 }
 
-.sidebar-nav button {
+.nav-section {
+  padding: 12px 8px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  font-family: var(--font-mono);
+}
+
+.nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 9px 12px;
-  border-radius: var(--radius, 8px);
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--sidebar-fg, #94a3b8);
-  background: transparent;
+  height: 32px;
+  padding: 0 10px;
+  margin-bottom: 1px;
   border: none;
+  border-radius: var(--radius, 8px);
+  background: transparent;
+  color: var(--sidebar-fg);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: all 150ms ease;
-  font-family: inherit;
   position: relative;
+  transition: background-color var(--transition), color var(--transition);
 }
 
-.sidebar-nav button:hover {
-  background: var(--sidebar-hover, rgba(255, 255, 255, 0.05));
-  color: var(--sidebar-active, #f8fafc);
-}
-
-/* 激活态：2px 左侧渐变光带 + 微tint，替代整块实心色块 */
-.sidebar-nav button.active {
-  background: var(--sidebar-active-bg, rgba(8, 145, 178, 0.08));
-  color: var(--sidebar-active-fg, #0e7490);
-  font-weight: 500;
-}
-
-.sidebar-nav button.active::before {
-  content: "";
-  position: absolute;
-  left: -12px;
-  top: 8px;
-  bottom: 8px;
-  width: 2.5px;
-  border-radius: 2px;
-  background: var(--sidebar-active-rail, linear-gradient(180deg, #06b6d4, #6366f1));
-  box-shadow: 0 0 8px rgba(6, 182, 212, 0.55);
-}
-
-.sidebar-nav button svg {
-  width: 18px;
-  height: 18px;
+.nav-item :deep(.n-icon) {
+  color: currentColor;
+  opacity: 0.8;
   flex-shrink: 0;
 }
 
-.sidebar-nav .sidebar-section {
-  padding: 16px 12px 8px;
-  margin-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 10px;
+.nav-item:hover {
+  background: var(--sidebar-hover);
+  color: #e5e7eb;
+}
+
+.nav-item.active {
+  background: var(--sidebar-active-bg);
+  color: var(--sidebar-active-fg);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.25);
+}
+
+/* 激活态：左侧 2px 实色竖线 */
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--sidebar-active-rail);
 }
 
 .sidebar-footer {
-  padding: 12px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 11px;
-  color: var(--sidebar-fg, #94a3b8);
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  opacity: 0.7;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 16px;
+  border-top: 1px solid var(--sidebar-border);
   flex-shrink: 0;
-  background: var(--sidebar-bg, #0f172a);
+}
+
+.footer-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #4b5563;
+}
+
+.footer-dot.online {
+  background: var(--success);
+}
+
+.footer-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--sidebar-fg);
 }
 
 /* ================================================================
-   Topbar — 玻璃拟态 header（渐变底光 + 模糊）
+   Topbar — 极简顶栏
    ================================================================ */
 .app-topbar {
-  background: var(--topbar-bg, rgba(255, 255, 255, 0.72)) !important;
-  backdrop-filter: blur(18px) saturate(1.4) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(1.4) !important;
-  border-bottom: 1px solid var(--topbar-border, #e2e8f0) !important;
-}
-
-.app-topbar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(90deg, rgba(6, 182, 212, 0.05), transparent 30%, transparent 70%, rgba(99, 102, 241, 0.05));
+  height: 52px;
+  background: var(--topbar-bg) !important;
+  border-bottom: 1px solid var(--topbar-border) !important;
 }
 
 .topbar-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
-  height: 64px;
+  height: 100%;
+  padding: 0 20px;
+  gap: 16px;
 }
 
-.topbar-title-text {
-  font-size: 15px;
+.topbar-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topbar-kicker {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
   font-weight: 600;
-  color: var(--topbar-title, #0f172a);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.topbar-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--topbar-title);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
-/* Topbar 状态指示器 */
-.topbar-actions .status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--muted, #94a3b8);
-  transition: all 0.3s;
-}
-
-.topbar-actions .status-dot.running {
-  background: var(--success, #10b981);
-  animation: pulse-dot 2s infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.topbar-actions .status-text {
-  font-size: 12px;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  color: var(--muted, #64748b);
-}
-
-.status-protocol {
-  opacity: 0.5;
-}
-
-.status-badge {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 8px;
-  border-radius: 10px;
+/* 状态胶囊：极简 pill */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px;
+  margin-right: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
   font-size: 11px;
+  color: var(--muted);
   font-weight: 500;
-  font-family: inherit;
 }
 
-.status-badge--online {
-  background: var(--success-soft, rgba(16, 185, 129, 0.1));
-  color: var(--success, #10b981);
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
 }
 
-.status-badge--offline {
-  background: var(--border-soft, #e2e8f0);
-  color: var(--muted, #64748b);
+.status-pill.online .status-dot {
+  background: var(--success);
+}
+
+.status-addr {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+}
+
+.status-sep {
+  width: 1px;
+  height: 10px;
+  background: var(--border);
+}
+
+.status-label {
+  font-weight: 600;
+}
+
+.status-pill.online .status-label {
+  color: var(--success);
 }
 
 /* ================================================================
-   Icon Button — 通用的 32×32 图标按钮
+   Icon Button — 极简
    ================================================================ */
 .icon-btn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: inline-grid;
   place-items: center;
   border-radius: var(--radius, 8px);
-  border: 1px solid var(--border-soft, #e2e8f0);
-  background: var(--surface, #ffffff);
-  color: var(--muted, #64748b);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: background-color var(--transition), color var(--transition),
+    border-color var(--transition);
 }
 
 .icon-btn:hover {
-  color: var(--fg, #0f172a);
-  border-color: var(--border, #cbd5e1);
-  background: var(--surface-alt, #f1f5f9);
+  color: var(--fg);
+  background: var(--surface-alt);
+  border-color: var(--muted);
 }
 
 .icon-btn--danger:hover {
-  color: var(--danger, #ef4444);
-  border-color: var(--danger, #ef4444);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
 }
 
-/* 主题切换按钮特殊 hover */
-.icon-btn--theme:hover {
-  border-color: var(--accent, #0891b2);
-  color: var(--accent, #0891b2);
+.icon-btn--go:hover {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface));
+}
+
+body.dark .icon-btn:hover {
+  border-color: #262626;
 }
 
 /* ================================================================
-   Content 区域
+   Content & Footer
    ================================================================ */
 .app-content {
-  background: var(--content-bg, #f8fafc);
+  background: var(--content-bg);
 }
 
-/* ================================================================
-   Main Footer
-   ================================================================ */
 .main-footer {
-  padding: 16px 28px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 20px;
   font-size: 11px;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  color: var(--muted, #64748b);
-  background: var(--surface, #ffffff);
+  font-family: var(--font-mono);
+  color: var(--muted);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.footer-sep {
+  opacity: 0.4;
 }
 
 /* ================================================================
@@ -514,61 +609,80 @@ onErrorCaptured((err, _instance, info) => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 400px;
-  text-align: center;
+  min-height: 380px;
   gap: 12px;
   padding: 48px 32px;
-  border-radius: var(--radius-xl, 20px);
-  background: var(--glass-bg, rgba(255,255,255,0.55));
-  backdrop-filter: blur(16px) saturate(1.6);
-  -webkit-backdrop-filter: blur(16px) saturate(1.6);
-  border: 1px solid var(--glass-border, rgba(255,255,255,0.4));
-  box-shadow: var(--shadow-card, 0 8px 32px rgba(0,0,0,0.06)),
-              0 0 0 1px rgba(255,255,255,0.5) inset,
-              var(--shadow-accent, 0 4px 24px rgba(99,102,241,0.10));
-  position: relative;
-  overflow: hidden;
-}
-
-.error-boundary::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #06b6d4, #6366f1);
-  border-radius: 20px 20px 0 0;
-  opacity: 0.85;
+  text-align: center;
+  border-radius: var(--radius-lg, 10px);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
 }
 
 .error-boundary-icon {
-  width: 64px;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(6,182,212,0.12), rgba(99,102,241,0.12));
-  border: 1px solid rgba(99,102,241,0.18);
-  box-shadow: 0 0 20px rgba(99,102,241,0.15);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
 }
 
 .error-boundary-icon svg {
-  width: 32px;
-  height: 32px;
+  width: 20px;
+  height: 20px;
 }
 
 .error-boundary-title {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--fg, #0f172a);
-  margin: 0;
+  color: var(--fg);
 }
 
 .error-boundary-message {
-  font-size: 13px;
-  color: var(--muted, #64748b);
-  max-width: 400px;
+  font-size: 12.5px;
+  color: var(--muted);
+  max-width: 420px;
   word-break: break-all;
-  margin: 0;
+}
+
+@media (max-width: 680px) {
+  .app-topbar {
+    height: 48px;
+  }
+
+  .topbar-inner {
+    padding: 0 14px;
+    gap: 8px;
+  }
+
+  .topbar-kicker,
+  .status-sep,
+  .status-label {
+    display: none;
+  }
+
+  .status-pill {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .status-addr {
+    max-width: 128px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .main-footer {
+    justify-content: flex-start;
+    overflow: hidden;
+    white-space: nowrap;
+    padding: 0 14px;
+  }
+
+  .main-footer span:nth-of-type(n + 2) {
+    display: none;
+  }
 }
 </style>

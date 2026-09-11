@@ -110,9 +110,9 @@ function delay(ms: number): Promise<void> {
   width: 100%;
   height: 100%;
   background:
-    radial-gradient(640px 380px at 80% -10%, rgba(99, 102, 241, 0.22), transparent 60%),
-    radial-gradient(560px 340px at -10% 110%, rgba(6, 182, 212, 0.18), transparent 60%),
-    linear-gradient(135deg, #0a1220 0%, #0f172a 60%, #101826 100%);
+    radial-gradient(640px 380px at 80% -10%, rgba(99, 102, 241, 0.10), transparent 60%),
+    radial-gradient(560px 340px at -10% 110%, rgba(6, 182, 212, 0.08), transparent 60%),
+    #0f141c;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -138,7 +138,6 @@ function delay(ms: number): Promise<void> {
   width: 88px;
   height: 88px;
   margin: 0 auto 24px;
-  filter: drop-shadow(0 8px 24px rgba(6, 182, 212, 0.35));
   animation: logoFloat 2.6s ease-in-out infinite;
 }
 
@@ -209,7 +208,6 @@ function delay(ms: number): Promise<void> {
 .spinner {
   display: inline-block;
   animation: spin 1s linear infinite;
-  text-shadow: 0 0 8px rgba(34, 211, 238, 0.8);
 }
 
 @keyframes spin {

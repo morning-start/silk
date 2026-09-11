@@ -59,3 +59,73 @@ const emit = defineEmits<{
     <slot name="after" />
   </div>
 </template>
+
+<style scoped>
+.app-page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg, #0a0a0a);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  gap: 12px;
+  padding: 48px 32px;
+  text-align: center;
+  border-radius: var(--radius-lg, 10px);
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border, #e5e5e5);
+}
+
+.error-icon {
+  color: var(--danger, #dc2626);
+}
+
+.error-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg, #0a0a0a);
+  margin: 0;
+}
+
+.error-desc {
+  font-size: 12.5px;
+  color: var(--muted, #737373);
+  margin: 0;
+  max-width: 360px;
+}
+</style>
