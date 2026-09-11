@@ -45,6 +45,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { getVersion } from '@tauri-apps/api/app';
 
 interface LoadingStep {
   text: string;
@@ -52,12 +53,9 @@ interface LoadingStep {
   current: boolean;
 }
 
-withDefaults(defineProps<{
+defineProps<{
   visible: boolean;
-  version?: string;
-}>(), {
-  version: '1.0.0',
-});
+}>();
 
 const emit = defineEmits<{
   (e: 'complete'): void;
@@ -69,7 +67,10 @@ const loadingSteps = ref<LoadingStep[]>([
   { text: '准备就绪', completed: false, current: false },
 ]);
 
+const version = ref('');
+
 onMounted(async () => {
+  version.value = await getVersion();
   await simulateLoading();
 });
 
@@ -108,7 +109,10 @@ function delay(ms: number): Promise<void> {
   left: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  background:
+    radial-gradient(640px 380px at 80% -10%, rgba(99, 102, 241, 0.22), transparent 60%),
+    radial-gradient(560px 340px at -10% 110%, rgba(6, 182, 212, 0.18), transparent 60%),
+    linear-gradient(135deg, #0a1220 0%, #0f172a 60%, #101826 100%);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -131,9 +135,16 @@ function delay(ms: number): Promise<void> {
 }
 
 .logo-icon {
-  width: 80px;
-  height: 80px;
-  margin: 0 auto 20px;
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 24px;
+  filter: drop-shadow(0 8px 24px rgba(6, 182, 212, 0.35));
+  animation: logoFloat 2.6s ease-in-out infinite;
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
 }
 
 .logo-icon svg {
@@ -146,6 +157,10 @@ function delay(ms: number): Promise<void> {
   font-weight: 600;
   margin: 0 0 8px 0;
   letter-spacing: 2px;
+  background: linear-gradient(135deg, #22d3ee, #818cf8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .app-tagline {
@@ -178,12 +193,12 @@ function delay(ms: number): Promise<void> {
 
 .loading-step.completed {
   opacity: 1;
-  color: #10b981;
+  color: #34d399;
 }
 
 .loading-step.current {
   opacity: 1;
-  color: #06b6d4;
+  color: #22d3ee;
 }
 
 .step-icon {
@@ -194,6 +209,7 @@ function delay(ms: number): Promise<void> {
 .spinner {
   display: inline-block;
   animation: spin 1s linear infinite;
+  text-shadow: 0 0 8px rgba(34, 211, 238, 0.8);
 }
 
 @keyframes spin {
@@ -202,7 +218,8 @@ function delay(ms: number): Promise<void> {
 }
 
 .version-info {
-  color: #475569;
+  color: #64748b;
   font-size: 12px;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
 }
 </style>

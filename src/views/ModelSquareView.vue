@@ -417,13 +417,27 @@ watch(
               <NTag size="tiny" type="success" v-if="item.enabled">启用</NTag>
               <NTag size="tiny" type="warning" v-else>禁用</NTag>
             </div>
+            <span class="mc-channels-count" v-if="item.channels">
+              {{ item.channels.length }} 渠道
+            </span>
           </div>
 
           <div class="mc-desc" v-if="item.description">{{ item.description }}</div>
 
-          <div class="mc-stats" v-if="item.channels">
-            <span>渠道 <span class="num">{{ item.channels.length }}</span></span>
+          <div class="mc-specs" v-if="item.max_context_tokens || item.max_output_tokens || item.max_input_tokens">
+            <template v-if="item.max_input_tokens">
+              <span>输入 <span class="num">{{ formatTokens(item.max_input_tokens) }}</span></span>
+              <span class="sep">·</span>
+            </template>
+            <template v-if="item.max_context_tokens">
+              <span>上下文 <span class="num">{{ formatTokens(item.max_context_tokens) }}</span></span>
+              <span v-if="item.max_context_tokens && item.max_output_tokens" class="sep">·</span>
+            </template>
+            <template v-if="item.max_output_tokens">
+              <span>输出 <span class="num">{{ formatTokens(item.max_output_tokens) }}</span></span>
+            </template>
           </div>
+
           <div class="mc-channels" v-if="item.channels && item.channels.length > 0">
             <div
               v-for="c in item.channels.slice(0, 3)"
@@ -439,20 +453,6 @@ watch(
             <NTag v-if="item.channels.length > 3" size="tiny" round>
               +{{ item.channels.length - 3 }}
             </NTag>
-          </div>
-
-          <div class="mc-specs">
-            <template v-if="item.max_input_tokens">
-              <span>输入 <span class="num">{{ formatTokens(item.max_input_tokens) }}</span></span>
-              <span class="sep">·</span>
-            </template>
-            <template v-if="item.max_context_tokens">
-              <span>上下文 <span class="num">{{ formatTokens(item.max_context_tokens) }}</span></span>
-              <span class="sep">·</span>
-            </template>
-            <template v-if="item.max_output_tokens">
-              <span>输出 <span class="num">{{ formatTokens(item.max_output_tokens) }}</span></span>
-            </template>
           </div>
 
           <div class="mc-caps" v-if="item.capabilities && item.capabilities.length > 0">
@@ -573,7 +573,7 @@ watch(
               </NFormItem>
             </template>
 
-            <!-- 步骤 2：权重与参数 -->
+            <!-- 步骤 1：权重与参数 -->
             <template v-else>
               <NFormItem v-if="isWeightedStrategy" label="模型权重">
                 <div style="width: 100%; display: flex; flex-direction: column; gap: 10px">
@@ -684,23 +684,25 @@ watch(
 }
 
 .model-card {
-  border-radius: 12px;
-  transition: box-shadow 0.2s;
+  border-radius: var(--radius-sm, 6px);
+  transition: border-color var(--transition);
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border, #e5e5e5);
 }
 
 .model-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border-color: var(--muted, #a3a3a3);
 }
 
 .model-card.disabled {
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 .mc-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .mc-name-group {
@@ -710,21 +712,24 @@ watch(
 }
 
 .mc-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
+  color: var(--fg, #0a0a0a);
+  letter-spacing: -0.01em;
 }
 
 .mc-desc {
   font-size: 13px;
-  color: var(--text-color-2, #64748b);
+  color: var(--fg-2, #171717);
   margin-bottom: 8px;
   line-height: 1.4;
 }
 
 .mc-stats {
-  font-size: 13px;
-  color: var(--text-color-2, #64748b);
+  font-size: 12px;
+  color: var(--muted, #737373);
   margin-bottom: 6px;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
 }
 
 .mc-channels {
@@ -740,39 +745,41 @@ watch(
   gap: 4px;
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
-  color: var(--accent, #0891b2);
-  font-weight: 500;
-  border: 1px solid rgba(8, 145, 178, 0.15);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 8%, var(--surface));
+  color: var(--fg);
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, var(--surface));
 }
 
 .channel-badge.healthy {
-  background: var(--success-soft, rgba(16, 185, 129, 0.1));
-  color: var(--success, #10b981);
-  border-color: rgba(16, 185, 129, 0.15);
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 20%, var(--surface));
 }
 
 .cb-models {
   font-size: 10px;
-  opacity: 0.8;
+  opacity: 0.75;
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
 }
 
 .mc-specs {
   font-size: 12px;
-  color: var(--text-color-2, #64748b);
+  color: var(--muted, #737373);
   margin-bottom: 6px;
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
 }
 
 .sep {
-  color: var(--border-color, #e2e8f0);
+  color: var(--border, #e5e5e5);
   margin: 0 4px;
 }
 
@@ -787,7 +794,7 @@ watch(
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-  border-top: 1px solid var(--border-color, #e2e8f0);
+  border-top: 1px solid var(--border-soft, #ededed);
   padding-top: 10px;
   margin-top: 4px;
 }
@@ -796,10 +803,9 @@ watch(
 .channel-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   max-height: 280px;
   overflow-y: auto;
-  /* 禁止子项被 flex 压缩（否则超出容器高度时行会被压扁裁切，而不是滚动） */
   align-items: stretch;
 }
 
@@ -807,11 +813,15 @@ watch(
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  border-radius: 8px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  transition: all 0.15s;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border, #e5e5e5);
+  transition: border-color var(--transition);
   overflow: hidden;
   background: var(--card-bg, #ffffff);
+}
+
+.channel-item:hover {
+  border-color: var(--muted, #a3a3a3);
 }
 
 /* 渠道头部行（信息展示，点击展开/收起模型区） */
@@ -820,21 +830,21 @@ watch(
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  min-height: 42px;
+  min-height: 40px;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background var(--transition);
   user-select: none;
 }
 
 .channel-item-head:hover {
-  background: var(--hover-bg, #f8fafc);
+  background: var(--surface-alt, #fafafa);
 }
 
 /* 展开箭头（收起时右指，展开时旋转下指） */
 .channel-arrow {
   font-size: 12px;
-  color: var(--text-color-3, #94a3b8);
-  transition: transform 0.15s ease;
+  color: var(--muted, #737373);
+  transition: transform var(--transition);
   flex-shrink: 0;
 }
 
@@ -846,15 +856,16 @@ watch(
 .channel-expand-hint {
   font-size: 12px;
   font-weight: 600;
-  color: var(--accent, #0891b2);
+  color: var(--fg, #0a0a0a);
   margin-left: auto;
   flex-shrink: 0;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
 }
 
-/* 筛选无匹配渠道：压缩为矮条，淡化提示无匹配（无需文字说明） */
+/* 筛选无匹配渠道：压缩为矮条，淡化提示无匹配 */
 .channel-item.no-match {
-  opacity: 0.45;
-  border-color: var(--border-color, #e2e8f0);
+  opacity: 0.4;
+  border-color: var(--border, #e5e5e5);
 }
 
 .channel-item.no-match .channel-item-head {
@@ -873,8 +884,8 @@ watch(
 
 /* 勾选渠道后内嵌的模型勾选区 */
 .channel-item .cmg-list {
-  border-top: 1px solid var(--border-color, #e2e8f0);
-  background: var(--surface-alt, #f1f5f9);
+  border-top: 1px solid var(--border-soft, #ededed);
+  background: var(--surface-alt, #fafafa);
 }
 
 .channel-item .cmg-item {
@@ -893,6 +904,7 @@ watch(
   font-weight: 600;
   font-size: 13px;
   min-width: 60px;
+  color: var(--fg, #0a0a0a);
 }
 
 .channel-protocols {
@@ -902,14 +914,14 @@ watch(
 
 .channel-models {
   font-size: 12px;
-  color: var(--text-color-2, #64748b);
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  color: var(--muted, #737373);
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
 }
 
 /* 模型分组 */
 .channel-model-group {
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 8px;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: var(--radius-sm, 6px);
   overflow: hidden;
 }
 
@@ -918,18 +930,20 @@ watch(
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: var(--surface-alt, #f1f5f9);
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  background: var(--surface-alt, #fafafa);
+  border-bottom: 1px solid var(--border-soft, #ededed);
 }
 
 .cmg-name {
   font-weight: 600;
   font-size: 13px;
+  color: var(--fg, #0a0a0a);
 }
 
 .cmg-count {
   font-size: 12px;
-  color: var(--text-color-3, #94a3b8);
+  color: var(--muted, #737373);
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
 }
 
 .cmg-weight {
@@ -941,13 +955,13 @@ watch(
 
 .cmg-weight-label {
   font-size: 12px;
-  color: var(--text-color-2, #64748b);
+  color: var(--muted, #737373);
 }
 
 .cmg-empty {
   padding: 12px;
   font-size: 13px;
-  color: var(--text-color-3, #94a3b8);
+  color: var(--muted, #737373);
   text-align: center;
 }
 
@@ -962,8 +976,8 @@ watch(
   gap: 8px;
   padding: 8px 12px;
   cursor: pointer;
-  transition: background 0.12s;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  transition: background var(--transition);
+  border-bottom: 1px solid var(--border-soft, #ededed);
 }
 
 .cmg-item:last-child {
@@ -971,31 +985,31 @@ watch(
 }
 
 .cmg-item:hover {
-  background: var(--hover-bg, #f8fafc);
+  background: var(--surface-alt, #fafafa);
 }
 
 .cmg-item.selected {
-  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .cmg-check {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 4px;
-  border: 1.5px solid #cbd5e1;
+  border: 1.5px solid var(--border, #e5e5e5);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: white;
   flex-shrink: 0;
-  transition: all 0.12s;
+  transition: all var(--transition);
 }
 
 .cmg-item.selected .cmg-check {
-  background: var(--accent, #0891b2);
-  border-color: var(--accent, #0891b2);
+  background: var(--fg, #0a0a0a);
+  border-color: var(--fg, #0a0a0a);
 }
 
 .cmg-check-icon {
@@ -1005,8 +1019,9 @@ watch(
 .cmg-model {
   font-weight: 600;
   font-size: 13px;
-  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
   flex: 1;
+  color: var(--fg-2, #171717);
 }
 
 .cap-checkboxes {
@@ -1021,6 +1036,7 @@ watch(
   gap: 4px;
   font-size: 13px;
   cursor: pointer;
+  color: var(--fg-2, #171717);
 }
 
 /* 向导底部按钮（覆盖 AppFormModal 默认 footer） */
@@ -1029,6 +1045,8 @@ watch(
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft, #ededed);
 }
 
 /* 右侧导航按钮组（上一步/下一步/确认） */
@@ -1041,12 +1059,12 @@ watch(
 /* 步骤切换过渡 */
 .step-fade-enter-active,
 .step-fade-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity var(--transition), transform var(--transition);
 }
 
 .step-fade-enter-from {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(4px);
 }
 
 .step-fade-leave-to {
@@ -1075,24 +1093,25 @@ watch(
 
 .token-option {
   font-size: 12px;
-  padding: 2px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--border-color, #e2e8f0);
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #e5e5e5);
   background: transparent;
-  color: var(--text-color-2, #64748b);
+  color: var(--muted, #737373);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition);
+  font-weight: 500;
 }
 
 .token-option:hover {
-  border-color: var(--accent, #0891b2);
-  color: var(--accent, #0891b2);
+  border-color: var(--fg, #0a0a0a);
+  color: var(--fg, #0a0a0a);
 }
 
 .token-option.active {
-  background: var(--accent-soft, rgba(8, 145, 178, 0.08));
-  border-color: var(--accent, #0891b2);
-  color: var(--accent, #0891b2);
-  font-weight: 500;
+  background: var(--fg, #0a0a0a);
+  border-color: var(--fg, #0a0a0a);
+  color: var(--surface, #ffffff);
+  font-weight: 600;
 }
 </style>

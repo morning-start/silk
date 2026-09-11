@@ -1,65 +1,96 @@
 @import "tailwindcss";
 
-/* ===== CSS Variables (matching design/index.html) ===== */
+/* ================================================================
+   Silk 设计令牌 v2 — 大胆视觉升级
+   渐变主视觉（青 → 靛）+ 玻璃拟态表面 + 辉光阴影 + 大圆角
+   ================================================================ */
 :root {
-  --bg: #f8fafc;
+  /* ---- 中性色（Slate 系，冷调） ---- */
+  --bg: #f4f7fb;
   --surface: #ffffff;
-  --surface-alt: #f1f5f9;
+  --surface-alt: #eef2f8;
   --fg: #0f172a;
   --fg-2: #334155;
   --muted: #64748b;
   --border: #cbd5e1;
   --border-soft: #e2e8f0;
 
+  /* ---- 主强调：青 → 靛 渐变 ---- */
   --accent: #0891b2;
-  --accent-hover: #0e7490;
-  --accent-soft: rgba(8, 145, 178, 0.08);
-  /* 次要强调（信息/链接/选中态），与主强调互补，避免单色系 */
   --accent-2: #6366f1;
-  --accent-2-hover: #4f46e5;
+  --gradient: linear-gradient(135deg, #06b6d4 0%, #6366f1 100%);
+  --gradient-soft: linear-gradient(135deg, rgba(6, 182, 212, 0.12), rgba(99, 102, 241, 0.12));
+  --gradient-hover: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%);
+  --accent-soft: rgba(8, 145, 178, 0.08);
   --accent-2-soft: rgba(99, 102, 241, 0.1);
 
-  /* 侧栏激活态（安静精确：2px 指示条 + 微tint） */
-  --sidebar-active-bg: rgba(8, 145, 178, 0.08);
-  --sidebar-active-fg: #0e7490;
-  --sidebar-active-rail: #0891b2;
+  /* ---- 玻璃拟态 ---- */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-bg-strong: rgba(255, 255, 255, 0.86);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-blur: 18px;
+
+  /* ---- 侧栏（深色渐变玻璃） ---- */
+  --sidebar-bg: linear-gradient(180deg, #0c1626 0%, #0a1220 100%);
+  --sidebar-bg-solid: #0a1220;
+  --sidebar-fg: #94a3b8;
+  --sidebar-active: #f8fafc;
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-active-bg: rgba(6, 182, 212, 0.12);
+  --sidebar-active-fg: #67e8f9;
+  --sidebar-active-rail: linear-gradient(180deg, #06b6d4, #6366f1);
+  --sidebar-width: 240px;
+
+  --topbar-bg: rgba(255, 255, 255, 0.72);
+  --topbar-border: rgba(226, 232, 240, 0.8);
+  --topbar-title: #0f172a;
+  --content-bg: #f4f7fb;
+  --status-bg: #eef2f8;
+  --border-color: #e2e8f0;
+  --text-color-2: #475569;
+  --text-color-3: #64748b;
+  --hover-bg: #f1f5f9;
+  --card-bg: #ffffff;
+
+  /* ---- 圆角（更大、更有现代感） ---- */
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+
+  /* ---- 阴影（辉光 + 分层） ---- */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 12px 24px -6px rgba(15, 23, 42, 0.12), 0 6px 12px -6px rgba(15, 23, 42, 0.08);
+  --shadow-accent: 0 8px 20px -6px rgba(8, 145, 178, 0.4);
+  --shadow-accent-2: 0 8px 24px -6px rgba(99, 102, 241, 0.4);
+
+  /* ---- 动效 ---- */
+  --transition: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-glow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---- Hover Glow 增强 ---- */
+  --glow-accent: 0 0 20px rgba(6, 182, 212, 0.25), 0 0 40px rgba(6, 182, 212, 0.1);
+  --glow-accent-2: 0 0 20px rgba(99, 102, 241, 0.25), 0 0 40px rgba(99, 102, 241, 0.1);
+  --glow-card: 0 8px 32px rgba(6, 182, 212, 0.08), 0 2px 8px rgba(99, 102, 241, 0.06);
+
+  /* ---- Focus Ring ---- */
+  --focus-ring: 0 0 0 3px rgba(6, 182, 212, 0.3);
+  --focus-ring-accent: 0 0 0 3px rgba(99, 102, 241, 0.3);
+
+  /* ---- 滚动条增强 ---- */
+  --scrollbar-thumb-hover: #94a3b8;
+  --scrollbar-thumb-active: #64748b;
 
   --font-mono: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
 
   --success: #10b981;
   --success-soft: rgba(16, 185, 129, 0.1);
-
   --warn: #f59e0b;
   --warn-soft: rgba(245, 158, 11, 0.1);
-
   --danger: #ef4444;
   --danger-soft: rgba(239, 68, 68, 0.1);
-
-  --sidebar-bg: #0f172a;
-  --sidebar-fg: #94a3b8;
-  --sidebar-active: #f8fafc;
-  --sidebar-hover: rgba(255, 255, 255, 0.05);
-  --sidebar-width: 240px;
-
-  --topbar-bg: #ffffff;
-  --topbar-border: #e2e8f0;
-  --topbar-title: #0f172a;
-  --content-bg: #f8fafc;
-  --status-bg: #f1f5f9;
-  --border-color: #e2e8f0;
-  --text-color-2: #475569;
-  --text-color-3: #64748b;
-  --hover-bg: #f8fafc;
-  --card-bg: #ffffff;
-
-  --radius: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-  --transition: 150ms ease;
 }
 
 /* ===== Global Reset ===== */
@@ -81,14 +112,40 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: var(--bg);
 }
 
 /* ===== NLayoutSider ===== */
 .n-layout-sider {
-  background: var(--sidebar-bg) !important;
+  background: transparent !important;
 }
 
-/* ===== Scrollbar ===== */
+/* ===== 内容区氛围光：浅色主题（与暗色一致，极淡的青/靛径向光） ===== */
+.app-content::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(720px 400px at 90% -10%, rgba(99, 102, 241, 0.05), transparent 60%),
+    radial-gradient(560px 320px at -10% 30%, rgba(6, 182, 212, 0.04), transparent 60%);
+  z-index: 0;
+}
+
+/* ===== NaiveUI 表单控件：圆角统一（对齐 --radius） ===== */
+.n-input,
+.n-input-number,
+.n-base-selection,
+.n-base-selection .n-base-selection-label {
+  border-radius: var(--radius, 10px) !important;
+}
+
+.n-input .n-input__border,
+.n-input-number .n-input-number__suffix {
+  border-radius: var(--radius, 10px) !important;
+}
+
+/* ===== Scrollbar（细、圆润） ===== */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -101,10 +158,15 @@ body {
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 3px;
+  transition: background var(--transition);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--scrollbar-thumb-hover, #94a3b8);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-active, #64748b);
 }
 
 /* ===== Monospace ===== */
@@ -112,26 +174,47 @@ body {
   font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace !important;
 }
 
-/* ===== Num styling ===== */
 .num {
   font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace !important;
   font-variant-numeric: tabular-nums;
 }
 
-/* ===== NaiveUI card overrides ===== */
+/* ===== NaiveUI card overrides：玻璃卡片 ===== */
 .n-card {
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-/* 表面收敛：hairline 边框替代阴影，安静、仪器感 */
-.n-card:not(.n-card--bordered-true) {
-  border: 1px solid var(--border-soft, #e2e8f0) !important;
-  box-shadow: none;
+  transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.25s ease;
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--shadow-sm);
 }
 
 .n-card:not(.n-card--bordered-true):hover {
-  border-color: var(--border, #cbd5e1) !important;
-  box-shadow: var(--shadow-sm);
+  border-color: rgba(6, 182, 212, 0.35) !important;
+  box-shadow: var(--shadow), var(--glow-card), 0 0 0 1px rgba(6, 182, 212, 0.06);
+  transform: translateY(-2px);
+}
+
+/* ===== Focus Ring 全局样式 ===== */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--accent, #0891b2);
+}
+
+/* ===== 全局过渡统一 ===== */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color, opacity, transform, box-shadow;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* ===== NButton focus ===== */
+.n-button:focus-visible {
+  box-shadow: var(--focus-ring) !important;
 }
 
 /* ===== Data Table ===== */
@@ -143,14 +226,13 @@ body {
   font-weight: 600 !important;
   font-size: 12px !important;
   color: var(--muted) !important;
-  background: var(--bg) !important;
+  background: rgba(244, 247, 251, 0.8) !important;
 }
 
 .n-data-table .n-data-table-tr--striped {
-  background: #fafbfc !important;
+  background: rgba(250, 251, 252, 0.7) !important;
 }
 
-/* 数据表格行密度收紧，便于快速扫描 */
 .n-data-table .n-data-table-td {
   padding-top: 9px !important;
   padding-bottom: 9px !important;
@@ -162,17 +244,34 @@ body {
 }
 
 /* ===== Button ===== */
-.n-button--primary-type.n-button--quaternary {
-  color: var(--accent);
+.n-button--primary-type {
+  background-image: var(--gradient) !important;
+  border: none !important;
+  box-shadow: 0 2px 8px -2px rgba(8, 145, 178, 0.4);
+  transition: all var(--transition) !important;
 }
 
-/* ===== Modal ===== */
+.n-button--primary-type:not(.n-button--disabled):hover {
+  background-image: var(--gradient-hover) !important;
+  box-shadow: var(--shadow-accent), var(--glow-accent);
+  transform: translateY(-1px);
+}
+
+.n-button--primary-type.n-button--quaternary {
+  background-image: none !important;
+  color: var(--accent);
+  box-shadow: none;
+}
+
+/* ===== Modal（玻璃 + 大圆角） ===== */
 .n-modal {
-  border-radius: var(--radius-xl) !important;
+  border-radius: var(--radius-2xl) !important;
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
 }
 
 .n-modal .n-card {
-  border-radius: var(--radius-xl) !important;
+  border-radius: var(--radius-2xl) !important;
 }
 
 /* ===== Form ===== */
@@ -193,95 +292,146 @@ body {
 
 /* ===== Dark Theme ===== */
 body.dark {
-  --bg: #0b0f19;
-  --surface: #131924;
-  --surface-alt: #1a2232;
-  --fg: #f1f5f9;
-  --fg-2: #cbd5e1;
-  --muted: #94a3b8;
-  --border: #242f41;
-  --border-soft: #1e293b;
-  --accent-soft: rgba(8, 145, 178, 0.15);
+  --bg: #070b14;
+  --surface: #101826;
+  --surface-alt: #151f31;
+  --fg: #eef4fb;
+  --fg-2: #c6d2e4;
+  --muted: #8b9bb4;
+  --border: #26334a;
+  --border-soft: #1b2639;
+  --accent: #22d3ee;
   --accent-2: #818cf8;
-  --accent-2-hover: #a5b4fc;
-  --accent-2-soft: rgba(99, 102, 241, 0.18);
+  --accent-soft: rgba(34, 211, 238, 0.12);
+  --accent-2-soft: rgba(129, 140, 248, 0.14);
+
+  --gradient: linear-gradient(135deg, #06b6d4 0%, #6366f1 100%);
+  --gradient-hover: linear-gradient(135deg, #22d3ee 0%, #818cf8 100%);
+  --gradient-soft: linear-gradient(135deg, rgba(6, 182, 212, 0.14), rgba(99, 102, 241, 0.14));
+
+  --glass-bg: rgba(16, 24, 38, 0.66);
+  --glass-bg-strong: rgba(16, 24, 38, 0.82);
+  --glass-border: rgba(148, 163, 184, 0.14);
+
+  --sidebar-bg: linear-gradient(180deg, #0a1424 0%, #070d18 100%);
+  --sidebar-bg-solid: #070d18;
+  --sidebar-fg: #6f819c;
+  --sidebar-active: #f8fafc;
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active-bg: rgba(34, 211, 238, 0.12);
+  --sidebar-active-fg: #67e8f9;
+  --sidebar-active-rail: linear-gradient(180deg, #06b6d4, #818cf8);
+
+  --topbar-bg: rgba(11, 17, 28, 0.66);
+  --topbar-border: rgba(148, 163, 184, 0.14);
+  --topbar-title: #eef4fb;
+  --content-bg: #070b14;
+  --status-bg: #151f31;
+  --border-color: #26334a;
+  --text-color-2: #a6b4cc;
+  --text-color-3: #7587a3;
+  --hover-bg: #141d2e;
+  --card-bg: #101826;
+
   --success-soft: rgba(16, 185, 129, 0.15);
   --warn-soft: rgba(245, 158, 11, 0.15);
   --danger-soft: rgba(239, 68, 68, 0.15);
-  --sidebar-bg: #070a13;
-  --sidebar-fg: #64748b;
-  --sidebar-active: #f8fafc;
-  --sidebar-active-bg: rgba(34, 211, 238, 0.12);
-  --sidebar-active-fg: #67e8f9;
-  --sidebar-active-rail: #22d3ee;
-  --sidebar-width: 240px;
-  --topbar-bg: #0b0f19;
-  --topbar-border: #1e293b;
-  --topbar-title: #f1f5f9;
-  --content-bg: #0b0f19;
-  --status-bg: #1a2232;
-  --border-color: #2a2a38;
-  --text-color-2: #a0a0b0;
-  --text-color-3: #6b6b7b;
-  --hover-bg: #1a1a24;
-  --card-bg: #1a1a24;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 4px 10px -2px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 14px 32px -8px rgba(0, 0, 0, 0.5);
+  --shadow-accent: 0 8px 24px -8px rgba(34, 211, 238, 0.45);
+
+  --glow-accent: 0 0 24px rgba(34, 211, 238, 0.3), 0 0 48px rgba(34, 211, 238, 0.1);
+  --glow-accent-2: 0 0 24px rgba(129, 140, 248, 0.3), 0 0 48px rgba(129, 140, 248, 0.1);
+  --glow-card: 0 8px 32px rgba(34, 211, 238, 0.1), 0 2px 8px rgba(129, 140, 248, 0.06);
+
+  --focus-ring: 0 0 0 3px rgba(34, 211, 238, 0.3);
+  --focus-ring-accent: 0 0 0 3px rgba(129, 140, 248, 0.3);
 }
 
-/* Dark theme topbar — blurred dark glass */
-body.dark .app-topbar {
-  background: rgba(11, 15, 25, 0.88) !important;
-  backdrop-filter: blur(14px) !important;
+/* 暗色下内容区极淡的渐变氛围光 */
+body.dark .app-content::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(640px 360px at 85% -10%, rgba(99, 102, 241, 0.08), transparent 60%),
+    radial-gradient(520px 300px at -10% 20%, rgba(6, 182, 212, 0.06), transparent 60%);
+  z-index: 0;
+}
+
+/* 暗色卡片玻璃 */
+body.dark .n-card {
+  background: var(--glass-bg) !important;
 }
 
 body.dark .icon-btn {
-  background: transparent !important;
-  border-color: #242f41 !important;
-}
-
-body.dark .n-card:not(.n-card--bordered-true) {
-  border: 1px solid var(--border-soft, #1e293b) !important;
-  box-shadow: none;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: var(--border) !important;
 }
 
 body.dark .n-data-table th {
-  background: var(--surface-alt) !important;
+  background: rgba(21, 31, 49, 0.7) !important;
   color: var(--muted) !important;
 }
 
 body.dark .n-data-table .n-data-table-tr--striped {
-  background: #1a1a24 !important;
+  background: rgba(21, 26, 38, 0.6) !important;
 }
 
 body.dark .n-data-table .n-data-table-tr {
-  background: #16161e !important;
+  background: transparent !important;
 }
 
 body.dark .n-data-table .n-data-table-tr:hover {
-  background: #22222f !important;
+  background: rgba(30, 41, 59, 0.7) !important;
 }
 
 body.dark ::-webkit-scrollbar-thumb {
-  background: #3a3a4a;
+  background: #2c3a52;
 }
 
 body.dark ::-webkit-scrollbar-thumb:hover {
-  background: #4a4a5a;
+  background: #3a4a66;
+}
+
+body.dark ::-webkit-scrollbar-thumb:active {
+  background: #4a5a76;
+}
+
+/* ===== 页面加载骨架屏动画 ===== */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-alt) 25%, var(--bg) 50%, var(--surface-alt) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius, 8px);
 }
 
 /* ===== Toolbar helpers ===== */
 .mb-16 { margin-bottom: 16px; }
 
-/* ===== 页面切换过渡（安静 150ms 淡入） ===== */
+/* ===== 页面切换过渡（增强：淡入 + 轻微上移） ===== */
 .page-fade-enter-active,
 .page-fade-leave-active {
-  transition: opacity 150ms ease;
+  transition: opacity 200ms var(--transition), transform 200ms var(--transition);
 }
-.page-fade-enter-from,
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
 .page-fade-leave-to {
   opacity: 0;
+  transform: translateY(-4px);
 }
 
-/* ===== Empty State (各页面的空数据引导) ===== */
+/* ===== Empty State ===== */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -333,7 +483,7 @@ body.dark ::-webkit-scrollbar-thumb:hover {
   max-width: 400px;
 }
 
-/* ===== Page Layout (各页面通用) ===== */
+/* ===== Page Layout ===== */
 .toolbar {
   display: flex;
   justify-content: space-between;
@@ -349,6 +499,7 @@ body.dark ::-webkit-scrollbar-thumb:hover {
 .toolbar-right {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 .page-title {
   font-size: 20px;
@@ -356,6 +507,10 @@ body.dark ::-webkit-scrollbar-thumb:hover {
   letter-spacing: -0.01em;
   margin: 0;
   color: var(--fg, #0f172a);
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .page-desc {
@@ -368,7 +523,8 @@ body.dark ::-webkit-scrollbar-thumb:hover {
 
 /* ===== Card ===== */
 .table-card {
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
 }
 
 /* ===== Form Row ===== */

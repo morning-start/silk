@@ -1,12 +1,12 @@
-import {
-  check,
-} from "@tauri-apps/plugin-updater";
+import { check } from "@tauri-apps/plugin-updater";
 
 export interface UpdateInfo {
   available: boolean;
   version?: string;
   date?: string;
   body?: string;
+  /** 检查失败时的错误信息（区别于"无更新"） */
+  error?: string;
 }
 
 /**
@@ -14,7 +14,7 @@ export interface UpdateInfo {
  */
 export async function checkForUpdates(): Promise<UpdateInfo> {
   try {
-    const update = await check();
+    const update = await check({ timeout: 15000 });
     if (update) {
       return {
         available: true,
@@ -26,7 +26,10 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
     return { available: false };
   } catch (error) {
     console.error("检查更新失败:", error);
-    return { available: false };
+    return {
+      available: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -47,12 +50,13 @@ export async function downloadAndInstall(
     await update.downloadAndInstall((event) => {
       switch (event.event) {
         case "Started":
+          downloaded = 0;
           contentLength = event.data.contentLength ?? 0;
           break;
         case "Progress":
           downloaded += event.data.chunkLength;
           if (contentLength > 0 && onProgress) {
-            onProgress(downloaded / contentLength);
+            onProgress(Math.min(downloaded / contentLength, 1));
           }
           break;
         case "Finished":

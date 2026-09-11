@@ -248,18 +248,41 @@ watch(
   width: 100%;
 }
 
-/* ===== Welcome Card — design spec ===== */
+/* ===== Welcome Card — 渐变玻璃欢迎区 ===== */
 .welcome-card {
-  background: linear-gradient(135deg, #f8fafc, #f1f5f9);
-  border: 1px solid var(--border-soft, #e2e8f0);
-  border-radius: var(--radius-lg, 12px);
+  background:
+    radial-gradient(480px 280px at 0% 0%, rgba(6, 182, 212, 0.12), transparent 60%),
+    radial-gradient(420px 260px at 100% 100%, rgba(99, 102, 241, 0.1), transparent 60%),
+    var(--glass-bg, rgba(255, 255, 255, 0.72));
+  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.4);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.6));
+  border-radius: var(--radius-xl, 20px);
+  box-shadow: var(--shadow-card, 0 8px 32px rgba(0,0,0,0.06)),
+              0 0 0 1px rgba(255,255,255,0.5) inset,
+              var(--shadow-accent, 0 4px 24px rgba(99,102,241,0.08));
+  position: relative;
+  overflow: hidden;
+}
+
+/* 顶部一条渐变光带，呼应侧栏激活态 */
+.welcome-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--gradient, linear-gradient(135deg, #06b6d4, #6366f1));
+  opacity: 0.9;
+  box-shadow: 0 2px 12px rgba(6,182,212,0.3), 0 2px 12px rgba(99,102,241,0.3);
 }
 
 .welcome-body {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
   gap: 24px;
-  padding: 24px 28px;
+  padding: 28px 32px;
 }
 
 .welcome-left {
@@ -304,12 +327,32 @@ watch(
   margin-top: 18px;
 }
 
-/* ===== Console Panel — design spec ===== */
+/* ===== Console Panel — 深色渐变玻璃 ===== */
 .console-panel {
-  border-radius: var(--radius-lg, 12px);
-  background: var(--sidebar-bg, #0f172a);
+  border-radius: var(--radius-xl, 16px);
+  background:
+    radial-gradient(280px 180px at 100% 0%, rgba(99, 102, 241, 0.18), transparent 60%),
+    radial-gradient(240px 160px at 0% 100%, rgba(6, 182, 212, 0.14), transparent 60%),
+    var(--sidebar-bg-solid, #0a1220);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 18px;
+  box-shadow: var(--shadow-lg, 0 12px 24px -6px rgba(15,23,42,0.12)),
+              0 0 0 1px rgba(255,255,255,0.05) inset;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 面板左上角渐变角标，呼应全局光带 */
+.console-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 64px;
+  height: 3px;
+  background: var(--gradient, linear-gradient(135deg, #06b6d4, #6366f1));
+  opacity: 0.95;
+  box-shadow: 0 0 10px rgba(6,182,212,0.4), 0 0 10px rgba(99,102,241,0.4);
 }
 
 .console-panel-head {
@@ -339,10 +382,16 @@ watch(
 }
 
 .console-metric {
-  padding: 10px 12px;
-  border-radius: var(--radius, 8px);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 12px 14px;
+  border-radius: var(--radius, 10px);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.console-metric:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .console-metric .label {
@@ -361,7 +410,7 @@ watch(
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-/* ===== Stat Grid — design spec ===== */
+/* ===== Stat Grid — 玻璃统计卡 ===== */
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -370,11 +419,42 @@ watch(
 }
 
 .stat-card {
-  background: var(--surface, #ffffff);
-  border: 1px solid var(--border-soft, #e2e8f0);
-  border-radius: var(--radius-lg, 12px);
-  padding: 20px;
-  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
+  background: var(--glass-bg, rgba(255, 255, 255, 0.72));
+  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.4);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.6));
+  border-radius: var(--radius-xl, 16px);
+  padding: 22px 24px;
+  box-shadow: var(--shadow-card, 0 8px 32px rgba(0,0,0,0.06)),
+              0 0 0 1px rgba(255,255,255,0.5) inset;
+  transition: transform var(--transition, 200ms ease), box-shadow var(--transition, 200ms ease), border-color var(--transition, 200ms ease);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 卡片左侧渐变竖条 */
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(180deg, #06b6d4, #6366f1);
+  opacity: 0;
+  transition: opacity var(--transition, 200ms ease);
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(6, 182, 212, 0.25);
+  box-shadow: var(--shadow, 0 8px 24px -4px rgba(0,0,0,0.1)),
+              0 0 0 1px rgba(6, 182, 212, 0.08),
+              0 8px 32px rgba(99,102,241,0.08);
+}
+
+.stat-card:hover::after {
+  opacity: 1;
 }
 
 .stat-label {
@@ -416,15 +496,28 @@ watch(
 
 /* ===== Card — design spec ===== */
 .card {
-  background: var(--surface, #ffffff);
-  border: 1px solid var(--border-soft, #e2e8f0);
-  border-radius: var(--radius-lg, 12px);
-  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
+  background: var(--glass-bg, rgba(255, 255, 255, 0.72));
+  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.4);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.6));
+  border-radius: var(--radius-xl, 16px);
+  box-shadow: var(--shadow-card, 0 8px 32px rgba(0,0,0,0.06)),
+              0 0 0 1px rgba(255,255,255,0.5) inset;
   overflow: hidden;
+  position: relative;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #06b6d4, #6366f1);
+  opacity: 0.6;
 }
 
 .card-header {
-  padding: 16px 20px;
+  padding: 16px 24px;
   border-bottom: 1px solid var(--border-soft, #e2e8f0);
   display: flex;
   align-items: center;
@@ -572,10 +665,23 @@ watch(
   height: 6px;
   border-radius: 50%;
   display: inline-block;
+  flex-shrink: 0;
 }
 
-.status-dot-sm.online { background: var(--success, #10b981); }
-.status-dot-sm.offline { background: var(--muted, #94a3b8); }
+.status-dot-sm.online {
+  background: var(--success, #10b981);
+  box-shadow: 0 0 0 0 rgba(16,185,129,0.4);
+  animation: pulse-online 2s ease-in-out infinite;
+}
+
+.status-dot-sm.offline {
+  background: var(--muted, #94a3b8);
+}
+
+@keyframes pulse-online {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(16,185,129,0); }
+}
 
 /* ===== Utilities ===== */
 .text-mono {

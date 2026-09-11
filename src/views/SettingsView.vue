@@ -218,12 +218,11 @@ onMounted(() => {
       </div>
     </div>
 
-    <NAlert type="info" :bordered="false" class="settings-alert">
-      Silk 的设置优先服务本地桌面使用。这里保留网关基础能力，并补充关闭窗口与自动启动网关等桌面行为。
-    </NAlert>
-
     <!-- 网关基础 -->
     <NCard :bordered="false" class="settings-card" size="small" title="网关基础">
+      <NAlert type="info" :bordered="false" class="card-intro" style="margin-bottom: 12px">
+        Silk 的设置优先服务本地桌面使用。这里保留网关基础能力，并补充关闭窗口与自动启动网关等桌面行为。
+      </NAlert>
       <NForm ref="formRef" :model="formValue" label-placement="left" label-width="100">
         <div class="form-row">
           <NFormItem label="监听地址" style="flex: 1">
@@ -268,7 +267,7 @@ onMounted(() => {
           </NFormItem>
         </div>
         <NText depth="3" class="settings-help">
-          开启“开机自启”后，Silk 会注册到系统启动项；开启“关闭到后台”后，关闭窗口会隐藏应用而不是直接退出；开启“启动后自动开网关”后，Silk 启动时会自动恢复本地网关。
+          开启"开机自启"后，Silk 会注册到系统启动项；开启"关闭到后台"后，关闭窗口会隐藏应用而不是直接退出；开启"启动后自动开网关"后，Silk 启动时会自动恢复本地网关。
         </NText>
       </NForm>
     </NCard>
@@ -276,83 +275,110 @@ onMounted(() => {
     <NCard :bordered="false" class="settings-card" size="small" title="配置与数据">
       <div class="data-actions">
         <div class="data-action">
-          <div>
+          <div class="da-content">
             <div class="data-action-title">导出配置</div>
             <div class="data-action-desc">导出当前网关设置、渠道、路由、模型映射与网关 Key；文件包含敏感密钥，请妥善保管。</div>
           </div>
-          <NButton size="small" @click="handleExportConfig">导出配置</NButton>
+          <NButton size="small" @click="handleExportConfig">导出</NButton>
         </div>
         <div class="data-action">
-          <div>
+          <div class="da-content">
             <div class="data-action-title">导入配置</div>
             <div class="data-action-desc">从已有配置文件恢复 Silk 配置，不会清理历史日志。</div>
           </div>
-          <NButton size="small" @click="handleImportConfig">导入配置</NButton>
+          <NButton size="small" @click="handleImportConfig">导入</NButton>
         </div>
         <div class="data-action">
-          <div>
+          <div class="da-content">
             <div class="data-action-title">备份数据库</div>
             <div class="data-action-desc">生成当前 SQLite 数据库副本，适合迁移或长期留档。</div>
           </div>
-          <NButton size="small" @click="handleBackupDatabase">备份数据库</NButton>
+          <NButton size="small" @click="handleBackupDatabase">备份</NButton>
         </div>
         <div class="data-action">
-          <div>
+          <div class="da-content">
             <div class="data-action-title">恢复数据库</div>
             <div class="data-action-desc">从已有 `.db` 备份恢复业务数据，不会改动当前桌面设置文件。</div>
           </div>
-          <NButton size="small" type="warning" @click="handleRestoreDatabase">恢复数据库</NButton>
+          <NButton size="small" type="warning" @click="handleRestoreDatabase">恢复</NButton>
         </div>
       </div>
-</NCard>
+    </NCard>
 
   </div>
 </template>
 <style scoped>
 .settings-page {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .settings-card {
-  border-radius: 12px;
-  margin-bottom: 16px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border, #e5e5e5);
 }
 
-.settings-alert {
-  margin-bottom: 16px;
-  border-radius: 12px;
+.card-intro {
+  border-radius: var(--radius-sm, 6px);
 }
 
 .settings-help {
   display: block;
   margin-top: 4px;
   font-size: 12px;
+  color: var(--muted, #737373);
 }
 
 .data-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
 }
 
 .data-action {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 10px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--card-bg, #ffffff);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.data-action:hover {
+  border-color: var(--muted, #737373);
+  background: var(--surface-alt, #fafafa);
+}
+
+.da-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .data-action-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   margin-bottom: 4px;
+  color: var(--fg, #0a0a0a);
 }
 
 .data-action-desc {
   font-size: 12px;
-  color: var(--text-color-3, #94a3b8);
+  color: var(--muted, #737373);
+  line-height: 1.4;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.form-row:last-child {
+  margin-bottom: 0;
 }
 </style>

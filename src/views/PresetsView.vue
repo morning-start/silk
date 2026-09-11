@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { NButton, NInput, NInputNumber, NModal, NSelect, NTag, useDialog, useMessage } from "naive-ui";
 import { presetsApi } from "../api/presets";
 import { providersApi } from "../api/providers";
-import type { AgentTypeInfo, Preset, ProviderModelInfo } from "../api";
+import type { AgentTypeInfo, Preset, Provider, ProviderModelInfo } from "../api";
 import { formSpecFor, officialCredentialFields, type HarnessField, type HarnessFormSpec } from "../config/harnessForms";
 
 const message = useMessage();
@@ -25,6 +25,91 @@ const officialModal = ref(false);
 const officialEditing = ref<Preset | null>(null);
 const officialName = ref("");
 const officialCredential = ref<Record<string, string>>({});
+// 渠道快速填充（新建/编辑弹窗：选已有渠道 → 自动填端点/Key/协议选择器，直连该渠道免手填）
+const channels = ref<Provider[]>([]);
+const channelsLoading = ref(false);
+const channelFillId = ref<string | null>(null);
+const channelFillHint = ref<string | null>(null);
+
+/** 各 harness 表单的端点/Key 字段 + 原生协议（对齐 harnessForms.ts 字段契约与 AgentType 能力表） */
+const channelFillTargets: Record<string, { endpointKey: string; apiKeyField: string; nativeProtocols: string[] }> = {
+  claude_code: { endpointKey: "ANTHROPIC_BASE_URL", apiKeyField: "ANTHROPIC_AUTH_TOKEN", nativeProtocols: ["messages"] },
+  codex: { endpointKey: "base_url", apiKeyField: "api_key", nativeProtocols: ["responses"] },
+  opencode: { endpointKey: "baseURL", apiKeyField: "apiKey", nativeProtocols: ["openai", "responses", "messages", "gemini", "bedrock"] },
+  hermes: { endpointKey: "base_url", apiKeyField: "api_key", nativeProtocols: ["openai", "responses", "messages", "bedrock"] },
+  gemini_cli: { endpointKey: "GOOGLE_GEMINI_BASE_URL", apiKeyField: "GEMINI_API_KEY", nativeProtocols: ["gemini"] },
+};
+/** 多协议 harness：渠道协议 → 表单协议选择器取值（直连该渠道时的原生协议） */
+const OPENCODE_SDK_BY_PROTOCOL: Record<string, string> = {
+  openai: "@ai-sdk/openai-compatible",
+  responses: "@ai-sdk/openai",
+  messages: "@ai-sdk/anthropic",
+  gemini: "@ai-sdk/google",
+  bedrock: "@ai-sdk/amazon-bedrock",
+};
+const HERMES_MODE_BY_PROTOCOL: Record<string, string> = {
+  openai: "chat_completions",
+  responses: "codex_responses",
+  messages: "anthropic_messages",
+  bedrock: "bedrock_converse",
+};
+const channelOptions = computed(() =>
+  channels.value.map((channel) => ({
+    label: channel.protocols.length ? `${channel.name}（${channel.protocols.join("/")}）` : channel.name,
+    value: channel.id,
+  })),
+);
+
+async function loadChannels() {
+  if (channelsLoading.value) return;
+  channelsLoading.value = true;
+  try {
+    channels.value = await providersApi.list();
+  } catch (error: any) {
+    message.error(error?.message || "加载渠道列表失败");
+  } finally {
+    channelsLoading.value = false;
+  }
+}
+
+function applyChannelFill(channelId: string | null) {
+  channelFillId.value = channelId;
+  if (!channelId) {
+    channelFillHint.value = null;
+    return;
+  }
+  const channel = channels.value.find((item) => item.id === channelId);
+  if (!channel) return;
+  const target = channelFillTargets[activeTab.value];
+  channelFillHint.value = null;
+  if (!target) {
+    message.warning("该 Agent 类型不支持渠道快速填充");
+    return;
+  }
+  // 端点：claude_code 自动去除尾部 /v1（与表单 toSettings 行为一致），其余按原样填入
+  let endpoint = (channel.api_base_url || "").trim();
+  if (activeTab.value === "claude_code") endpoint = endpoint.replace(/\/+$/, "").replace(/\/v1$/i, "");
+  // Key：优先取启用中的第一个，其次取第一个
+  const apiKey = channel.keys.find((key) => key.enabled)?.value ?? channel.keys[0]?.value ?? "";
+  formValues.value[target.endpointKey] = endpoint;
+  formValues.value[target.apiKeyField] = apiKey;
+  // 多协议 harness（opencode/hermes）：按渠道协议联动协议选择器
+  if (activeTab.value === "opencode") {
+    const sdk = channel.protocols.map((protocol) => OPENCODE_SDK_BY_PROTOCOL[protocol]).find(Boolean);
+    if (sdk) formValues.value.npm = sdk;
+  }
+  if (activeTab.value === "hermes") {
+    const mode = channel.protocols.map((protocol) => HERMES_MODE_BY_PROTOCOL[protocol]).find(Boolean);
+    if (mode) formValues.value.api_mode = mode;
+  }
+  // 协议兼容提示：单协议 harness 若渠道协议不含原生协议，直连会失败
+  const compatible = channel.protocols.length === 0 || channel.protocols.some((protocol) => target.nativeProtocols.includes(protocol));
+  if (!compatible) {
+    channelFillHint.value = `该渠道协议为 ${channel.protocols.join("/")}，与 ${tabLabel(activeTab.value)} 原生协议（${target.nativeProtocols.join("/")}）不匹配，直连可能失败；经 silk 网关转换则无此问题`;
+  }
+  message.success(`已从渠道「${channel.name}」填充端点与 Key，可点击「获取模型」加载模型列表`);
+  channelFillId.value = null; // 每次选择后复位，便于再次选择
+}
 
 const PROTOCOL_LABELS: Record<string, string> = {
   openai: "OpenAI Chat",
@@ -339,12 +424,15 @@ async function openAdd() {
   formName.value = "";
   fetchedModels.value = [];
   modelsFetched.value = false;
+  channelFillId.value = null;
+  channelFillHint.value = null;
   try {
     const defaults = await presetsApi.getDefaults(activeTab.value);
     formValues.value = { ...defaults.values };
   } catch {
     formValues.value = {};
   }
+  void loadChannels();
   showModal.value = true;
 }
 
@@ -354,6 +442,9 @@ function openEdit(preset: Preset) {
   formValues.value = formSpecFor(preset.agent_type)?.fromSettings(preset.settings_config) || {};
   fetchedModels.value = [];
   modelsFetched.value = false;
+  channelFillId.value = null;
+  channelFillHint.value = null;
+  void loadChannels();
   showModal.value = true;
 }
 
@@ -536,6 +627,11 @@ onMounted(async () => {
       <template v-if="spec">
         <p v-if="nativeProtocolHint()" class="official-tip">{{ nativeProtocolHint() }}</p>
         <div class="form-item">
+          <label>从渠道快速填充（可选）</label>
+          <NSelect v-model:value="channelFillId" :options="channelOptions" filterable clearable :loading="channelsLoading" :disabled="channels.length === 0" :placeholder="channels.length === 0 ? '暂无渠道，请先在「渠道」页配置' : '选择已有渠道，自动填充 API 端点与 Key'" @update:value="applyChannelFill" />
+          <p v-if="channelFillHint" class="channel-fill-hint">{{ channelFillHint }}</p>
+        </div>
+        <div class="form-item">
           <label>预设名称</label>
           <NInput v-model:value="formName" placeholder="请输入预设名称" @keydown.enter="save(false)" />
         </div>
@@ -605,28 +701,68 @@ onMounted(async () => {
 
 <style scoped>
 .presets-page { width: 100%; }
-.agent-tabs { display: flex; justify-content: center; gap: 6px; margin-bottom: 24px; padding: 4px; background: var(--surface-alt, #f1f5f9); border-radius: 12px; }
+.agent-tabs { display: flex; justify-content: center; gap: 6px; margin-bottom: 24px; padding: 4px; background: var(--glass-bg, rgba(255,255,255,0.5)); backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.4); -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.4); border: 1px solid var(--glass-border, rgba(255,255,255,0.6)); border-radius: var(--radius-xl, 14px); box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05)); }
 .agent-tab { min-width: 100px; padding: 10px 20px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; font-family: inherit; }
 .agent-tab:hover { background: var(--hover-bg, #e2e8f0); }
-.agent-tab.active { background: #18a058; color: #fff; font-weight: 600; }
+.agent-tab.active { background: var(--gradient, linear-gradient(135deg, #06b6d4, #6366f1)); color: #fff; font-weight: 600; box-shadow: var(--shadow-accent, 0 8px 20px -6px rgba(8, 145, 178, 0.4)); }
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
 .page-header h2 { margin: 0 0 4px; font-size: 18px; }
 .subtitle, .empty-desc, .fetch-count { color: var(--muted, #94a3b8); font-size: 13px; }
 .subtitle { margin: 0; }
 .preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-.preset-card { padding: 14px; border: 1px solid var(--border-color, #e2e8f0); border-radius: 10px; background: var(--card-bg, #fff); cursor: grab; }
+.preset-card {
+  padding: 16px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-xl, 14px);
+  background: var(--glass-bg, rgba(255,255,255,0.65));
+  backdrop-filter: blur(var(--glass-blur, 16px)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 16px)) saturate(1.4);
+  cursor: grab;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease, background 150ms ease;
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.05)),
+              0 0 0 1px rgba(255,255,255,0.5) inset;
+  position: relative;
+  overflow: hidden;
+}
+
+.preset-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #06b6d4, #6366f1);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.preset-card:hover {
+  border-color: rgba(6, 182, 212, 0.25);
+  box-shadow: var(--shadow, 0 6px 20px -4px rgba(0,0,0,0.08)),
+              0 0 0 1px rgba(6, 182, 212, 0.08);
+  transform: translateY(-2px);
+  background: var(--glass-bg, rgba(255,255,255,0.75));
+}
+
+.preset-card:hover::before {
+  opacity: 0.6;
+}
 .model-list-editor { display: flex; flex-direction: column; gap: 8px; }
 .model-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 110px auto; gap: 6px; align-items: center; }
 @media (max-width: 700px) {
   .model-row { grid-template-columns: 1fr 1fr; }
 }
-.preset-card.active { border-color: #18a058; box-shadow: 0 0 0 1px rgb(24 160 88 / 30%); }
+.preset-card.active {
+  border-color: var(--success, #10b981);
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3),
+              0 0 16px rgba(16, 185, 129, 0.12);
+}
 .preset-card.dragging { opacity: .55; border-style: dashed; }
 .preset-card-head, .preset-actions, .modal-actions, .fetch-row, .role-row { display: flex; align-items: center; }
 .preset-card-head { justify-content: space-between; margin-bottom: 12px; }
 .preset-tags { display: flex; align-items: center; gap: 4px; }
 .preset-desc { margin: 0 0 10px; color: var(--muted, #94a3b8); font-size: 12px; line-height: 1.5; }
 .official-tip { margin: 0 0 10px; color: var(--muted, #94a3b8); font-size: 12px; line-height: 1.6; }
+.channel-fill-hint { margin: 6px 0 0; color: #d03050; font-size: 12px; line-height: 1.6; }
 .preset-name { font-size: 14px; font-weight: 600; }
 .preset-actions, .modal-actions { gap: 6px; }
 .empty-state { padding: 48px 0; text-align: center; }

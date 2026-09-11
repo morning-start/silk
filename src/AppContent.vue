@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, onErrorCaptured } from "vue";
 import { useRouter, useRoute } from "vue-router";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   NLayout,
   NLayoutSider,
@@ -35,6 +36,7 @@ function toggleTheme() {
 
 const isRunning = computed(() => gatewayStore.status?.running ?? false);
 const bindAddress = computed(() => gatewayStore.status?.address ?? "127.0.0.1:1877");
+const appVersion = ref("");
 
 async function startGateway() {
   try {
@@ -63,8 +65,9 @@ async function restartGateway() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   gatewayStore.initStatus();
+  appVersion.value = await getVersion();
 });
 
 // 全局错误边界：捕获子组件渲染错误，显示降级 UI
@@ -116,10 +119,13 @@ onErrorCaptured((err, _instance, info) => {
             <button :class="{ active: route.path === '/settings' }" @click="handleNav('/settings')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置
             </button>
+            <button :class="{ active: route.path === '/about' }" @click="handleNav('/about')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>关于
+            </button>
           </nav>
         </div>
 
-        <div class="sidebar-footer">gateway.silk.io · v1.0.0</div>
+        <div class="sidebar-footer">gateway.silk.io · v{{ appVersion }}</div>
       </div>
     </NLayoutSider>
 
@@ -171,7 +177,12 @@ onErrorCaptured((err, _instance, info) => {
       <NLayoutContent content-style="padding: 28px;" class="app-content">
         <template v-if="errorInfo">
           <div class="error-boundary">
-            <div class="error-boundary-icon">⚠️</div>
+            <div class="error-boundary-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="url(#err-grad)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <defs><linearGradient id="err-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#06b6d4"/><stop offset="100%" stop-color="#6366f1"/></linearGradient></defs>
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
             <h3 class="error-boundary-title">页面渲染出错</h3>
             <p class="error-boundary-message">{{ errorInfo.message }}</p>
             <NButton type="primary" @click="errorInfo = null">重试</NButton>
@@ -188,7 +199,7 @@ onErrorCaptured((err, _instance, info) => {
 
       <!-- Main Footer -->
       <NLayoutFooter bordered class="main-footer">
-        Silk Gateway v1.0.0 · 纯本地私有化多模型中转网关 · 零云端上传数据
+        Silk Gateway v{{ appVersion }} · 纯本地私有化多模型中转网关 · 零云端上传数据
       </NLayoutFooter>
     </NLayout>
   </NLayout>
@@ -226,12 +237,16 @@ onErrorCaptured((err, _instance, info) => {
    ================================================================ */
 .app-sidebar {
   background: var(--sidebar-bg, #0f172a) !important;
+  border-right: 1px solid rgba(148, 163, 184, 0.12) !important;
 }
 
 .sidebar-inner {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  background:
+    radial-gradient(420px 260px at 20% -10%, rgba(6, 182, 212, 0.16), transparent 60%),
+    radial-gradient(360px 280px at 100% 40%, rgba(99, 102, 241, 0.1), transparent 60%);
 }
 
 .sidebar-brand {
@@ -254,9 +269,10 @@ onErrorCaptured((err, _instance, info) => {
 .sidebar-brand h1 .logo-dot {
   width: 10px;
   height: 10px;
-  background: var(--accent, #0891b2);
+  background: var(--gradient, linear-gradient(135deg, #06b6d4, #6366f1));
   border-radius: 3px;
   flex-shrink: 0;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
 }
 
 .sidebar-brand p {
@@ -304,7 +320,7 @@ onErrorCaptured((err, _instance, info) => {
   color: var(--sidebar-active, #f8fafc);
 }
 
-/* 激活态：2px 左侧指示条 + 微tint，替代整块实心色块 */
+/* 激活态：2px 左侧渐变光带 + 微tint，替代整块实心色块 */
 .sidebar-nav button.active {
   background: var(--sidebar-active-bg, rgba(8, 145, 178, 0.08));
   color: var(--sidebar-active-fg, #0e7490);
@@ -317,9 +333,10 @@ onErrorCaptured((err, _instance, info) => {
   left: -12px;
   top: 8px;
   bottom: 8px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--sidebar-active-rail, #0891b2);
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--sidebar-active-rail, linear-gradient(180deg, #06b6d4, #6366f1));
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.55);
 }
 
 .sidebar-nav button svg {
@@ -351,12 +368,21 @@ onErrorCaptured((err, _instance, info) => {
 }
 
 /* ================================================================
-   Topbar — 毛玻璃 header
+   Topbar — 玻璃拟态 header（渐变底光 + 模糊）
    ================================================================ */
 .app-topbar {
-  background: rgba(255, 255, 255, 0.88) !important;
-  backdrop-filter: blur(14px) !important;
-  border-bottom: 1px solid var(--border-soft, #e2e8f0) !important;
+  background: var(--topbar-bg, rgba(255, 255, 255, 0.72)) !important;
+  backdrop-filter: blur(18px) saturate(1.4) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.4) !important;
+  border-bottom: 1px solid var(--topbar-border, #e2e8f0) !important;
+}
+
+.app-topbar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(6, 182, 212, 0.05), transparent 30%, transparent 70%, rgba(99, 102, 241, 0.05));
 }
 
 .topbar-inner {
@@ -491,10 +517,44 @@ onErrorCaptured((err, _instance, info) => {
   min-height: 400px;
   text-align: center;
   gap: 12px;
+  padding: 48px 32px;
+  border-radius: var(--radius-xl, 20px);
+  background: var(--glass-bg, rgba(255,255,255,0.55));
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  border: 1px solid var(--glass-border, rgba(255,255,255,0.4));
+  box-shadow: var(--shadow-card, 0 8px 32px rgba(0,0,0,0.06)),
+              0 0 0 1px rgba(255,255,255,0.5) inset,
+              var(--shadow-accent, 0 4px 24px rgba(99,102,241,0.10));
+  position: relative;
+  overflow: hidden;
+}
+
+.error-boundary::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #06b6d4, #6366f1);
+  border-radius: 20px 20px 0 0;
+  opacity: 0.85;
 }
 
 .error-boundary-icon {
-  font-size: 48px;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(6,182,212,0.12), rgba(99,102,241,0.12));
+  border: 1px solid rgba(99,102,241,0.18);
+  box-shadow: 0 0 20px rgba(99,102,241,0.15);
+}
+
+.error-boundary-icon svg {
+  width: 32px;
+  height: 32px;
 }
 
 .error-boundary-title {

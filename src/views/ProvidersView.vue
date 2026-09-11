@@ -760,9 +760,9 @@ onMounted(() => {
   max-width: 180px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  color: #475569;
+  background: var(--surface-alt, #f1f5f9);
+  border: 1px solid var(--border-soft, #e2e8f0);
+  color: var(--fg-2, #334155);
   font-size: 11px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   overflow: hidden;

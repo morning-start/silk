@@ -118,7 +118,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
+import { getVersion } from '@tauri-apps/api/app';
 
 defineProps<{
   show: boolean;
@@ -128,7 +129,12 @@ defineEmits<{
   (e: 'close'): void;
 }>();
 
-const version = '1.0.0';
+const version = ref('');
+
+onMounted(async () => {
+  version.value = await getVersion();
+});
+
 const activeTab = ref('quickstart');
 
 const tabs = [

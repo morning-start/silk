@@ -14,8 +14,6 @@ import {
   NPagination,
   NCard,
   NPopconfirm,
-  NGrid,
-  NGi,
   useMessage,
   type DataTableColumns,
 } from "naive-ui";
@@ -238,82 +236,75 @@ onMounted(() => {
 
 <template>
   <div class="logs-page">
-    <NGrid :x-gap="16" :y-gap="16" :cols="4" class="mb-16">
-      <NGi>
-        <NCard :bordered="false" class="metric-card">
-          <div class="stat-label">请求数 ({{ metricRange }}h)</div>
-          <div class="stat-value accent">{{ totalRequestsInRange.toLocaleString() }}</div>
-          <div class="stat-sub">本地网关总请求</div>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard :bordered="false" class="metric-card">
-          <div class="stat-label">平均响应</div>
-          <div class="stat-value success">{{ averageDurationInRange }}<span class="stat-unit">ms</span></div>
-          <div class="stat-sub">轻量监控</div>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard :bordered="false" class="metric-card">
-          <div class="stat-label">Token 消耗</div>
-          <div class="stat-value accent">{{ (totalTokensInRange / 1000).toFixed(1) }}<span class="stat-unit">K</span></div>
-          <div class="stat-sub">最近 {{ metricRange }} 小时</div>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard :bordered="false" class="metric-card">
-          <div class="stat-label">活跃渠道</div>
-          <div class="stat-value">{{ activeProvidersInRange }}</div>
-          <div class="stat-sub">最近 {{ metricRange }} 小时</div>
-        </NCard>
-      </NGi>
-    </NGrid>
-
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <div class="page-head">
-          <h2 class="page-title">请求日志</h2>
-          <p class="page-desc">检索网关请求记录，支持导出与清理</p>
-        </div>
+    <!-- 顶部标题 + 快捷指标 -->
+    <div class="page-header">
+      <div class="page-header-left">
+        <h2 class="page-title">请求日志</h2>
         <NTag size="small" type="info">共 {{ total.toLocaleString() }} 条</NTag>
       </div>
-      <div class="toolbar-right">
-        <NSpace :size="8">
-          <NSelect
-            v-model:value="metricRange"
-            :options="[
-              { label: '最近 1 小时', value: 1 },
-              { label: '最近 24 小时', value: 24 },
-              { label: '最近 7 天', value: 168 },
-            ]"
-            style="width: 130px"
-            size="small"
-            @update:value="loadStats"
-          />
-          <NSelect
-            v-model:value="statusFilter"
-            :options="[
-              { label: '全部状态', value: 'all' },
-              { label: '2xx 成功', value: '2xx' },
-              { label: '4xx 客户端错误', value: '4xx' },
-              { label: '5xx 服务端错误', value: '5xx' },
-            ]"
-            style="width: 140px"
-            size="small"
-          />
-          <NButton secondary size="small" @click="() => { logsStore.fetchAll(); loadStats(); }">刷新</NButton>
-          <NButton secondary size="small" @click="handleExportCsv">导出 CSV</NButton>
-          <NButton secondary size="small" @click="handleCleanup">清理 7 天前</NButton>
-          <NPopconfirm @positive-click="handleClearAll">
-            <template #trigger>
-              <NButton type="error" size="small">清空全部</NButton>
-            </template>
-            确定要清空所有日志吗？此操作不可恢复。
-          </NPopconfirm>
-        </NSpace>
+      <div class="page-header-stats">
+        <div class="mini-stat">
+          <span class="mini-stat-label">请求</span>
+          <span class="mini-stat-val accent">{{ totalRequestsInRange.toLocaleString() }}</span>
+        </div>
+        <div class="mini-stat-divider"></div>
+        <div class="mini-stat">
+          <span class="mini-stat-label">平均</span>
+          <span class="mini-stat-val success">{{ averageDurationInRange }}<span class="mini-unit">ms</span></span>
+        </div>
+        <div class="mini-stat-divider"></div>
+        <div class="mini-stat">
+          <span class="mini-stat-label">Tokens</span>
+          <span class="mini-stat-val accent">{{ (totalTokensInRange / 1000).toFixed(1) }}K</span>
+        </div>
+        <div class="mini-stat-divider"></div>
+        <div class="mini-stat">
+          <span class="mini-stat-label">活跃渠道</span>
+          <span class="mini-stat-val">{{ activeProvidersInRange }}</span>
+        </div>
       </div>
     </div>
 
+    <!-- 工具栏：筛选 + 操作 -->
+    <div class="toolbar">
+      <NSpace :size="8">
+        <NSelect
+          v-model:value="metricRange"
+          :options="[
+            { label: '最近 1 小时', value: 1 },
+            { label: '最近 24 小时', value: 24 },
+            { label: '最近 7 天', value: 168 },
+          ]"
+          style="width: 130px"
+          size="small"
+          @update:value="loadStats"
+        />
+        <NSelect
+          v-model:value="statusFilter"
+          :options="[
+            { label: '全部状态', value: 'all' },
+            { label: '2xx 成功', value: '2xx' },
+            { label: '4xx 客户端错误', value: '4xx' },
+            { label: '5xx 服务端错误', value: '5xx' },
+          ]"
+          style="width: 140px"
+          size="small"
+        />
+      </NSpace>
+      <NSpace :size="8">
+        <NButton secondary size="small" @click="() => { logsStore.fetchAll(); loadStats(); }">刷新</NButton>
+        <NButton secondary size="small" @click="handleExportCsv">导出 CSV</NButton>
+        <NButton secondary size="small" @click="handleCleanup">清理 7 天前</NButton>
+        <NPopconfirm @positive-click="handleClearAll">
+          <template #trigger>
+            <NButton type="error" size="small">清空全部</NButton>
+          </template>
+          确定要清空所有日志吗？此操作不可恢复。
+        </NPopconfirm>
+      </NSpace>
+    </div>
+
+    <!-- 主表格（含分页） -->
     <NCard :bordered="false" class="table-card" size="small">
       <!-- Error State -->
       <template v-if="error">
@@ -336,51 +327,32 @@ onMounted(() => {
           <p class="empty-desc">启动网关并发送请求后，日志将实时显示在这里</p>
         </div>
       </template>
-      <NDataTable
-        v-else
-        :columns="columns"
-        :data="filteredLogs"
-        :loading="loading"
-        :bordered="false"
-        :single-line="false"
-        :scroll-x="1000"
-        striped
-        size="small"
-      />
-    </NCard>
-
-    <NCard
-      v-if="providerStats.length > 0"
-      title="渠道请求占比"
-      :bordered="false"
-      class="table-card provider-card"
-      size="small"
-    >
-      <div class="provider-summary-list">
-        <div v-for="item in providerStats" :key="item.provider_name || 'unknown'" class="provider-summary-item">
-          <div class="provider-summary-head">
-            <span class="provider-summary-name">{{ item.provider_name || "未知渠道" }}</span>
-            <span class="provider-summary-count">{{ item.request_count.toLocaleString() }} 次</span>
-          </div>
-          <div class="provider-summary-meta">
-            <span>平均 {{ item.avg_duration_ms }}ms</span>
-            <span>{{ (item.total_tokens / 1000).toFixed(1) }}K tokens</span>
-          </div>
+      <template v-else>
+        <NDataTable
+          :columns="columns"
+          :data="filteredLogs"
+          :loading="loading"
+          :bordered="false"
+          :single-line="false"
+          :scroll-x="1000"
+          striped
+          size="small"
+        />
+        <!-- 分页整合在表格卡片内 -->
+        <div class="table-pagination">
+          <NText depth="3" style="font-size: 12px">{{ paginationText }}</NText>
+          <NPagination
+            v-model:page="page"
+            :page-count="totalPages"
+            :page-size="50"
+            :show-size-picker="false"
+            @update:page="logsStore.fetchPage"
+          />
         </div>
-      </div>
+      </template>
     </NCard>
 
-    <div class="pagination-bar">
-      <NText depth="3" style="font-size: 13px">{{ paginationText }}</NText>
-      <NPagination
-        v-model:page="page"
-        :page-count="totalPages"
-        :page-size="50"
-        @update:page="logsStore.fetchPage"
-      />
-    </div>
-
-    <!-- Log Detail Modal -->
+    <!-- 日志详情弹窗 -->
     <NModal
       v-model:show="showDetail"
       preset="card"
@@ -390,93 +362,108 @@ onMounted(() => {
       :segmented="{ footer: true }"
     >
       <div v-if="selectedLog" class="log-detail">
-        <div class="detail-row">
-          <span class="detail-label">Request ID：</span>
-          <span class="detail-value text-mono">{{ selectedLog.request_id }}</span>
+        <div class="detail-group">
+          <div class="detail-group-title">基本信息</div>
+          <div class="detail-row">
+            <span class="detail-label">Request ID</span>
+            <span class="detail-value text-mono">{{ selectedLog.request_id }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">时间</span>
+            <span class="detail-value">{{ selectedLog.timestamp }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">请求</span>
+            <NTag size="small" type="info">{{ selectedLog.method }}</NTag>
+            <span class="detail-value text-mono" style="margin-left: 8px">{{ selectedLog.path }}</span>
+          </div>
         </div>
-        <div class="detail-row">
-          <span class="detail-label">时间：</span>
-          <span class="detail-value">{{ selectedLog.timestamp }}</span>
+        <div class="detail-group">
+          <div class="detail-group-title">执行结果</div>
+          <div class="detail-row" v-if="selectedLog.response_status">
+            <span class="detail-label">状态码</span>
+            <NTag size="small" :type="selectedLog.response_status < 300 ? 'success' : 'error'">
+              {{ selectedLog.response_status }}
+            </NTag>
+          </div>
+          <div class="detail-row" v-if="selectedLog.resp_ms != null">
+            <span class="detail-label">响应</span>
+            <span class="detail-value">{{ selectedLog.resp_ms }}ms</span>
+          </div>
+          <div class="detail-row" v-if="selectedLog.total_duration_ms != null">
+            <span class="detail-label">耗时</span>
+            <span class="detail-value">{{ selectedLog.total_duration_ms }}ms</span>
+          </div>
+          <div class="detail-row" v-if="selectedLog.retry_count > 0">
+            <span class="detail-label">重试</span>
+            <NTag size="small" type="warning">{{ selectedLog.retry_count }}</NTag>
+          </div>
         </div>
-        <div class="detail-row">
-          <span class="detail-label">请求：</span>
-          <NTag size="small" type="info">{{ selectedLog.method }}</NTag>
-          <span class="detail-value text-mono" style="margin-left: 8px">{{ selectedLog.path }}</span>
+        <div class="detail-group">
+          <div class="detail-group-title">路由信息</div>
+          <div class="detail-row" v-if="selectedLog.inbound_protocol || selectedLog.outbound_protocol">
+            <span class="detail-label">协议转换</span>
+            <NTag size="small">{{ selectedLog.inbound_protocol || '-' }}</NTag>
+            <span style="margin: 0 4px; color: var(--muted)">→</span>
+            <NTag size="small">{{ selectedLog.outbound_protocol || '-' }}</NTag>
+          </div>
+          <div class="detail-row" v-if="selectedLog.provider_id">
+            <span class="detail-label">渠道</span>
+            <span class="detail-value">{{ selectedLog.provider_name || selectedLog.provider_id }}</span>
+            <span v-if="selectedLog.provider_name && selectedLog.provider_name !== selectedLog.provider_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.provider_id }})</span>
+          </div>
+          <div class="detail-row" v-if="selectedLog.model_id || selectedLog.model_name">
+            <span class="detail-label">模型</span>
+            <span class="detail-value">{{ selectedLog.model_name || selectedLog.model_id }}</span>
+            <span v-if="selectedLog.model_name && selectedLog.model_id && selectedLog.model_name !== selectedLog.model_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.model_id }})</span>
+          </div>
+          <div class="detail-row" v-if="selectedLog.auth_key_name">
+            <span class="detail-label">认证 Key</span>
+            <NTag size="small" type="success">{{ selectedLog.auth_key_name }}</NTag>
+          </div>
+          <div class="detail-row" v-if="selectedLog.channel_key_name">
+            <span class="detail-label">渠道 Key</span>
+            <NTag size="small" type="info">{{ selectedLog.channel_key_name }}</NTag>
+          </div>
         </div>
-        <div class="detail-row" v-if="selectedLog.response_status">
-          <span class="detail-label">状态码：</span>
-          <NTag size="small" :type="selectedLog.response_status < 300 ? 'success' : 'error'">
-            {{ selectedLog.response_status }}
-          </NTag>
-        </div>
-        <div class="detail-row" v-if="selectedLog.resp_ms != null">
-          <span class="detail-label">响应：</span>
-          <span class="detail-value">{{ selectedLog.resp_ms }}ms</span>
-        </div>
-        <div class="detail-row" v-if="selectedLog.total_duration_ms != null">
-          <span class="detail-label">耗时：</span>
-          <span class="detail-value">{{ selectedLog.total_duration_ms }}ms</span>
-        </div>
-        <div class="detail-row" v-if="selectedLog.inbound_protocol || selectedLog.outbound_protocol">
-          <span class="detail-label">协议(入→出)：</span>
-          <NTag size="small">{{ selectedLog.inbound_protocol || '-' }}</NTag>
-          <span style="margin: 0 4px">→</span>
-          <NTag size="small">{{ selectedLog.outbound_protocol || '-' }}</NTag>
-        </div>
-        <div class="detail-row" v-if="selectedLog.provider_id">
-          <span class="detail-label">渠道：</span>
-          <span class="detail-value">{{ selectedLog.provider_name || selectedLog.provider_id }}</span>
-          <span v-if="selectedLog.provider_name && selectedLog.provider_name !== selectedLog.provider_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.provider_id }})</span>
-        </div>
-        <div class="detail-row" v-if="selectedLog.model_id || selectedLog.model_name">
-          <span class="detail-label">模型：</span>
-          <span class="detail-value">{{ selectedLog.model_name || selectedLog.model_id }}</span>
-          <span v-if="selectedLog.model_name && selectedLog.model_id && selectedLog.model_name !== selectedLog.model_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.model_id }})</span>
-        </div>
-        <div class="detail-row" v-if="selectedLog.auth_key_name">
-          <span class="detail-label">认证 Key：</span>
-          <NTag size="small" type="success">{{ selectedLog.auth_key_name }}</NTag>
-        </div>
-        <div class="detail-row" v-if="selectedLog.channel_key_name">
-          <span class="detail-label">渠道 Key：</span>
-          <NTag size="small" type="info">{{ selectedLog.channel_key_name }}</NTag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">请求大小：</span>
-          <span class="detail-value">{{ (selectedLog.request_size_bytes || 0).toLocaleString() }} bytes</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">响应大小：</span>
-          <span class="detail-value">{{ (selectedLog.response_size_bytes || 0).toLocaleString() }} bytes</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Token (输入/发送/输出)：</span>
-          <span class="detail-value">
-            {{ selectedLog.tokens_input || 0 }} / {{ selectedLog.tokens_sent || 0 }} / {{ selectedLog.tokens_output || 0 }}
-            <span v-if="selectedLog.tokens_input != null && selectedLog.tokens_sent != null && selectedLog.tokens_input > selectedLog.tokens_sent" style="color: var(--success, #10b981); margin-left: 8px">
-              优化 -{{ selectedLog.tokens_input - selectedLog.tokens_sent }}
+        <div class="detail-group">
+          <div class="detail-group-title">数据量</div>
+          <div class="detail-row">
+            <span class="detail-label">请求大小</span>
+            <span class="detail-value">{{ (selectedLog.request_size_bytes || 0).toLocaleString() }} bytes</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">响应大小</span>
+            <span class="detail-value">{{ (selectedLog.response_size_bytes || 0).toLocaleString() }} bytes</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Tokens</span>
+            <span class="detail-value">
+              输入 {{ selectedLog.tokens_input || 0 }} / 发送 {{ selectedLog.tokens_sent || 0 }} / 输出 {{ selectedLog.tokens_output || 0 }}
+              <span v-if="selectedLog.tokens_input != null && selectedLog.tokens_sent != null && selectedLog.tokens_input > selectedLog.tokens_sent" style="color: var(--success, #10b981); margin-left: 8px">
+                优化 -{{ selectedLog.tokens_input - selectedLog.tokens_sent }}
+              </span>
             </span>
-          </span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">流式</span>
+            <NTag size="small" :type="selectedLog.stream_enabled ? 'info' : 'default'">{{ selectedLog.stream_enabled ? '是' : '否' }}</NTag>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">缓存命中</span>
+            <NTag size="small" :type="selectedLog.cache_hit ? 'success' : 'default'">{{ selectedLog.cache_hit ? '是' : '否' }}</NTag>
+          </div>
         </div>
-        <div class="detail-row">
-          <span class="detail-label">流式：</span>
-          <NTag size="small" :type="selectedLog.stream_enabled ? 'info' : 'default'">{{ selectedLog.stream_enabled ? '是' : '否' }}</NTag>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">缓存命中：</span>
-          <NTag size="small" :type="selectedLog.cache_hit ? 'success' : 'default'">{{ selectedLog.cache_hit ? '是' : '否' }}</NTag>
-        </div>
-        <div class="detail-row" v-if="selectedLog.retry_count > 0">
-          <span class="detail-label">重试次数：</span>
-          <NTag size="small" type="warning">{{ selectedLog.retry_count }}</NTag>
-        </div>
-        <div class="detail-row" v-if="selectedLog.error_message">
-          <span class="detail-label" style="color: #ef4444">错误：</span>
-          <span class="detail-value" style="color: #ef4444">{{ selectedLog.error_message }}</span>
-        </div>
-        <div class="detail-row" v-if="selectedLog.error_code">
-          <span class="detail-label">错误码：</span>
-          <NTag size="small" type="error">{{ selectedLog.error_code }}</NTag>
+        <div class="detail-group" v-if="selectedLog.error_message || selectedLog.error_code">
+          <div class="detail-group-title">错误信息</div>
+          <div class="detail-row" v-if="selectedLog.error_message">
+            <span class="detail-label" style="color: #ef4444">错误</span>
+            <span class="detail-value" style="color: #ef4444">{{ selectedLog.error_message }}</span>
+          </div>
+          <div class="detail-row" v-if="selectedLog.error_code">
+            <span class="detail-label">错误码</span>
+            <NTag size="small" type="error">{{ selectedLog.error_code }}</NTag>
+          </div>
         </div>
       </div>
       <template #footer>
@@ -492,111 +479,206 @@ onMounted(() => {
 <style scoped>
 .logs-page {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.metric-card {
-  border-radius: 12px;
+/* 顶部标题 + mini-stat 行 */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
 }
 
-.stat-label {
-  font-size: 13px;
-  color: var(--text-color-3, #64748b);
-  margin-bottom: 4px;
+.page-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-.stat-value {
-  font-size: 24px;
+.page-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg, #0a0a0a);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.page-header-stats {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 12px;
+  overflow: hidden;
+  flex-shrink: 1;
+}
+
+.mini-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 10px;
+  min-width: 0;
+}
+
+.mini-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted, #737373);
+  font-weight: 600;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  white-space: nowrap;
+}
+
+.mini-stat-val {
+  font-size: 16px;
   font-weight: 700;
+  color: var(--fg, #0a0a0a);
   line-height: 1.2;
-  margin-bottom: 4px;
+  letter-spacing: -0.02em;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  white-space: nowrap;
 }
 
-.stat-value.accent {
-  color: var(--accent, #0891b2);
+.mini-stat-val.accent {
+  color: var(--accent, #2563eb);
 }
 
-.stat-value.success {
-  color: var(--success, #10b981);
+.mini-stat-val.success {
+  color: var(--success, #16a34a);
 }
 
-.stat-unit {
-  font-size: 14px;
+.mini-unit {
+  font-size: 11px;
   font-weight: 500;
-  opacity: 0.6;
+  opacity: 0.65;
+  margin-left: 1px;
 }
 
-.stat-sub {
-  font-size: 12px;
-  color: var(--text-color-3, #94a3b8);
+.mini-stat-divider {
+  width: 1px;
+  background: var(--border, #e5e5e5);
+  margin: 4px 0;
+  flex-shrink: 0;
 }
 
-.pagination-bar {
+/* 工具栏 */
+.toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 16px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.provider-card {
-  margin-top: 16px;
+/* 表格卡片 */
+.table-card {
+  border-radius: var(--radius-sm, 6px);
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border, #e5e5e5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.provider-summary-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.provider-summary-item {
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: var(--card-color, #ffffff);
-}
-
-.provider-summary-head {
+.table-pagination {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
+  align-items: center;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-soft, #ededed);
+  flex-shrink: 0;
 }
 
-.provider-summary-name {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.provider-summary-count,
-.provider-summary-meta {
-  font-size: 12px;
-  color: var(--text-color-3, #64748b);
-}
-
-.provider-summary-meta {
+/* 空态 / 错误 */
+.error-state, .empty-state {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 16px;
+  text-align: center;
 }
 
+.error-icon, .empty-icon {
+  opacity: 0.6;
+}
+
+.error-title, .empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg, #0a0a0a);
+  margin: 0;
+}
+
+.error-desc, .empty-desc {
+  font-size: 13px;
+  color: var(--muted, #737373);
+  margin: 0;
+  max-width: 320px;
+}
+
+/* 详情弹窗 */
 .log-detail {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+
+.detail-group {
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: var(--radius-sm, 6px);
+  overflow: hidden;
+}
+
+.detail-group-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--muted, #737373);
+  background: var(--surface-alt, #fafafa);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border, #e5e5e5);
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
 }
 
 .detail-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-soft, #ededed);
+}
+
+.detail-row:last-child {
+  border-bottom: none;
 }
 
 .detail-label {
-  font-size: 13px;
-  font-weight: 500;
-  min-width: 110px;
-  color: var(--text-color-2, #475569);
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 90px;
+  color: var(--muted, #737373);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  flex-shrink: 0;
+  padding-top: 1px;
 }
 
 .detail-value {
   font-size: 13px;
+  color: var(--fg-2, #171717);
+  flex: 1;
+  word-break: break-all;
 }
 </style>

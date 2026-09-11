@@ -23,7 +23,7 @@ const emit = defineEmits<{
       <div class="toolbar-left">
         <h2 class="page-title">{{ title }}</h2>
         <slot name="count">
-          <span v-if="countLabel">{{ countLabel }}</span>
+          <NTag v-if="countLabel" size="small" type="info">{{ countLabel }}</NTag>
         </slot>
       </div>
       <div class="toolbar-right">

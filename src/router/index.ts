@@ -38,6 +38,12 @@ const routes = [
     component: () => import("../views/SettingsView.vue"),
     meta: { title: "设置" },
   },
+  {
+    path: "/about",
+    name: "about",
+    component: () => import("../views/AboutView.vue"),
+    meta: { title: "关于" },
+  },
 ];
 
 const router = createRouter({

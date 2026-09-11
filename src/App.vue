@@ -11,17 +11,18 @@ const showSplash = ref(true);
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
+    // 渐变主视觉：主按钮/选中态用青，次要强调用靛（互补双色）
     primaryColor: "#0891b2",
     primaryColorHover: "#0e7490",
     primaryColorPressed: "#0c6a83",
-    // 次要强调：靛蓝（信息/链接/选中），与青色主强调互补
     infoColor: "#6366f1",
     infoColorHover: "#4f46e5",
     infoColorPressed: "#4338ca",
-    borderRadius: "8px",
-    bodyColor: "#f8fafc",
-    cardColor: "#ffffff",
-    modalColor: "#ffffff",
+    borderRadius: "10px",
+    bodyColor: "#f4f7fb",
+    cardColor: "rgba(255,255,255,0.72)",
+    modalColor: "rgba(255,255,255,0.86)",
+    popoverColor: "rgba(255,255,255,0.86)",
   },
 };
 
@@ -33,18 +34,18 @@ const darkOverrides: GlobalThemeOverrides = {
     infoColor: "#818cf8",
     infoColorHover: "#a5b4fc",
     infoColorPressed: "#6366f1",
-    borderRadius: "8px",
-    bodyColor: "#0b0f19",
-    cardColor: "#131924",
-    modalColor: "#131924",
-    borderColor: "#242f41",
-    dividerColor: "#242f41",
-    textColor1: "#f1f5f9",
-    textColor2: "#cbd5e1",
-    textColor3: "#94a3b8",
+    borderRadius: "10px",
+    bodyColor: "#070b14",
+    cardColor: "rgba(16,24,38,0.66)",
+    modalColor: "rgba(16,24,38,0.82)",
+    popoverColor: "rgba(16,24,38,0.82)",
+    borderColor: "#26334a",
+    dividerColor: "#26334a",
+    textColor1: "#eef4fb",
+    textColor2: "#c6d2e4",
+    textColor3: "#8b9bb4",
     placeholderColor: "#475569",
-    popoverColor: "#131924",
-    hoverColor: "#1e293b",
+    hoverColor: "#1b2639",
   },
 };
 
