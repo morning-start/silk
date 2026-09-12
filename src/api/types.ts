@@ -182,6 +182,10 @@ export interface ModelMapping {
   channels: MappingChannelInfo[];
   created_at: string;
   updated_at: string;
+  /** 是否支持思考（来自内置模型目录补充，DB 无此字段） */
+  reasoning?: boolean | null;
+  /** 支持的输入类型（来自内置模型目录补充，DB 无此字段） */
+  input_types?: string[];
 }
 
 // ---------------------------------------------------------------------------
