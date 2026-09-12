@@ -11,6 +11,7 @@ pub mod claude_code;
 pub mod codex;
 pub mod gemini;
 pub mod hermes;
+pub mod omp;
 pub mod opencode;
 
 use super::config_writer::{ConfigFormat, LiveSnapshot};
@@ -110,6 +111,7 @@ pub fn writer_for(agent_type: &str) -> Option<Box<dyn HarnessWriter>> {
         "opencode" => Some(Box::new(opencode::OpenCodeWriter)),
         "hermes" => Some(Box::new(hermes::HermesWriter)),
         "gemini_cli" => Some(Box::new(gemini::GeminiWriter)),
+        "omp" => Some(Box::new(omp::OmpWriter)),
         _ => None,
     }
 }
@@ -121,7 +123,7 @@ mod tests {
 
     #[test]
     fn registry_exposes_all_supported_harnesses() {
-        for agent_type in ["claude_code", "codex", "opencode", "hermes", "gemini_cli"] {
+        for agent_type in ["claude_code", "codex", "opencode", "hermes", "gemini_cli", "omp"] {
             assert!(writer_for(agent_type).is_some(), "missing writer: {agent_type}");
         }
     }

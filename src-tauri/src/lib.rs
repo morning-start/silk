@@ -392,6 +392,8 @@ pub fn run() {
             // 预置配置
             commands::discovery::get_preset_providers,
             commands::discovery::get_preset_provider_by_id,
+            // OMP 模型探测
+            commands::discovery::list_omp_models,
             // 预设管理（cc-switch 复刻）
             commands::presets::list_presets,
             commands::presets::get_preset,

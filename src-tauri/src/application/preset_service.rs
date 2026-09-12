@@ -856,6 +856,13 @@ impl PresetService {
                     .entry("apiKey".to_string())
                     .or_insert_with(|| serde_json::json!(api_key));
             }
+            // OMP：provider 条目顶层 baseUrl/apiKey（models.yml 同形）
+            "omp" => {
+                obj.entry("baseUrl".to_string())
+                    .or_insert_with(|| serde_json::json!(base_url));
+                obj.entry("apiKey".to_string())
+                    .or_insert_with(|| serde_json::json!(api_key));
+            }
             _ => {}
         }
     }
@@ -912,6 +919,12 @@ impl PresetService {
             "gemini_cli" => {
                 values.insert("GOOGLE_GEMINI_BASE_URL".into(), base_url.into());
                 values.insert("GEMINI_API_KEY".into(), api_key.into());
+            }
+            // OMP：provider 条目内顶层键（models.yml 的 baseUrl/apiKey 同形，
+            // 对齐 inject_gateway_config omp 分支）
+            "omp" => {
+                values.insert("baseUrl".into(), base_url.into());
+                values.insert("apiKey".into(), api_key.into());
             }
             // 其他（未接入）类型 → 空
             _ => {}

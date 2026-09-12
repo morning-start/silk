@@ -16,6 +16,7 @@ export type FieldType =
   | "key-value"
   | "model-list"
   | "model-map"
+  | "model-defs"
   | "json";
 export interface HarnessOption {
   label: string;
@@ -75,6 +76,37 @@ function cleanModels(value: unknown): Array<Record<string, unknown>> {
         ? { context_length: Number(item.context_length) }
         : {}),
     }));
+}
+
+/** OMP 结构化模型定义（models.yml models[] 元素）：id/name/api/reasoning/input/cost/contextWindow/maxTokens */
+function cleanModelDefs(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => object(item))
+    .filter((item) => string(item.id).trim())
+    .map((item) => {
+      const def: Record<string, unknown> = { id: string(item.id).trim() };
+      if (string(item.name).trim()) def.name = string(item.name).trim();
+      if (string(item.api).trim()) def.api = string(item.api).trim();
+      if (typeof item.reasoning === "boolean") def.reasoning = item.reasoning;
+      if (Array.isArray(item.input) && item.input.length) {
+        def.input = (item.input as unknown[])
+          .map((v) => string(v))
+          .filter((v) => v === "text" || v === "image");
+      }
+      if (Number(item.contextWindow) > 0) def.contextWindow = Number(item.contextWindow);
+      if (Number(item.maxTokens) > 0) def.maxTokens = Number(item.maxTokens);
+      const cost = object(item.cost);
+      if (Object.keys(cost).length) {
+        const cleanCost: Record<string, number> = {};
+        for (const [k, v] of Object.entries(cost)) {
+          const n = Number(v);
+          if (Number.isFinite(n) && n > 0) cleanCost[k] = n;
+        }
+        if (Object.keys(cleanCost).length) def.cost = cleanCost;
+      }
+      return def;
+    });
 }
 
 function cleanModelMap(value: unknown): Array<Record<string, unknown>> {
@@ -297,12 +329,64 @@ const geminiSpec: HarnessFormSpec = {
   },
 };
 
+const ompApiOptions = [
+  { label: "OpenAI Completions", value: "openai-completions" },
+  { label: "OpenAI Responses", value: "openai-responses" },
+  { label: "Anthropic Messages", value: "anthropic-messages" },
+  { label: "Google Gemini", value: "google-generative-ai" },
+];
+
+const ompSpec: HarnessFormSpec = {
+  agentType: "omp",
+  label: "OMP",
+  fields: [
+    { key: "id", label: "Provider ID", type: "text", placeholder: "silk" },
+    { key: "name", label: "显示名称", type: "text", placeholder: "可选" },
+    { key: "baseUrl", label: "API 端点", type: "text", placeholder: "http://127.0.0.1:1877/v1" },
+    { key: "apiKey", label: "API Key", type: "secret", placeholder: "sk-..." },
+    { key: "api", label: "协议", type: "select", options: ompApiOptions },
+    { key: "headers", label: "请求头", type: "key-value", placeholder: "{\n  \"X-Provider\": \"silk\"\n}" },
+    { key: "models", label: "模型定义", type: "model-defs", placeholder: "请先获取模型列表" },
+    { key: "advanced", label: "其他原生配置", type: "json", placeholder: "JSON 对象（可选）" },
+  ],
+  toSettings(form) {
+    const out = { ...rawConfig(form), ...object(form.advanced) };
+    setNested(out, "id", string(form.id).trim());
+    setNested(out, "name", string(form.name).trim());
+    setNested(out, "baseUrl", string(form.baseUrl).trim());
+    setNested(out, "apiKey", string(form.apiKey).trim());
+    setNested(out, "api", string(form.api).trim());
+    const headers = cleanKeyValue(form.headers);
+    if (Object.keys(headers).length) out.headers = headers;
+    else delete out.headers;
+    const models = cleanModelDefs(form.models);
+    if (models.length) out.models = models;
+    else delete out.models;
+    return out;
+  },
+  fromSettings(config) {
+    const advanced = { ...config };
+    for (const key of ["id", "name", "baseUrl", "apiKey", "api", "headers", "models"]) delete advanced[key];
+    return withRaw(config, {
+      id: string(config.id),
+      name: string(config.name),
+      baseUrl: string(config.baseUrl),
+      apiKey: string(config.apiKey),
+      api: string(config.api),
+      headers: cleanKeyValue(config.headers),
+      models: cleanModelDefs(config.models),
+      advanced,
+    });
+  },
+};
+
 export const harnessFormSpecs: Record<string, HarnessFormSpec> = {
   claude_code: claudeSpec,
   codex: codexSpec,
   opencode: opencodeSpec,
   hermes: hermesSpec,
   gemini_cli: geminiSpec,
+  omp: ompSpec,
 };
 
 /**

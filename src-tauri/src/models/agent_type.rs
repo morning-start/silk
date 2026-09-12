@@ -17,6 +17,7 @@ impl AgentType {
             ("opencode", "OpenCode"),
             ("hermes", "Hermes"),
             ("gemini_cli", "Gemini CLI"),
+            ("omp", "OMP"),
         ]
     }
 
@@ -59,6 +60,9 @@ impl AgentType {
         ("opencode", &["openai", "responses", "messages", "gemini", "bedrock"]),
         ("hermes", &["openai", "messages", "responses", "bedrock"]),
         ("gemini_cli", &["gemini"]),
+        // OMP models.yml 的 api 字段取值：openai-completions/openai-responses/
+        // anthropic-messages/google-generative-ai（对应 openai/responses/messages/gemini）
+        ("omp", &["openai", "responses", "messages", "gemini"]),
     ];
 
     /// 返回 harness 原生支持的协议集（未登记返回空）

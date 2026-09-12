@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { NButton, NInput, NInputNumber, NModal, NSelect, useMessage } from "naive-ui";
+import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, useMessage } from "naive-ui";
 import { presetsApi } from "../api/presets";
 import { providersApi } from "../api/providers";
+import { discoveryApi } from "../api/discovery";
 import type { AgentTypeInfo, Preset, Provider, ProviderModelInfo } from "../api";
 import { formSpecFor, officialCredentialFields, type HarnessField, type HarnessFormSpec } from "../config/harnessForms";
 import ModalAdvanced from "../components/ModalAdvanced.vue";
@@ -41,6 +42,7 @@ const channelFillTargets: Record<string, { endpointKey: string; apiKeyField: str
   opencode: { endpointKey: "baseURL", apiKeyField: "apiKey", nativeProtocols: ["openai", "responses", "messages", "gemini", "bedrock"] },
   hermes: { endpointKey: "base_url", apiKeyField: "api_key", nativeProtocols: ["openai", "responses", "messages", "bedrock"] },
   gemini_cli: { endpointKey: "GOOGLE_GEMINI_BASE_URL", apiKeyField: "GEMINI_API_KEY", nativeProtocols: ["gemini"] },
+  omp: { endpointKey: "baseUrl", apiKeyField: "apiKey", nativeProtocols: ["openai", "responses", "messages", "gemini"] },
 };
 /** 多协议 harness：渠道协议 → 表单协议选择器取值（直连该渠道时的原生协议） */
 const OPENCODE_SDK_BY_PROTOCOL: Record<string, string> = {
@@ -227,7 +229,7 @@ function isAdvancedField(field: HarnessField): boolean {
 
 /** 需要占整行的字段：模型角色 / 模型列表这类多行编辑器放半栏会挤成一团 */
 function isWideField(field: HarnessField): boolean {
-  return ["model-roles", "model-list", "model-map"].includes(field.type);
+  return ["model-roles", "model-list", "model-map", "model-defs"].includes(field.type);
 }
 
 const basicFields = computed(() => (spec.value?.fields || []).filter((field) => !isAdvancedField(field)));
@@ -245,7 +247,7 @@ const currentModelIds = computed(() => {
     if (field.type === "model-roles" && value && typeof value === "object" && !Array.isArray(value)) {
       for (const role of Object.values(value as Record<string, unknown>)) if (typeof role === "string" && role.trim()) ids.add(role.trim());
     }
-    if ((field.type === "model-list" || field.type === "model-map") && Array.isArray(value)) {
+    if ((field.type === "model-list" || field.type === "model-map" || field.type === "model-defs") && Array.isArray(value)) {
       for (const item of value) if (item && typeof item === "object" && !Array.isArray(item)) {
         const id = (item as Record<string, unknown>).id;
         if (typeof id === "string" && id.trim()) ids.add(id.trim());
@@ -281,6 +283,7 @@ const modelEndpointKey = computed(() => ({
   opencode: "baseURL",
   hermes: "base_url",
   gemini_cli: "GOOGLE_GEMINI_BASE_URL",
+  omp: "baseUrl",
 }[activeTab.value] || ""));
 
 async function loadAgentTypes() {
@@ -309,7 +312,7 @@ function tabLabel(id: string) {
 
 function fieldValue(field: HarnessField): string {
   const value = formValues.value[field.key];
-  if (["key-value", "json", "model-list"].includes(field.type)) {
+  if (["key-value", "json", "model-list", "model-map", "model-defs"].includes(field.type)) {
     return value && typeof value === "object" ? JSON.stringify(value, null, 2) : "";
   }
   return String(value ?? "");
@@ -345,15 +348,38 @@ function addModelListItem() {
   formValues.value.models = [...modelListValue(), { id: "" }];
 }
 
+/** model-defs 的协议选择项（OMP models.yml api 取值，与 ompSpec 对齐） */
+function ompApiSelectOptions() {
+  return [
+    { label: "OpenAI Completions", value: "openai-completions" },
+    { label: "OpenAI Responses", value: "openai-responses" },
+    { label: "Anthropic Messages", value: "anthropic-messages" },
+    { label: "Google Gemini", value: "google-generative-ai" },
+  ];
+}
+
+/** model-defs：切换模型的输入类型（text/image）复选框 */
+function toggleModelInput(index: number, inputType: string, checked: boolean) {
+  const models = modelListValue().map((item) => ({ ...item }));
+  if (!models[index]) return;
+  const input = new Set<string>(Array.isArray(models[index].input) ? (models[index].input as string[]) : []);
+  if (checked) input.add(inputType);
+  else input.delete(inputType);
+  const values = [...input];
+  if (values.length) models[index].input = values;
+  else delete models[index].input;
+  formValues.value.models = models;
+}
+
 function removeModelListItem(index: number) {
   formValues.value.models = modelListValue().filter((_, itemIndex) => itemIndex !== index);
 }
 function parseStructuredValues(): Record<string, unknown> {
   const values = { ...formValues.value };
   for (const field of spec.value?.fields || []) {
-    if (!["key-value", "json", "model-list", "model-map"].includes(field.type)) continue;
+    if (!["key-value", "json", "model-list", "model-map", "model-defs"].includes(field.type)) continue;
     const existing = values[field.key];
-    const expectedArray = field.type === "model-list" || field.type === "model-map";
+    const expectedArray = field.type === "model-list" || field.type === "model-map" || field.type === "model-defs";
     if (existing && typeof existing === "object") {
       if (expectedArray ? !Array.isArray(existing) : Array.isArray(existing)) {
         throw new Error(`${field.label}必须是 JSON ${expectedArray ? "数组" : "对象"}`);
@@ -408,7 +434,7 @@ function validateStructuredValues(values: Record<string, unknown>) {
         if (typeof itemValue !== "string") throw new Error(`${field.label}的值必须是字符串`);
       }
     }
-    if ((field.type === "model-list" || field.type === "model-map") && Array.isArray(value)) {
+    if ((field.type === "model-list" || field.type === "model-map" || field.type === "model-defs") && Array.isArray(value)) {
       const seen: Record<string, true> = {};
       for (const item of value) {
         if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`${field.label}包含无效模型项`);
@@ -420,6 +446,14 @@ function validateStructuredValues(values: Record<string, unknown>) {
         seen[id] = true;
         if (field.type === "model-list" && model.context_length !== undefined && (!Number.isInteger(Number(model.context_length)) || Number(model.context_length) <= 0)) {
           throw new Error(`${field.label}的上下文长度必须是正整数`);
+        }
+        if (field.type === "model-defs") {
+          if (model.contextWindow !== undefined && (!Number.isInteger(Number(model.contextWindow)) || Number(model.contextWindow) <= 0)) {
+            throw new Error(`${field.label}的上下文窗口必须是正整数`);
+          }
+          if (model.maxTokens !== undefined && (!Number.isInteger(Number(model.maxTokens)) || Number(model.maxTokens) <= 0)) {
+            throw new Error(`${field.label}的最大输出必须是正整数`);
+          }
         }
       }
     }
@@ -434,6 +468,33 @@ function endpointCredentials() {
 }
 
 async function fetchModels() {
+  // OMP：走 `omp --list-models` 本机探测（无需端点/Key），探测结果填入模型定义
+  if (activeTab.value === "omp") {
+    fetchingModels.value = true;
+    modelsFetched.value = false;
+    fetchedModels.value = [];
+    try {
+      const groups = await discoveryApi.listOmpModels();
+      const all: ProviderModelInfo[] = groups.flatMap((group) =>
+        (group.models || []).map((model) => ({
+          id: String(model.id || ""),
+          object: "model",
+          created: null,
+          owned_by: String(group.provider || "omp"),
+          supported_endpoint_types: [],
+        })),
+      );
+      fetchedModels.value = all;
+      modelsFetched.value = true;
+      message[all.length ? "success" : "warning"](all.length ? `已探测 ${all.length} 个模型` : "未探测到模型（请确认已安装 OMP）");
+    } catch (error: any) {
+      message.error(error?.message || "探测 OMP 模型失败");
+    } finally {
+      fetchingModels.value = false;
+    }
+    return;
+  }
+
   const { baseUrl, apiKey } = endpointCredentials();
   if (!baseUrl.trim() || !apiKey.trim()) {
     message.warning("请先填写 API 端点与 API Key");
@@ -731,7 +792,7 @@ onMounted(async () => {
                 secondary
                 class="m-sec-action"
                 :loading="fetchingModels"
-                :disabled="!formValues[modelEndpointKey]"
+                :disabled="activeTab !== 'omp' && !formValues[modelEndpointKey]"
                 @click="fetchModels"
               >
                 获取模型
@@ -786,6 +847,35 @@ onMounted(async () => {
                       <NButton size="small" quaternary type="error" aria-label="删除模型" @click="removeModelListItem(index)">删除</NButton>
                     </div>
                     <NButton size="small" dashed :disabled="modelSelectorDisabled" @click="addModelListItem">添加模型</NButton>
+                  </div>
+                </template>
+                <template v-else-if="field.type === 'model-defs'">
+                  <div class="model-list-editor">
+                    <div v-for="(model, index) in modelListValue()" :key="index" class="model-defs-row">
+                      <div class="model-defs-line">
+                        <NSelect :value="String(model.id || '')" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" placeholder="选择模型" @update:value="(value) => updateModelListItem(index, 'id', value || '')" />
+                        <NInput :value="String(model.name || '')" placeholder="显示名称（可选）" @update:value="(value) => updateModelListItem(index, 'name', value)" />
+                        <NSelect :value="String(model.api || '')" :options="ompApiSelectOptions()" filterable clearable placeholder="协议" @update:value="(value) => updateModelListItem(index, 'api', value || '')" />
+                        <NButton size="small" quaternary type="error" aria-label="删除模型" @click="removeModelListItem(index)">删除</NButton>
+                      </div>
+                      <div class="model-defs-line model-defs-meta">
+                        <span class="model-defs-tag"><NCheckbox :checked="model.reasoning === true" @update:checked="(value) => updateModelListItem(index, 'reasoning', value)">推理</NCheckbox></span>
+                        <span class="model-defs-tag">输入
+                          <NCheckbox :checked="((model.input as string[]) || []).includes('text')" @update:checked="(value) => toggleModelInput(index, 'text', value)">文本</NCheckbox>
+                          <NCheckbox :checked="((model.input as string[]) || []).includes('image')" @update:checked="(value) => toggleModelInput(index, 'image', value)">图像</NCheckbox>
+                        </span>
+                        <span class="model-defs-tag">上下文
+                          <NInputNumber size="small" :value="typeof model.contextWindow === 'number' ? model.contextWindow : null" :min="1" placeholder="tokens" @update:value="(value) => updateModelListItem(index, 'contextWindow', value)" />
+                        </span>
+                        <span class="model-defs-tag">输出
+                          <NInputNumber size="small" :value="typeof model.maxTokens === 'number' ? model.maxTokens : null" :min="1" placeholder="tokens" @update:value="(value) => updateModelListItem(index, 'maxTokens', value)" />
+                        </span>
+                      </div>
+                    </div>
+                    <div class="model-defs-actions">
+                      <NButton size="small" dashed :disabled="modelSelectorDisabled" @click="addModelListItem">添加模型</NButton>
+                      <NButton size="small" secondary :loading="fetchingModels" @click="fetchModels">从 OMP 探测导入</NButton>
+                    </div>
                   </div>
                 </template>
                 <NInput v-else-if="field.type === 'secret'" :value="fieldValue(field)" type="password" show-password-on="click" :placeholder="field.placeholder" @update:value="(value) => updateField(field.key, value)" />
@@ -982,6 +1072,61 @@ onMounted(async () => {
 
 .model-row > :nth-child(4) {
   flex: 0 0 auto;
+}
+
+/* OMP 结构化模型定义编辑器：两行布局（首行 id/名称/协议，次行元数据） */
+.model-defs-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.model-defs-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.model-defs-line > :nth-child(1) {
+  flex: 2 1 160px;
+}
+
+.model-defs-line > :nth-child(2) {
+  flex: 1 1 140px;
+}
+
+.model-defs-line > :nth-child(3) {
+  flex: 0 0 180px;
+}
+
+.model-defs-line > :nth-child(4) {
+  flex: 0 0 auto;
+}
+
+.model-defs-meta {
+  gap: var(--sp-3);
+}
+
+.model-defs-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.model-defs-tag .n-input-number {
+  width: 110px;
+}
+
+.model-defs-actions {
+  display: flex;
+  gap: var(--sp-2);
 }
 
 .role-row {

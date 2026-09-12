@@ -19,3 +19,9 @@ pub async fn get_preset_providers() -> Result<Vec<PresetProvider>, String> {
 pub async fn get_preset_provider_by_id(id: String) -> Result<Option<PresetProvider>, String> {
     Ok(PresetProviderService::get_by_id(&id))
 }
+
+/// 探测本机 OMP 的模型列表（`omp --list-models`，3s 超时；未安装降级为空）。
+#[tauri::command]
+pub async fn list_omp_models() -> Result<Vec<serde_json::Value>, String> {
+    Ok(crate::application::harness::omp::probe_omp_models())
+}

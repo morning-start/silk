@@ -37,6 +37,18 @@ export interface InstalledAiApp {
   color: string;
 }
 
+/** `omp --list-models` 探测结果：按 provider 分组的模型列表 */
+export interface OmpModelGroup {
+  provider: string;
+  models: Array<{
+    id: string;
+    context_window?: number;
+    max_tokens?: number;
+    reasoning?: boolean;
+    input_types?: string[];
+  }>;
+}
+
 export const discoveryApi = {
   /** 获取全部预置渠道模板 */
   getPresetProviders: (): Promise<PresetProvider[]> =>
@@ -49,4 +61,8 @@ export const discoveryApi = {
   /** 检测本机已安装的 AI 应用（扫描其配置文件是否存在） */
   detectInstalledAiApps: (): Promise<InstalledAiApp[]> =>
     invoke<InstalledAiApp[]>("detect_installed_ai_apps"),
+
+  /** 探测本机 OMP 的模型列表（`omp --list-models`，3s 超时；未安装降级为空） */
+  listOmpModels: (): Promise<OmpModelGroup[]> =>
+    invoke<OmpModelGroup[]>("list_omp_models"),
 };
