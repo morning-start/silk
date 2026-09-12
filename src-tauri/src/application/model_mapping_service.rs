@@ -25,24 +25,59 @@ pub struct ModelMappingResponse {
     pub channels: Vec<MappingChannelInfo>,
     pub created_at: String,
     pub updated_at: String,
+    /// 是否支持思考（来自内置模型目录补充，DB 无此字段）
+    pub reasoning: Option<bool>,
+    /// 支持的输入类型（来自内置模型目录补充，DB 无此字段）
+    pub input_types: Vec<String>,
 }
 
 impl ModelMappingResponse {
     pub fn from_model(m: ModelMapping, channels: Vec<MappingChannelInfo>) -> Self {
+        // 内置模型目录补充：仅模型池（model_mappings）响应，渠道模型不受影响。
+        // 合并规则：DB 字段有值优先，空值/缺省从目录（按 model_name 精确匹配）补。
+        let entry = crate::application::model_catalog::get_entry(&m.model_name);
+        Self::merge(m, entry.as_ref(), channels)
+    }
+
+    /// 目录合并（纯函数，便于单测；entry 为 None 时行为与旧版一致）
+    fn merge(
+        m: ModelMapping,
+        entry: Option<&crate::application::model_catalog::ModelCatalogEntry>,
+        channels: Vec<MappingChannelInfo>,
+    ) -> Self {
         let capabilities = m.capabilities_vec();
+        let description = m.description;
         Self {
             id: m.id,
             model_name: m.model_name,
             strategy: m.strategy,
-            max_input_tokens: m.max_input_tokens,
-            max_context_tokens: m.max_context_tokens,
-            max_output_tokens: m.max_output_tokens,
-            capabilities,
-            description: m.description,
+            max_input_tokens: m
+                .max_input_tokens
+                .or_else(|| entry.and_then(|e| e.max_input_tokens)),
+            max_context_tokens: m
+                .max_context_tokens
+                .or_else(|| entry.and_then(|e| e.max_context_tokens)),
+            max_output_tokens: m
+                .max_output_tokens
+                .or_else(|| entry.and_then(|e| e.max_output_tokens)),
+            capabilities: if capabilities.is_empty() {
+                entry
+                    .map(|e| e.capabilities.clone())
+                    .unwrap_or_default()
+            } else {
+                capabilities
+            },
+            description: if description.is_empty() {
+                entry.map(|e| e.description.clone()).unwrap_or_default()
+            } else {
+                description
+            },
             enabled: m.enabled != 0,
             channels,
             created_at: m.created_at.to_string(),
             updated_at: m.updated_at.to_string(),
+            reasoning: entry.and_then(|e| e.reasoning),
+            input_types: entry.map(|e| e.input_types.clone()).unwrap_or_default(),
         }
     }
 }
@@ -323,5 +358,102 @@ mod validation_tests {
 
     fn assert_bad_request(result: Result<(), ServiceError>) {
         assert!(matches!(result, Err(ServiceError::BadRequest { .. })));
+    }
+}
+
+#[cfg(test)]
+mod catalog_merge_tests {
+    use super::*;
+    use crate::application::model_catalog::ModelCatalog;
+    use crate::models::ModelMapping;
+
+    /// 构造一个仅 model_name 有值、其余元数据全空的模型映射（模拟用户建池时未填元数据）
+    fn empty_mapping(model_name: &str) -> ModelMapping {
+        ModelMapping {
+            id: format!("mapping-{model_name}"),
+            model_name: model_name.to_string(),
+            max_input_tokens: None,
+            max_context_tokens: None,
+            max_output_tokens: None,
+            capabilities: "[]".to_string(),
+            description: String::new(),
+            vendor: String::new(),
+            knowledge_cutoff: None,
+            model_family: String::new(),
+            reference_url: None,
+            strategy: "round_robin".to_string(),
+            enabled: 1,
+            created_at: chrono::NaiveDateTime::default(),
+            updated_at: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    /// 从 JSON 片段解析出单条目录（纯数据，不触全局 OnceLock，测试可并行）
+    fn entry_from(json: &str) -> Option<crate::application::model_catalog::ModelCatalogEntry> {
+        let file: crate::application::model_catalog::ModelCatalogFile =
+            serde_json::from_str(json).expect("测试 JSON 合法");
+        let catalog = ModelCatalog::load_from_file(file);
+        catalog.get("gpt-4o").cloned()
+    }
+
+    #[test]
+    fn catalog_fills_empty_db_fields() {
+        let entry = entry_from(
+            r#"{
+                "version": 1,
+                "models": [
+                    {
+                        "model_name": "gpt-4o",
+                        "max_context_tokens": 128000,
+                        "capabilities": ["chat", "vision"],
+                        "description": "OpenAI 旗舰",
+                        "reasoning": false,
+                        "input_types": ["text", "image"]
+                    }
+                ]
+            }"#,
+        );
+        let resp = ModelMappingResponse::merge(empty_mapping("gpt-4o"), entry.as_ref(), Vec::new());
+        assert_eq!(resp.max_context_tokens, Some(128000));
+        assert_eq!(resp.capabilities, vec!["chat", "vision"]);
+        assert_eq!(resp.description, "OpenAI 旗舰");
+        assert_eq!(resp.reasoning, Some(false));
+        assert_eq!(resp.input_types, vec!["text", "image"]);
+    }
+
+    #[test]
+    fn db_values_take_precedence_over_catalog() {
+        let entry = entry_from(
+            r#"{
+                "version": 1,
+                "models": [
+                    {
+                        "model_name": "gpt-4o",
+                        "max_context_tokens": 128000,
+                        "capabilities": ["vision"],
+                        "description": "目录描述"
+                    }
+                ]
+            }"#,
+        );
+        let mut mapping = empty_mapping("gpt-4o");
+        mapping.max_context_tokens = Some(200000);
+        mapping.capabilities = "[\"chat\"]".to_string();
+        mapping.description = "用户自定义".to_string();
+
+        let resp = ModelMappingResponse::merge(mapping, entry.as_ref(), Vec::new());
+        assert_eq!(resp.max_context_tokens, Some(200000));
+        assert_eq!(resp.capabilities, vec!["chat"]);
+        assert_eq!(resp.description, "用户自定义");
+    }
+
+    #[test]
+    fn unknown_model_keeps_empty_fields_without_error() {
+        let resp =
+            ModelMappingResponse::merge(empty_mapping("unknown-model"), None, Vec::new());
+        assert_eq!(resp.max_context_tokens, None);
+        assert!(resp.capabilities.is_empty());
+        assert_eq!(resp.reasoning, None);
+        assert!(resp.input_types.is_empty());
     }
 }

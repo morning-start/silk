@@ -230,6 +230,40 @@ pub(crate) async fn init_gateway_settings(data_dir: &Path) -> Result<(), String>
     Ok(())
 }
 
+/// 初始化内置模型目录（首次运行时从打包资源复制种子文件，之后可手动编辑）。
+/// 资源缺失时不阻断启动，仅告警。
+pub(crate) async fn init_model_catalog(app: &tauri::App, data_dir: &Path) -> Result<(), String> {
+    let catalog_path = data_dir.join("model-catalog.json");
+
+    if !catalog_path.exists() {
+        let seeded = if let Ok(resource_dir) = app.path().resource_dir() {
+            let seed = resource_dir.join("model-catalog.json");
+            if seed.exists() {
+                std::fs::copy(&seed, &catalog_path).map_err(|e| format!("复制模型目录失败: {e}"))?;
+                tracing::info!("已从资源复制模型目录种子: {}", seed.display());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !seeded {
+            // 开发环境无打包资源：写入空目录占位，用户可自行填充
+            let empty = serde_json::json!({ "version": 1, "models": [] });
+            crate::application::config_writer::write_to_path_atomic(&catalog_path, &empty)?;
+            tracing::warn!(
+                "未找到 model-catalog.json 打包资源，已创建空目录（可手动编辑填充）: {}",
+                catalog_path.display()
+            );
+        }
+    }
+
+    crate::application::model_catalog::init(&catalog_path);
+    Ok(())
+}
+
 // Tauri 入口
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -302,6 +336,12 @@ pub fn run() {
             }
 
             spawn_settings_watchdog(app.handle().clone());
+
+            // 外部配置文件变更监听（gateway.json / model-catalog.json）
+            crate::application::config_watcher::spawn_config_watcher(
+                app.handle().clone(),
+                data_dir.clone(),
+            );
 
             Ok(())
         })
@@ -395,6 +435,10 @@ async fn bootstrap(
     tracing::info!(db_path = %data_dir.join("silk.db").display(), "数据库文件");
 
     init_gateway_settings(data_dir)
+        .await
+        .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
+
+    init_model_catalog(app, data_dir)
         .await
         .map_err(|e| sqlx::Error::Io(std::io::Error::other(e)))?;
 

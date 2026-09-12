@@ -74,7 +74,38 @@ pub fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
     }
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("写入临时文件失败: {e}"))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("重命名失败: {e}"))
+    std::fs::rename(&tmp, path).map_err(|e| format!("重命名失败: {e}"))?;
+    // 记录本次自身写入（供外部文件 watcher 区分「应用写入」与「外部编辑」，
+    // 避免 gateway.json 保存触发监听循环重启）
+    record_self_write(path, text);
+    Ok(())
+}
+
+/// 最近一次由应用自身原子写入的文件内容（路径 → 内容摘要）
+use std::sync::Mutex;
+
+static LAST_SELF_WRITES: Mutex<Vec<(std::path::PathBuf, String)>> = Mutex::new(Vec::new());
+
+fn record_self_write(path: &Path, text: &str) {
+    if let Ok(mut guard) = LAST_SELF_WRITES.lock() {
+        guard.retain(|(p, _)| p != path);
+        guard.push((path.to_path_buf(), text.to_string()));
+        // 只保留最近 8 个，防止无界增长
+        if guard.len() > 8 {
+            guard.remove(0);
+        }
+    }
+}
+
+/// 判断该文件当前内容是否与应用最近一次自身写入一致（即未发生外部编辑）
+pub fn is_self_write(path: &Path, content: &str) -> bool {
+    if let Ok(guard) = LAST_SELF_WRITES.lock() {
+        guard
+            .iter()
+            .any(|(p, text)| p == path && text == content)
+    } else {
+        false
+    }
 }
 
 /// 深合并：target 中不存在的键才从 source 补充（不覆盖已有键）

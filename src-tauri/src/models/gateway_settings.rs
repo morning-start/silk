@@ -122,15 +122,11 @@ impl GatewaySettings {
         Ok(settings)
     }
 
-    /// 保存网关设置到 JSON 文件
+    /// 保存网关设置到 JSON 文件（原子写：临时文件 + 重命名，避免半写状态）
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建设置目录失败: {e}"))?;
-        }
         let content = serde_json::to_string_pretty(self)
             .map_err(|e| format!("序列化设置失败: {e}"))?;
-        std::fs::write(path, content)
+        crate::application::config_writer::write_text_atomic(path, &content)
             .map_err(|e| format!("写入设置文件失败: {e}"))
     }
 
