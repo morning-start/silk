@@ -83,7 +83,7 @@ impl GatewayPipeline {
 
     /// 最终化：流式响应在流结束后异步落日志，非流式同步落日志后返回
     async fn finalize_with_log(&self, mut ctx: RequestContext) -> Response {
-        if !ctx.path.starts_with("/v1/") {
+        if !crate::gateway::is_gateway_path(&ctx.path) {
             return finalize::success(ctx);
         }
 

@@ -215,4 +215,8 @@ if (!flags.has("--no-push")) {
 }
 
 console.log(`\n=== 发布完成: v${version} ===`);
-console.log(`检查更新端点: https://github.com/${REPO}/releases/latest/download/latest.json`);
+// 两条端点分工不同，别混：
+// - REST API：应用内「检查更新」走它（只需网络可达，不依赖签名产物）
+// - 插件清单：tauri-plugin-updater 静默安装走它（要求 latest.json + .sig 都已上传）
+console.log(`更新检查（REST API）  : https://api.github.com/repos/${REPO}/releases/latest`);
+console.log(`静默安装清单（插件）  : https://github.com/${REPO}/releases/latest/download/latest.json`);

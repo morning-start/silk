@@ -50,6 +50,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 前置校验：没有签名私钥时 tauri-action 会跳过 .sig 与 latest.json 的上传，
+      # 构建却是绿色的 —— 结果就是客户端「检查更新」一直拿不到更新清单。
+      # 与其产出这种半成品发布，不如在构建前直接失败。
+      - name: Verify updater signing key
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::未配置 Secret TAURI_SIGNING_PRIVATE_KEY，构建产物将不含 .sig 与 latest.json，自动更新不可用。请在仓库 Settings → Secrets and variables → Actions 中补上（内容与本地 ~/.tauri/silk.key 一致）。"
+            exit 1
+          fi
+          echo "签名私钥已配置"
+
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |

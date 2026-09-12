@@ -58,6 +58,12 @@ const isLatest = computed(
     !updateInfo.value.error
 );
 
+/** 有签名清单时可静默安装，否则只能引导到下载地址 */
+const installLabel = computed(() => {
+  if (installing.value) return "更新中…";
+  return updateInfo.value?.autoUpdateReady === false ? "前往下载" : "下载并安装";
+});
+
 function formatDate(date?: string): string {
   if (!date) return "";
   const d = new Date(date);
@@ -85,7 +91,8 @@ async function handleCheckUpdate() {
   checking.value = true;
   updateInfo.value = null;
   try {
-    updateInfo.value = await checkForUpdates();
+    // 手动点击必须跳过缓存，否则用户会以为按钮没生效
+    updateInfo.value = await checkForUpdates(true);
   } finally {
     checking.value = false;
   }
@@ -95,11 +102,18 @@ async function handleInstall() {
   installing.value = true;
   progress.value = 0;
   try {
-    const ok = await downloadAndInstall((p) => {
-      progress.value = Math.round(p * 100);
-    });
-    if (ok) {
+    // 把当前检查结果传下去：静默安装不可用时用它取下载地址
+    const outcome = await downloadAndInstall(
+      (p) => {
+        progress.value = Math.round(p * 100);
+      },
+      updateInfo.value ?? undefined
+    );
+
+    if (outcome === "installed") {
       message.success("更新已下载并安装，应用即将重启");
+    } else if (outcome === "opened-download") {
+      message.info("已在浏览器打开安装包下载，完成后请手动运行安装程序");
     } else {
       message.error("更新失败，请稍后重试");
     }
@@ -118,7 +132,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppPageShell title="关于">
+  <AppPageShell title="关于" desc="当前实例状态、软件更新与本地优先的隐私说明。">
     <template #count>
       <NTag size="small" type="info">v{{ version || "…" }}</NTag>
       <span class="ab-state" :class="{ 'is-online': running }">
@@ -133,16 +147,16 @@ onMounted(async () => {
       </NButton>
     </template>
 
-    <div class="ab-body">
+    <div class="p-split">
       <!-- 左栏：本机状态与更新（可变高度，放在一起不互相挤压） -->
-      <div class="ab-col">
+      <div class="p-col">
         <!-- 本机实例：地址与状态优先，取代原先的渐变标识块 -->
-        <section class="ab-card">
-          <header class="ab-head">
+        <section class="s-card">
+          <header class="s-card-head">
             <span class="ab-kicker">本机实例</span>
-            <span class="ab-head-meta text-mono">{{ running ? "RUNNING" : "STOPPED" }}</span>
+            <span class="s-card-meta">{{ running ? "RUNNING" : "STOPPED" }}</span>
           </header>
-          <div class="ab-card-body">
+          <div class="s-card-body">
             <div class="ab-id">
               <span class="ab-mark">S</span>
               <div>
@@ -176,7 +190,7 @@ onMounted(async () => {
                   <span
                     v-for="protocol in PROTOCOLS"
                     :key="protocol"
-                    class="ab-chip text-mono"
+                    class="s-chip text-mono"
                   >{{ protocol }}</span>
                   <span class="ab-note">任意互转</span>
                 </dd>
@@ -186,14 +200,15 @@ onMounted(async () => {
         </section>
 
         <!-- 软件更新：状态、发布说明与安装动作收在一张卡里 -->
-        <section class="ab-card">
-          <header class="ab-head">
+        <section class="s-card">
+          <header class="s-card-head">
             <span class="ab-kicker">软件更新</span>
-            <span class="ab-head-meta text-mono">v{{ version || "…" }}</span>
+            <span class="s-card-meta">v{{ version || "…" }}</span>
           </header>
-          <div class="ab-card-body">
+          <div class="s-card-body">
             <p class="ab-note ab-hint">
-              更新包从 GitHub Releases 下载并自动安装，完成后需要重启应用。
+              更新取自 GitHub Releases。发布带签名清单时可自动下载安装，完成后重启应用；
+              否则转为浏览器下载安装包。
             </p>
 
             <div v-if="checking" class="ab-line ab-muted">正在检查更新…</div>
@@ -222,6 +237,11 @@ onMounted(async () => {
                 </span>
               </div>
 
+              <p v-if="updateInfo.autoUpdateReady === false" class="ab-note">
+                本次发布未提供自动更新清单，将为你打开
+                {{ updateInfo.assetName || "安装包" }} 的下载地址。
+              </p>
+
               <div class="ab-actions">
                 <NButton
                   type="primary"
@@ -231,7 +251,15 @@ onMounted(async () => {
                   @click="handleInstall"
                 >
                   <template #icon><NIcon><DownloadOutline /></NIcon></template>
-                  {{ installing ? "更新中…" : "下载并安装" }}
+                  {{ installLabel }}
+                </NButton>
+                <NButton
+                  v-if="updateInfo.releaseUrl"
+                  size="small"
+                  quaternary
+                  @click="openLink(updateInfo.releaseUrl!)"
+                >
+                  查看发布页
                 </NButton>
               </div>
             </template>
@@ -243,8 +271,8 @@ onMounted(async () => {
 
             <div v-else-if="updateInfo?.error" class="ab-line ab-line--error">
               <span class="ab-dot ab-dot--error"></span>
-              检查更新失败，请确认网络后重试
-              <span class="ab-note text-mono">{{ updateInfo.error }}</span>
+              检查更新失败
+              <span class="ab-note">{{ updateInfo.error }}</span>
             </div>
 
             <div v-else class="ab-line ab-muted">
@@ -255,12 +283,12 @@ onMounted(async () => {
       </div>
 
       <!-- 右栏：静态资料，条目短且数量固定 -->
-      <div class="ab-col">
-        <section class="ab-card">
-          <header class="ab-head">
+      <div class="p-col">
+        <section class="s-card">
+          <header class="s-card-head">
             <span class="ab-kicker">项目信息</span>
           </header>
-          <div class="ab-card-body">
+          <div class="s-card-body">
             <dl class="ab-kv">
               <div class="ab-kv-row">
                 <dt>仓库</dt>
@@ -298,12 +326,12 @@ onMounted(async () => {
           </div>
         </section>
 
-        <section class="ab-card">
-          <header class="ab-head">
+        <section class="s-card">
+          <header class="s-card-head">
             <span class="ab-kicker">数据与隐私</span>
-            <span class="ab-head-meta text-mono">LOCAL-FIRST</span>
+            <span class="s-card-meta">LOCAL-FIRST</span>
           </header>
-          <div class="ab-card-body">
+          <div class="s-card-body">
             <ul class="ab-facts">
               <li v-for="fact in PRIVACY_FACTS" :key="fact">
                 <NIcon :size="14" class="ab-fact-ico"><CheckmarkCircleOutline /></NIcon>
@@ -319,28 +347,16 @@ onMounted(async () => {
 
 <style scoped>
 /* 两栏铺满：左栏是「会变的东西」（状态、更新），右栏是「不变的东西」（资料）。
-   设计基线要求页面横向铺满，不做窄容器；栏宽比 1.35:1 保证左栏的发布说明有足够行宽。 */
-.ab-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-  width: 100%;
-}
-
-.ab-col {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
+   栏宽比 1.35:1 由全局 .p-split 提供，窄窗单栏也由全局断点处理。
+   卡片 / 页头 / 徽标 / 空态全部走 style.css 的 s-* 规范；
+   这里只保留本页特有的标识、key-value、隐私要点与更新造型。 */
 
 /* ---------- 页头状态 ---------- */
 .ab-state {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 
@@ -361,48 +377,12 @@ onMounted(async () => {
 .ab-dot--ok { background: var(--success); }
 .ab-dot--error { background: var(--danger); }
 
-/* ---------- 系统卡 ---------- */
-.ab-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.ab-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.ab-kicker {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.ab-head-meta {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-
-.ab-card-body {
-  padding: 16px 18px;
-}
-
 /* ---------- 标识 ---------- */
 .ab-id {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
 }
 
 .ab-mark {
@@ -416,13 +396,13 @@ onMounted(async () => {
   background: var(--surface-alt);
   color: var(--fg-2);
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: var(--fs-lg);
   font-weight: 700;
 }
 
 .ab-name {
   margin: 0 0 3px;
-  font-size: 16px;
+  font-size: var(--fs-lg);
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--fg);
@@ -430,7 +410,7 @@ onMounted(async () => {
 
 .ab-sub {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 
@@ -444,7 +424,7 @@ onMounted(async () => {
 .ab-kv-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--sp-3);
   padding: 9px 0;
   border-top: 1px solid var(--border-soft);
   min-width: 0;
@@ -453,7 +433,7 @@ onMounted(async () => {
 .ab-kv-row dt {
   flex: none;
   width: 76px;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 
@@ -461,25 +441,16 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
   margin: 0;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--fg-2);
 }
 
 .ab-strong { color: var(--fg); }
-.ab-note { font-size: 12px; color: var(--muted); }
+.ab-note { font-size: var(--fs-sm); color: var(--muted); }
 .ab-ico { color: var(--muted); }
-
-.ab-chip {
-  padding: 1px 7px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  background: var(--surface-alt);
-  font-size: 11px;
-  color: var(--fg-2);
-}
 
 /* ---------- 隐私要点 ---------- */
 .ab-facts {
@@ -488,14 +459,14 @@ onMounted(async () => {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: var(--sp-2);
 }
 
 .ab-facts li {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  font-size: 12.5px;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
   line-height: 1.6;
   color: var(--fg-2);
 }
@@ -508,32 +479,32 @@ onMounted(async () => {
 
 /* ---------- 更新 ---------- */
 .ab-hint {
-  margin: 0 0 12px;
+  margin: 0 0 var(--sp-3);
 }
 
 .ab-line {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  font-size: 13px;
+  gap: var(--sp-2);
+  font-size: var(--fs-base);
   color: var(--fg-2);
 }
 
 .ab-line--ok { color: var(--success); }
 .ab-line--error { color: var(--danger); }
-.ab-muted { font-size: 12.5px; color: var(--muted); }
+.ab-muted { font-size: var(--fs-sm); color: var(--muted); }
 
 .ab-notes {
-  margin: 12px 0 0;
-  padding: 12px 14px;
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-3) var(--sp-4);
   max-height: 220px;
   overflow-y: auto;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--surface-alt);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -543,32 +514,13 @@ onMounted(async () => {
 .ab-progress {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 12px;
+  gap: var(--sp-1);
+  margin-top: var(--sp-3);
 }
 
 .ab-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-/* 窄窗口退化为单栏：左栏在上，符合「先看状态再看资料」的顺序 */
-@media (max-width: 1024px) {
-  .ab-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (max-width: 720px) {
-  .ab-kv-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-  }
-
-  .ab-kv-row dt {
-    width: auto;
-  }
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
 }
 </style>

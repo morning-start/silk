@@ -16,3 +16,4 @@ pub mod preset_service;
 pub mod provider_service;
 pub mod settings_service;
 pub mod stats_service;
+pub mod update_service;

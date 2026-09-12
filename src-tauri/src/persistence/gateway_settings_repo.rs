@@ -45,7 +45,7 @@ impl GatewaySettingsRepo {
             settings.auto_start_gateway = v;
         }
         if let Some(v) = &update.default_provider_id {
-            settings.default_provider_id = Some(v.clone());
+            settings.default_provider_id = v.clone();
         }
         if let Some(v) = update.rate_limit_enabled {
             settings.rate_limit_enabled = v;
@@ -57,7 +57,12 @@ impl GatewaySettingsRepo {
             settings.rate_limit_max_tokens_per_minute = v;
         }
         if let Some(v) = &update.proxy_url {
-            settings.proxy_url = Some(v.clone());
+            // 显式 null（或空串）→ 清除代理；有值 → 覆盖
+            settings.proxy_url = v
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
         }
         if let Some(v) = update.trace_enabled {
             settings.trace_enabled = v;

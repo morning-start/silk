@@ -43,3 +43,7 @@ export { statsApi } from "./stats";
 export { modelMappingsApi } from "./model-mappings";
 export { presetsApi } from "./presets";
 export { configApi } from "./config";
+export { discoveryApi } from "./discovery";
+export type { PresetProvider, PresetModel, InstalledAiApp } from "./discovery";
+export { updaterApi } from "./updater";
+export type { AppUpdateInfo } from "./updater";

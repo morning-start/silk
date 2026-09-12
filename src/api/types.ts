@@ -17,6 +17,14 @@ export interface GatewaySettings {
   rate_limit_max_tokens_per_minute: number;
   /** 全局默认代理地址（渠道未配置代理时使用），null 表示直连 */
   proxy_url: string | null;
+  /** 是否启用 prism 日志追踪（调试用） */
+  trace_enabled: boolean;
+  /** 全局日志级别（trace/debug/info/warn/error） */
+  log_level: string;
+  /** 文件日志级别（默认 debug，比控制台更详细） */
+  file_level: string;
+  /** 模块级日志覆盖（模块路径 → 级别） */
+  log_modules: Record<string, string>;
 }
 
 export interface GatewayStatus {
@@ -180,16 +188,11 @@ export interface ModelMapping {
 // Gateway Key 类型
 // ---------------------------------------------------------------------------
 
+/** 与 `application::gateway_key_service::GatewayKeyResponse` 一一对应 */
 export interface GatewayKey {
   id: string;
   name: string;
   plain_key: string;
-  enabled: boolean;
-  expires_at: string | null;
-  max_concurrent: number;
-  is_expired: boolean;
-  created_at: string;
-  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,12 +261,6 @@ export interface PresetDefaults {
 // 模型列表
 // ---------------------------------------------------------------------------
 
-export interface ModelListingItem {
-  name?: string;
-  config_json?: string;
-  sort_index?: number;
-}
-
 export interface SwitchResult {
   success: boolean;
   warnings: string[];
@@ -274,11 +271,13 @@ export interface SwitchResult {
 // 其他类型
 // ---------------------------------------------------------------------------
 
+/** 与 `application::models_listing::ModelListingItem` 一一对应 */
 export interface ModelListingItem {
   id: string;
   object: string;
   created: number;
   owned_by: string;
+  /** 模型池映射 ID，下拉框用此作 value；渠道穿透模型为 null */
   model_mapping_id: string | null;
 }
 

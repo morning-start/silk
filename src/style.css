@@ -100,6 +100,28 @@
     'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', 'Menlo', monospace;
 
+  /* ---- 间距刻度：全站只用这 6 档，4 的倍数 ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* ---- 内容区留白：由文件末尾的统一断点调小，页面内部不再各自写 padding ---- */
+  --page-pad-y: 24px;
+  --page-pad-x: 28px;
+
+  /* ---- 字号刻度：收敛原先 11/11.5/12/12.5/13/13.5/14/15/16/18/19/20/22/24 的漂移 ---- */
+  --fs-kicker: 11px;   /* 眉标 / 统计标签 */
+  --fs-xs: 11.5px;     /* 辅助说明 */
+  --fs-sm: 12.5px;     /* 次级正文 */
+  --fs-base: 13.5px;   /* 正文 */
+  --fs-md: 14px;       /* 卡片小标题 */
+  --fs-lg: 16px;       /* 区块大标题 */
+  --fs-title: 19px;    /* 页面标题：全站唯一 */
+  --fs-value: 22px;    /* 统计数值 */
+
   /* ---- 语义色 ---- */
   --success: #16a34a;
   --success-soft: rgba(22, 163, 74, 0.10);
@@ -443,7 +465,7 @@ body.dark {
 }
 
 body.dark .n-data-table th {
-  background: #262626 !important;
+  background: var(--surface-alt) !important;
   color: var(--muted) !important;
 }
 
@@ -490,97 +512,497 @@ body.dark ::-webkit-scrollbar-thumb:active {
 }
 
 /* ================================================================
-   页面骨架
+   页面系统 (p-*) 与表面系统 (s-*)
+   ----------------------------------------------------------------
+   这是全站唯一的页面/卡片/统计/徽标/空态实现。
+   各视图不得再自建 page-header / card / stat-card / empty-state，
+   只能组合以下类；断点也只在文件末尾统一定义一次。
+
+   布局语法：
+     p-page       页面根容器（纵向节奏 + 最大宽度居中）
+       p-head     页头（标题区 + 操作区，窄窗自动换成上下堆叠）
+       p-split    两栏页面体（窄窗自动单栏）
+       s-card     卡片（头/体/脚三段）
+       s-stats    统计卡网格（自适应列数）
    ================================================================ */
-.mb-16 { margin-bottom: 16px; }
 
-.toolbar {
+/* ---------- 页面根容器 ---------- */
+.p-page {
   display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+/* ---------- 页头：全站唯一的标题实现 ---------- */
+.p-head {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  align-items: flex-end;
-  margin-bottom: 20px;
-  gap: 16px;
+  gap: var(--sp-3) var(--sp-4);
+  min-height: 36px;
+  flex-wrap: wrap;
 }
 
-.toolbar-left {
+.p-head-main {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
-.toolbar-right {
+/* 标题行：标题与徽标/计数同一基线 */
+.p-head-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
-.page-title {
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.018em;
+.p-head-title {
   margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
   color: var(--fg);
 }
 
-.page-desc {
-  font-size: 12.5px;
-  font-weight: 400;
-  color: var(--muted);
-  margin: 2px 0 0;
+.p-head-desc {
+  margin: 0;
+  font-size: var(--fs-sm);
   line-height: 1.5;
+  color: var(--muted);
+  max-width: 68ch;
 }
 
-.table-card {
+.p-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* 页头内的搜索框：给个稳定的最小宽度，窄窗再放开 */
+.p-head-actions :deep(.n-input),
+.p-head-actions .n-input {
+  min-width: 200px;
+}
+
+/* ---------- 两栏页面体 ---------- */
+.p-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.p-split--even {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.p-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+/* ---------- 卡片 ---------- */
+.s-card {
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  background: var(--surface);
   overflow: hidden;
 }
 
-.form-row {
-  display: flex;
-  gap: 12px;
+/* 整卡可点：只加深边框，不做位移与辉光 */
+.s-card--link {
+  cursor: pointer;
+  transition: border-color var(--transition);
 }
 
-/* ================================================================
-   空态 / 错误态
-   ================================================================ */
-.empty-state,
-.error-state {
+.s-card--link:hover {
+  border-color: color-mix(in srgb, var(--fg) 16%, var(--border));
+}
+
+.s-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 42px;
+  padding: 10px var(--sp-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.s-card-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+.s-card-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-kicker);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.s-card-body {
+  padding: var(--sp-4);
+}
+
+.s-card-body--tight {
+  padding: 10px 14px;
+}
+
+.s-card-body--flush {
+  padding: 0;
+}
+
+.s-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ---------- 统计卡 ---------- */
+.s-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--sp-3);
+}
+
+.s-stat {
+  position: relative;
+  padding: 14px var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* 顶部 2px 色条：统计卡的唯一区分手段 */
+.s-stat::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--border);
+}
+
+.s-stat--accent::before { background: var(--accent); }
+.s-stat--success::before { background: var(--success); }
+.s-stat--indigo::before { background: var(--brand-2); }
+.s-stat--warn::before { background: var(--warn); }
+.s-stat--danger::before { background: var(--danger); }
+.s-stat--neutral::before { background: var(--muted); }
+
+.s-stat-label {
+  margin-bottom: 7px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-kicker);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.s-stat-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-value);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.s-stat-value.is-success { color: var(--success); }
+.s-stat-value.is-danger { color: var(--danger); }
+
+.s-stat-unit {
+  margin-left: 2px;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  opacity: 0.6;
+}
+
+.s-stat-sub {
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+/* 页头里的紧凑统计条：与 s-stat 同一语义，只是压缩成一行 */
+.s-statstrip {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.s-statstrip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 6px 12px;
+}
+
+.s-statstrip-item + .s-statstrip-item {
+  border-left: 1px solid var(--border-soft);
+}
+
+.s-statstrip-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.s-statstrip-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.s-statstrip-value.is-accent { color: var(--accent); }
+.s-statstrip-value.is-success { color: var(--success); }
+.s-statstrip-value.is-danger { color: var(--danger); }
+
+/* ---------- 徽标 / 码片 ---------- */
+
+/* 胶囊徽标：状态、方法、类别
+   基类自带中性配色——裸用 .s-badge（不加色调修饰符）也必须可见，
+   色调类只覆盖颜色三件套，不改变形状。 */
+.s-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  font-size: var(--fs-kicker);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.s-badge--neutral {
+  background: var(--surface-alt);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.s-badge--accent {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  color: var(--accent);
+}
+
+.s-badge--success {
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--success) 22%, var(--surface));
+  color: var(--success);
+}
+
+.s-badge--warn {
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--warn) 22%, var(--surface));
+  color: var(--warn);
+}
+
+.s-badge--danger {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--surface));
+  color: var(--danger);
+}
+
+/* 等宽徽标：承载 HTTP 方法这类固定长度标识符 */
+.s-badge--mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+/* 方形码片：承载标识符（模型名 / 协议名 / Header），等宽 + 截断 */
+.s-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 190px;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-kicker);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.s-chip--plain {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+/* 状态点：全站统一 6px */
+.s-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.s-dot.is-online { background: var(--success); }
+.s-dot.is-error { background: var(--danger); }
+.s-dot.is-warn { background: var(--warn); }
+
+/* ---------- 表格：让原生 table 与 NDataTable 长相一致 ---------- */
+.s-table-wrap {
+  overflow-x: auto;
+}
+
+.s-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.s-table th {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt);
+  font-family: var(--font-mono);
+  font-size: var(--fs-kicker);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.s-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+
+.s-table tbody tr:hover {
+  background: var(--surface-alt);
+}
+
+.s-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.s-table .is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 行内工具条 ---------- */
+.s-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.s-toolbar-end {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ---------- 通用网格 ---------- */
+.s-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.s-grid-auto {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--sp-3);
+}
+
+
+/* ---------- 空态 / 错误态：全站唯一实现 ---------- */
+.s-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 56px 24px;
+  gap: 10px;
+  padding: 44px var(--sp-6);
   text-align: center;
 }
 
-.empty-state .empty-icon {
-  margin-bottom: 14px;
-  opacity: 0.45;
+.s-state-icon {
+  display: grid;
+  place-items: center;
   color: var(--muted);
+  opacity: 0.55;
 }
 
-.empty-state .empty-title,
-.error-state .error-title {
-  font-size: 15px;
+.s-state-icon.is-error {
+  color: var(--danger);
+  opacity: 1;
+}
+
+.s-state-title {
+  margin: 0;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--fg);
-  margin: 0 0 6px;
 }
 
-.empty-state .empty-desc,
-.error-state .error-desc {
-  font-size: 13px;
-  color: var(--muted);
-  margin: 0 0 18px;
+.s-state-desc {
+  margin: 0;
   max-width: 380px;
+  font-size: var(--fs-sm);
   line-height: 1.55;
+  color: var(--muted);
 }
 
-.error-state .error-icon {
-  margin-bottom: 14px;
-  color: var(--danger);
+/* 空态里的动作按钮与说明之间留一口气 */
+.s-state-desc + .n-button,
+.s-state-title + .n-button {
+  margin-top: 6px;
 }
+
 
 /* ================================================================
    页面切换过渡
@@ -599,26 +1021,123 @@ body.dark ::-webkit-scrollbar-thumb:active {
   opacity: 0;
 }
 
-@media (max-width: 900px) {
-  .app-content .n-layout-scroll-container {
-    padding: 20px !important;
+/* ================================================================
+   响应式：全站只在这里定义断点
+   ----------------------------------------------------------------
+   4 档，对应窗口实际会被拖到的宽度：
+     1280  宽屏      —  统计卡 4 列，双栏保持
+     1024  中等      —  双栏收成单栏（侧栏仍在，内容区仍够宽）
+      860  紧凑      —  页头换成上下堆叠，统计卡 2 列
+      640  窄窗      —  一律单列，留白压到最小
+   各视图不得再写自己的 @media，否则又会产生第二套事实。
+   ================================================================ */
+
+/* 内容区留白由令牌驱动，随断点收缩；不再用内联 style 覆盖 */
+.app-content .n-layout-scroll-container {
+  padding: var(--page-pad-y) var(--page-pad-x);
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --page-pad-y: 20px;
+    --page-pad-x: 22px;
+  }
+
+  .p-split,
+  .p-split--even,
+  .s-grid-2 {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
-@media (max-width: 680px) {
-  .app-content .n-layout-scroll-container {
-    padding: 16px !important;
+@media (max-width: 860px) {
+  .p-head {
+    align-items: stretch;
   }
 
-  .toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
+  .p-head-actions {
+    justify-content: flex-start;
   }
 
-  .toolbar-right {
+  .p-head-actions .n-input {
+    flex: 1 1 200px;
+    min-width: 0;
+  }
+
+  .s-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .s-statstrip {
     width: 100%;
-    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page-pad-y: 16px;
+    --page-pad-x: 16px;
+  }
+
+  .s-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .s-grid-2,
+  .s-grid-auto {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .s-card-body {
+    padding: var(--sp-3);
+  }
+
+  .s-stat {
+    padding: var(--sp-3);
+  }
+
+  .s-stat-value {
+    font-size: 20px;
+  }
+
+  .s-state {
+    padding: 32px var(--sp-4);
+  }
+
+  /* 渠道卡片：窄窗下操作按钮拉伸占满整行（原 ProvidersView 900/560 私有规则合并） */
+  .s-card .pc-actions {
+    justify-content: stretch;
+  }
+
+  .s-card .pc-actions .n-button {
+    flex: 1;
+  }
+
+  /* 渠道弹窗：窄窗下密钥 / 请求头开关的标签与控件右对齐（原 ProvidersView 900 私有规则） */
+  .m-list .key-enabled,
+  .m-list .header-enabled {
+    justify-content: flex-end;
+  }
+
+  /* 关于页：窄窗下 key-value 行竖排（原 AboutView 720 私有规则） */
+  .ab-kv-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .ab-kv-row dt {
+    width: auto;
+  }
+
+  /* 弹窗：窄窗下改为按视口高度限高，底部按钮拉伸占满（原 AppFormModal 560 私有规则） */
+  .app-form-modal-body {
+    max-height: calc(100vh - 148px);
+  }
+
+  .modal-footer-main .n-button {
+    flex: 1;
   }
 }
 
@@ -968,7 +1487,7 @@ body.dark ::-webkit-scrollbar-thumb:active {
   flex: none;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .m-grid {
     grid-template-columns: minmax(0, 1fr);
   }

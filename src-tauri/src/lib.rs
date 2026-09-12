@@ -260,6 +260,22 @@ pub fn run() {
                         hide_main_window(window);
                     }
                 }
+                return;
+            }
+
+            // 「最小化到托盘」：Tauri 没有独立的 minimize 事件，最小化会以
+            // Resized 形式到达。先判窗口状态再读设置，避免拖动缩放时反复读盘。
+            // 恢复走托盘「显示窗口」，show_main_window 会 unminimize + show。
+            if let WindowEvent::Resized(_) = event {
+                if window.is_minimized().unwrap_or(false) {
+                    if let Some(path) = crate::get_settings_path() {
+                        let settings =
+                            crate::persistence::GatewaySettingsRepo::load_effective(path);
+                        if settings.minimize_to_tray {
+                            hide_main_window(window);
+                        }
+                    }
+                }
             }
         })
         .setup(|app| {
@@ -348,6 +364,8 @@ pub fn run() {
             commands::presets::list_agent_types,
             commands::presets::get_preset_defaults,
             commands::presets::update_preset_order,
+            // 软件更新（GitHub Releases REST API）
+            commands::updater::check_app_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

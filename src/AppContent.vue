@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, onErrorCaptured, type Component } from "vue";
+import { computed, onMounted, onUnmounted, ref, onErrorCaptured, type Component } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { getVersion } from "@tauri-apps/api/app";
 import {
@@ -21,6 +21,7 @@ import {
   CubeOutline,
   LayersOutline,
   DocumentTextOutline,
+  StatsChartOutline,
   SettingsOutline,
   InformationCircleOutline,
 } from "@vicons/ionicons5";
@@ -63,6 +64,7 @@ const navGroups: NavGroup[] = [
       { label: "模型", path: "/model-square", exact: true, icon: CubeOutline },
       { label: "预设", path: "/presets", exact: true, icon: LayersOutline },
       { label: "日志", path: "/logs", exact: true, icon: DocumentTextOutline },
+      { label: "统计", path: "/stats", exact: true, icon: StatsChartOutline },
     ],
   },
   {
@@ -119,9 +121,25 @@ async function restartGateway() {
   }
 }
 
+// 窄窗自动收起侧栏：窗口被拖窄时把横向空间让给内容区
+const isNarrow = ref(false);
+let narrowQuery: MediaQueryList | null = null;
+
+function syncNarrow(matches?: boolean) {
+  isNarrow.value = matches ?? narrowQuery?.matches ?? false;
+}
+
 onMounted(async () => {
   gatewayStore.initStatus();
   appVersion.value = await getVersion();
+
+  narrowQuery = window.matchMedia("(max-width: 860px)");
+  syncNarrow();
+  narrowQuery.addEventListener("change", (e) => syncNarrow(e.matches));
+});
+
+onUnmounted(() => {
+  narrowQuery = null;
 });
 
 // 全局错误边界：捕获子组件渲染错误，显示降级 UI
@@ -139,7 +157,16 @@ onErrorCaptured((err, _instance, info) => {
 <template>
   <NLayout class="app-layout" has-sider>
     <!-- ============ Sidebar ============ -->
-    <NLayoutSider :width="236" :native-scrollbar="false" class="app-sidebar" bordered>
+    <NLayoutSider
+      :width="236"
+      :collapsed-width="56"
+      :collapsed="isNarrow"
+      :show-trigger="false"
+      :native-scrollbar="false"
+      class="app-sidebar"
+      :class="{ 'is-collapsed': isNarrow }"
+      bordered
+    >
       <div class="sidebar-inner">
         <div class="sidebar-brand">
           <div class="brand-mark"></div>
@@ -222,7 +249,7 @@ onErrorCaptured((err, _instance, info) => {
         </div>
       </NLayoutHeader>
 
-      <NLayoutContent class="app-content" content-style="padding: 24px 28px;">
+      <NLayoutContent class="app-content">
         <div v-if="errorInfo" class="error-boundary">
           <div class="error-boundary-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
@@ -390,7 +417,7 @@ onErrorCaptured((err, _instance, info) => {
 
 .nav-item:hover {
   background: var(--sidebar-hover);
-  color: #e5e7eb;
+  color: color-mix(in srgb, var(--sidebar-active) 80%, var(--sidebar-fg));
 }
 
 .nav-item.active {
@@ -425,7 +452,7 @@ onErrorCaptured((err, _instance, info) => {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #4b5563;
+  background: color-mix(in srgb, var(--sidebar-fg) 45%, var(--sidebar-bg-solid));
 }
 
 .footer-dot.online {
@@ -557,7 +584,7 @@ onErrorCaptured((err, _instance, info) => {
 .icon-btn:hover {
   color: var(--fg);
   background: var(--surface-alt);
-  border-color: var(--muted);
+  border-color: color-mix(in srgb, var(--fg) 22%, var(--border));
 }
 
 .icon-btn--danger:hover {
@@ -570,10 +597,6 @@ onErrorCaptured((err, _instance, info) => {
   color: var(--success);
   border-color: color-mix(in srgb, var(--success) 30%, var(--border));
   background: color-mix(in srgb, var(--success) 8%, var(--surface));
-}
-
-body.dark .icon-btn:hover {
-  border-color: #262626;
 }
 
 /* ================================================================
@@ -647,16 +670,28 @@ body.dark .icon-btn:hover {
   word-break: break-all;
 }
 
-@media (max-width: 680px) {
-  .app-topbar {
-    height: 48px;
-  }
+/* 侧栏收起：只留图标，导航标签与分组标题隐藏。
+   宽度交给 NLayoutSider 的 collapsed-width，这里只管内容形态。 */
+.app-sidebar.is-collapsed .nav-item {
+  justify-content: center;
+  padding: 0;
+}
 
-  .topbar-inner {
-    padding: 0 14px;
-    gap: 8px;
-  }
+.app-sidebar.is-collapsed .nav-item > span,
+.app-sidebar.is-collapsed .nav-section,
+.app-sidebar.is-collapsed .brand-text,
+.app-sidebar.is-collapsed .footer-text {
+  display: none;
+}
 
+.app-sidebar.is-collapsed .sidebar-brand,
+.app-sidebar.is-collapsed .sidebar-footer {
+  justify-content: center;
+  padding: 0;
+}
+
+/* 顶栏在紧凑宽度下先丢掉装饰性信息，保留状态与操作 */
+@media (max-width: 860px) {
   .topbar-kicker,
   .status-sep,
   .status-label {
@@ -672,6 +707,17 @@ body.dark .icon-btn:hover {
     max-width: 128px;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-topbar {
+    height: 48px;
+  }
+
+  .topbar-inner {
+    padding: 0 14px;
+    gap: 8px;
   }
 
   .main-footer {

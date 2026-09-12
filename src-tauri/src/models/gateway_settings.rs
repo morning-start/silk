@@ -173,6 +173,23 @@ impl GatewaySettings {
     }
 }
 
+/// 可清空的更新字段：区分「未提供」与「显式清空」
+///
+/// `Option<Option<T>>` 单独用 serde 无法表达三态——JSON `null` 会被外层
+/// `Option` 直接吃掉，变成与字段缺失相同的 `None`。加上本反序列化器后：
+/// - 字段缺失 → `None`（不改动）
+/// - 显式 `null` → `Some(None)`（清空为未设置）
+/// - 具体值 → `Some(Some(v))`（写入）
+pub type NullableUpdate<T> = Option<Option<T>>;
+
+pub fn double_option<'de, D, T>(deserializer: D) -> Result<NullableUpdate<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateGatewaySettings {
     pub bind_host: Option<String>,
@@ -183,12 +200,15 @@ pub struct UpdateGatewaySettings {
     pub minimize_to_tray: Option<bool>,
     pub close_to_tray: Option<bool>,
     pub auto_start_gateway: Option<bool>,
-    pub default_provider_id: Option<String>,
+    /// 默认渠道 ID；显式传 null 表示清除
+    #[serde(default, deserialize_with = "double_option")]
+    pub default_provider_id: NullableUpdate<String>,
     pub rate_limit_enabled: Option<bool>,
     pub rate_limit_max_requests_per_minute: Option<i64>,
     pub rate_limit_max_tokens_per_minute: Option<i64>,
-    /// 全局默认代理地址（渠道未配置代理时使用）
-    pub proxy_url: Option<String>,
+    /// 全局默认代理地址（渠道未配置代理时使用）；显式传 null 表示清除
+    #[serde(default, deserialize_with = "double_option")]
+    pub proxy_url: NullableUpdate<String>,
     /// 是否启用 prism 日志追踪（调试用）
     pub trace_enabled: Option<bool>,
     /// 全局日志级别
@@ -197,4 +217,33 @@ pub struct UpdateGatewaySettings {
     pub file_level: Option<String>,
     /// 模块级日志覆盖
     pub log_modules: Option<std::collections::HashMap<String, String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(json: &str) -> UpdateGatewaySettings {
+        serde_json::from_str(json).expect("valid payload")
+    }
+
+    #[test]
+    fn nullable_update_distinguishes_missing_from_null() {
+        // 字段缺失：不改动
+        let missing = parse(r#"{"bind_port":1877}"#);
+        assert!(missing.proxy_url.is_none());
+        assert!(missing.default_provider_id.is_none());
+
+        // 显式 null：清空
+        let cleared = parse(r#"{"proxy_url":null,"default_provider_id":null}"#);
+        assert_eq!(cleared.proxy_url, Some(None));
+        assert_eq!(cleared.default_provider_id, Some(None));
+
+        // 具体值：写入
+        let set = parse(r#"{"proxy_url":"http://127.0.0.1:7890"}"#);
+        assert_eq!(
+            set.proxy_url,
+            Some(Some("http://127.0.0.1:7890".to_string()))
+        );
+    }
 }

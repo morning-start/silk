@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from "vue";
 import {
   NButton,
-  NCard,
   NCheckbox,
   NGrid,
   NGi,
@@ -16,8 +15,10 @@ import {
 } from "naive-ui";
 import { SearchOutline } from "@vicons/ionicons5";
 import { storeToRefs } from "pinia";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { providersApi } from "../api/providers";
-import type { Provider, ProviderHeaderEntry } from "../api";
+import { discoveryApi } from "../api/discovery";
+import type { PresetProvider, Provider, ProviderHeaderEntry } from "../api";
 import { copyWithFeedback } from "../utils/clipboard";
 import { healthStatusType } from "../utils/health";
 import { useConfirm } from "../utils/confirm";
@@ -81,6 +82,59 @@ const keyStrategyOptions = [
   { label: "加权随机", value: "weighted" },
   { label: "最少连接", value: "least_conn" },
 ];
+
+// ---------------------------------------------------------------------------
+// 预置模板：把官方地址 / 协议 / 常用模型一次填好，省掉查文档
+// ---------------------------------------------------------------------------
+
+const presetProviders = ref<PresetProvider[]>([]);
+const presetId = ref<string | null>(null);
+
+const presetOptions = computed(() =>
+  presetProviders.value.map((p) => ({ label: p.name, value: p.id })),
+);
+
+const selectedPreset = computed(
+  () => presetProviders.value.find((p) => p.id === presetId.value) ?? null,
+);
+
+async function loadPresetProviders() {
+  if (presetProviders.value.length > 0) return;
+  try {
+    presetProviders.value = await discoveryApi.getPresetProviders();
+  } catch {
+    /* 模板加载失败不影响手动填写 */
+  }
+}
+
+/**
+ * 应用预置模板
+ *
+ * 只覆盖"官方既定"的字段（地址、协议）；名称仅在用户还没填时补上；
+ * 模型取并集追加，避免清掉用户已经勾好的模型。
+ */
+function applyPreset(id: string) {
+  const preset = presetProviders.value.find((p) => p.id === id);
+  if (!preset) return;
+  presetId.value = id;
+  formValue.value.api_base_url = preset.api_base_url;
+  formValue.value.protocols = [...preset.protocols];
+  if (!formValue.value.name.trim()) {
+    formValue.value.name = preset.name;
+  }
+  const merged = new Set(formValue.value.models);
+  for (const model of preset.models) merged.add(model.id);
+  formValue.value.models = [...merged];
+}
+
+async function openPresetKeyUrl() {
+  if (!selectedPreset.value) return;
+  try {
+    await openUrl(selectedPreset.value.api_key_url);
+  } catch {
+    message.error("打开链接失败");
+  }
+}
 
 const formValue = ref({
   name: "",
@@ -166,6 +220,7 @@ function resetForm() {
   editingId.value = null;
   selectedModels.value = [];
   modelSearch.value = "";
+  presetId.value = null;
   keyVisibility.value = [false];
   formValue.value = {
     name: "",
@@ -196,7 +251,7 @@ function handleEdit(row: Provider) {
   editingId.value = row.id;
   selectedModels.value = [];
   modelSearch.value = "";
-  keyVisibility.value = (row.keys && row.keys.length > 0)
+  presetId.value = null;  keyVisibility.value = (row.keys && row.keys.length > 0)
     ? row.keys.map(() => false)
     : [false];
   formValue.value = {
@@ -433,12 +488,14 @@ async function handleSubmit() {
 
 onMounted(() => {
   providersStore.fetchAll();
+  loadPresetProviders();
 });
 </script>
 
 <template>
   <AppPageShell
     title="渠道管理"
+    desc="管理转发渠道：配置地址、协议、密钥与模型，并测试连通性。"
     :loading="loading"
     :error="error"
     :empty="filteredProviders.length === 0"
@@ -456,62 +513,58 @@ onMounted(() => {
       <NButton type="primary" @click="handleAdd">+ 新增渠道</NButton>
     </template>
     <template #empty>
-      <div v-if="searchQuery.trim()" class="empty-state">
-        <div class="empty-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        </div>
-        <h3 class="empty-title">未找到匹配的渠道</h3>
-        <p class="empty-desc">换个关键词，或者直接新增一个渠道。</p>
+      <div v-if="searchQuery.trim()" class="s-state">
+        <h3 class="s-state-title">未找到匹配的渠道</h3>
+        <p class="s-state-desc">换个关键词，或者直接新增一个渠道。</p>
       </div>
-      <div v-else class="empty-state">
-        <div class="empty-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        </div>
-        <h3 class="empty-title">暂无渠道</h3>
-        <p class="empty-desc">添加第一个 AI 渠道，开始配置您的 API 网关。</p>
+      <div v-else class="s-state">
+        <h3 class="s-state-title">暂无渠道</h3>
+        <p class="s-state-desc">添加第一个 AI 渠道，开始配置您的 API 网关。</p>
         <NButton type="primary" @click="handleAdd">+ 新增渠道</NButton>
       </div>
     </template>
 
-    <NGrid class="provider-grid" :x-gap="16" :y-gap="16" cols="1 s:2 m:3" responsive="screen" style="margin-top: 16px">
+    <NGrid class="provider-grid" :x-gap="16" :y-gap="16" cols="1 s:2 m:3" responsive="screen">
       <NGi v-for="item in filteredProviders" :key="item.id">
-        <NCard :bordered="false" class="provider-card" :class="{ disabled: item.status !== 'enabled' }">
-          <div class="pc-header">
+        <div class="s-card" :class="{ disabled: item.status !== 'enabled' }">
+          <div class="s-card-head">
             <div class="pc-title">
               <span class="pc-name">{{ item.name }}</span>
               <NTag size="tiny" :type="healthStatusType(item.health_status)">
                 {{ healthLabel(item) }}
               </NTag>
             </div>
-            <span class="pc-protocol-count">{{ item.protocols?.length || 0 }} 协议</span>
+            <span class="s-card-meta">{{ item.protocols?.length || 0 }} 协议</span>
           </div>
 
-          <div class="pc-url">{{ item.api_base_url.replace(/^https?:\/\//, "") }}</div>
+          <div class="s-card-body">
+            <div class="s-chip">{{ item.api_base_url.replace(/^https?:\/\//, "") }}</div>
 
-          <div class="pc-tags">
-            <NTag size="small" type="info">{{ keySummary(item) }}</NTag>
-            <NTag size="small" type="success" v-if="item.models?.length">{{ item.models.length }} 模型</NTag>
-            <NTag size="small" type="default">超时 {{ item.timeout_seconds }}s</NTag>
-            <NTag size="small" :type="item.models_passthrough ? 'warning' : 'default'">
-              {{ item.models_passthrough ? '穿透' : '不穿透' }}
-            </NTag>
-          </div>
+            <div class="pc-meta">
+              <NTag size="small" type="info">{{ keySummary(item) }}</NTag>
+              <NTag size="small" type="success" v-if="item.models?.length">{{ item.models.length }} 模型</NTag>
+              <NTag size="small" type="default">超时 {{ item.timeout_seconds }}s</NTag>
+              <NTag size="small" :type="item.models_passthrough ? 'warning' : 'default'">
+                {{ item.models_passthrough ? '穿透' : '不穿透' }}
+              </NTag>
+            </div>
 
-          <div class="pc-protocols" v-if="item.protocols?.length">
-            <NTag v-for="protocol in item.protocols" :key="protocol" size="tiny" round>{{ protocol }}</NTag>
-          </div>
+            <div class="pc-proto" v-if="item.protocols?.length">
+              <NTag v-for="protocol in item.protocols" :key="protocol" size="tiny" round>{{ protocol }}</NTag>
+            </div>
 
-          <div class="pc-models" v-if="item.models?.length">
-            <span v-for="model in item.models.slice(0, 4)" :key="model" class="pc-model-pill">{{ model }}</span>
-            <NTag v-if="item.models.length > 4" size="tiny" round>+{{ item.models.length - 4 }}</NTag>
-          </div>
+            <div class="pc-models" v-if="item.models?.length">
+              <span v-for="model in item.models.slice(0, 4)" :key="model" class="s-chip">{{ model }}</span>
+              <NTag v-if="item.models.length > 4" size="tiny" round>+{{ item.models.length - 4 }}</NTag>
+            </div>
 
-          <div class="pc-actions">
-            <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
-            <NButton size="tiny" quaternary :loading="testingStates[item.id]" @click="handleTest(item)">测试</NButton>
-            <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
+            <div class="pc-actions">
+              <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
+              <NButton size="tiny" quaternary :loading="testingStates[item.id]" @click="handleTest(item)">测试</NButton>
+              <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
+            </div>
           </div>
-        </NCard>
+        </div>
       </NGi>
     </NGrid>
 
@@ -534,6 +587,25 @@ onMounted(() => {
               <span class="m-sec-meta">{{ editingId ? "编辑已有渠道" : "新建渠道" }}</span>
             </div>
             <div class="m-grid" style="--m-cols: 4">
+              <div v-if="presetOptions.length > 0" class="m-field m-full">
+                <label class="m-label">官方模板</label>
+                <div class="preset-row">
+                  <NSelect
+                    :value="presetId"
+                    :options="presetOptions"
+                    filterable
+                    clearable
+                    placeholder="选择官方渠道，自动填好地址 / 协议 / 常用模型"
+                    @update:value="(value: string | null) => { if (value) applyPreset(value); }"
+                  />
+                  <NButton v-if="selectedPreset" size="small" secondary @click="openPresetKeyUrl">
+                    去申请 Key
+                  </NButton>
+                </div>
+                <span class="m-note">
+                  {{ selectedPreset ? selectedPreset.description : "官方模板只覆盖地址、协议与常用模型，名称与 Key 仍可自行修改" }}
+                </span>
+              </div>
               <div class="m-field m-span-2">
                 <label class="m-label">名称<i class="m-req">*</i></label>
                 <NInput v-model:value="formValue.name" placeholder="如：OpenAI 官方" />
@@ -620,7 +692,7 @@ onMounted(() => {
                 <NInput
                   v-model:value="key.value"
                   :type="keyVisibility[index] ? 'text' : 'password'"
-                  placeholder="sk-..."
+                  :placeholder="selectedPreset?.api_key_placeholder || 'sk-...'"
                   style="flex: 1; min-width: 0"
                 />
                 <NButton quaternary size="small" @click="toggleKeyVisibility(index)">
@@ -751,16 +823,18 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.provider-card {
-  border-radius: var(--radius-lg, 10px);
-  transition: border-color var(--transition, 150ms ease);
+/* 卡片 / 页头 / 徽标 / 统计 / 空态全部走 style.css 的 p-* / s-* 规范；
+   这里只保留本页特有的「渠道卡内部」与「弹窗字段」造型。 */
+
+.s-card {
+  transition: border-color var(--transition);
 }
 
-.provider-card:hover {
+.s-card:not(.disabled):hover {
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
 }
 
-.provider-card.disabled {
+.s-card.disabled {
   opacity: 0.6;
 }
 
@@ -768,88 +842,46 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
 }
 
 .pc-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
 }
 
 .pc-name {
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
-  color: var(--fg, #0a0a0a);
+  color: var(--fg);
   letter-spacing: -0.01em;
 }
 
-.pc-protocol-count {
-  font-size: 12px;
-  color: var(--muted, #737373);
-  white-space: nowrap;
+.pc-meta,
+.pc-proto {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
 }
 
-.pc-url {
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  font-size: 12px;
-  color: var(--muted, #737373);
-  margin-bottom: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: -0.01em;
-  background: var(--surface-alt, #f5f5f5);
-  border: 1px solid var(--border-soft, #ededed);
-  border-radius: var(--radius-sm, 6px);
-  padding: 6px 8px;
-}
-
-.pc-tags,
-.pc-protocols,
 .pc-models {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-}
-
-.pc-tags {
-  margin-bottom: 10px;
-}
-
-.pc-protocols {
-  margin-bottom: 10px;
-}
-
-.pc-models {
-  margin-bottom: 12px;
-}
-
-.pc-model-pill {
-  display: inline-flex;
-  align-items: center;
-  max-width: 180px;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm, 6px);
-  background: var(--surface-alt, #f5f5f5);
-  border: 1px solid var(--border, #e5e5e5);
-  color: var(--text-color-2, #404040);
-  font-size: 11px;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
 }
 
 .pc-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
-  border-top: 1px solid var(--border, #e5e5e5);
-  padding-top: 10px;
-  margin-top: 2px;
+  gap: var(--sp-1);
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-2);
+  margin-top: var(--sp-1);
 }
 
 .provider-grid :deep(.n-grid-item) {
@@ -858,7 +890,7 @@ onMounted(() => {
 
 /* 高级设置里的请求头区块：与上方网格拉开距离 */
 .adv-headers {
-  margin-top: 14px;
+  margin-top: var(--sp-3);
 }
 
 .key-head-weight {
@@ -876,73 +908,63 @@ onMounted(() => {
   min-width: 0;
 }
 
-.key-enabled {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted, #737373);
-  white-space: nowrap;
-  font-size: 12px;
-}
-
 /* 密钥 / 请求头条目右侧的开关：只留控件，文字标签交给分区说明 */
 .key-enabled,
 .header-enabled {
   display: flex;
   align-items: center;
   flex: none;
-  gap: 8px;
-  color: var(--muted, #737373);
+  gap: var(--sp-2);
+  color: var(--muted);
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* 模型勾选网格：限高滚动，弹窗高度不随模型数量增长 */
 .model-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 2px 12px;
+  gap: 2px var(--sp-3);
   max-height: 200px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-right: 4px;
+  padding-right: var(--sp-1);
 }
 
 .model-check-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   min-width: 0;
-  padding: 4px 8px;
-  border-radius: var(--radius, 8px);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
 .model-check-row:hover {
-  background: var(--hover-bg, #f5f5f5);
+  background: var(--hover-bg);
 }
 
 .model-check-name {
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  font-size: 12px;
-  color: var(--fg, #0a0a0a);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--fg);
   word-break: break-all;
 }
 
-@media (max-width: 900px) {
-  .key-enabled,
-  .header-enabled {
-    justify-content: flex-end;
-  }
+/* 官方模板：选模板 + 去申请 Key 一行解决 */
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
-@media (max-width: 560px) {
-  .pc-actions {
-    justify-content: stretch;
-  }
+.preset-row :deep(.n-select) {
+  flex: 1;
+  min-width: 0;
+}
 
-  .pc-actions :deep(.n-button) {
-    flex: 1;
-  }
+.preset-row :deep(.n-button) {
+  flex: none;
 }
 </style>

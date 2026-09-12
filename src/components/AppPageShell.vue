@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { NButton, NEmpty, NSpin, NTag } from "naive-ui";
+import { NButton, NEmpty, NSpin } from "naive-ui";
 
+/**
+ * 全站唯一的页面骨架：页头（标题 / 说明 / 操作）+ 加载态 + 空态 + 错误态。
+ *
+ * 页面不要再自己写 page-header / page-title / empty-state，
+ * 结构统一由这里产出，样式统一走 style.css 的 p-* / s-* 类。
+ */
 defineProps<{
   title: string;
-  countLabel?: string;
+  /** 标题下方的一句话说明，用于交代这个页面在管什么 */
+  desc?: string;
   loading?: boolean;
   error?: string | null;
   empty?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
   reloadText?: string;
+  /** 空态是否用朴素提示（true）还是 NEmpty 图形（false，默认） */
+  emptyPlain?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -18,29 +27,42 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="app-page-shell">
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <h2 class="page-title">{{ title }}</h2>
-        <slot name="count">
-          <NTag v-if="countLabel" size="small" type="info">{{ countLabel }}</NTag>
-        </slot>
+  <div class="p-page">
+    <header class="p-head">
+      <div class="p-head-main">
+        <div class="p-head-row">
+          <h1 class="p-head-title">{{ title }}</h1>
+          <slot name="count" />
+        </div>
+        <p v-if="desc" class="p-head-desc">{{ desc }}</p>
+        <slot name="head-extra" />
       </div>
-      <div class="toolbar-right">
+
+      <div v-if="$slots.actions" class="p-head-actions">
         <slot name="actions" />
       </div>
-    </div>
+    </header>
 
     <slot name="before" />
 
     <NSpin :show="loading" style="min-height: 220px">
       <template v-if="error && !loading">
-        <div class="error-state">
-          <div class="error-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          </div>
-          <h3 class="error-title">数据加载失败</h3>
-          <p class="error-desc">{{ error }}</p>
+        <div class="s-state">
+          <span class="s-state-icon is-error">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+              style="width: 40px; height: 40px"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </span>
+          <h3 class="s-state-title">数据加载失败</h3>
+          <p class="s-state-desc">{{ error }}</p>
           <slot name="error-action">
             <NButton type="primary" @click="emit('reload')">{{ reloadText || "重新加载" }}</NButton>
           </slot>
@@ -49,7 +71,11 @@ const emit = defineEmits<{
 
       <template v-else-if="empty && !loading">
         <slot name="empty">
-          <NEmpty :description="emptyDescription || emptyTitle || '暂无数据'" />
+          <div v-if="emptyPlain" class="s-state">
+            <h3 class="s-state-title">{{ emptyTitle || "暂无数据" }}</h3>
+            <p v-if="emptyDescription" class="s-state-desc">{{ emptyDescription }}</p>
+          </div>
+          <NEmpty v-else :description="emptyDescription || emptyTitle || '暂无数据'" style="padding: 32px 0" />
         </slot>
       </template>
 
@@ -59,96 +85,3 @@ const emit = defineEmits<{
     <slot name="after" />
   </div>
 </template>
-
-<style scoped>
-.app-page-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 34px;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.page-title {
-  font-size: 19px;
-  font-weight: 650;
-  color: var(--fg, #0a0a0a);
-  margin: 0;
-  letter-spacing: -0.02em;
-}
-
-.toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.toolbar-right :deep(.n-input) {
-  min-width: 220px;
-}
-
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 280px;
-  gap: 12px;
-  padding: 48px 32px;
-  text-align: center;
-  border-radius: var(--radius-lg, 10px);
-  background: var(--card-bg, #ffffff);
-  border: 1px solid var(--border, #e5e5e5);
-}
-
-.error-icon {
-  color: var(--danger, #dc2626);
-}
-
-.error-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg, #0a0a0a);
-  margin: 0;
-}
-
-.error-desc {
-  font-size: 12.5px;
-  color: var(--muted, #737373);
-  margin: 0;
-  max-width: 360px;
-}
-
-@media (max-width: 680px) {
-  .toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .toolbar-right {
-    flex-wrap: wrap;
-  }
-
-  .toolbar-right :deep(.n-input) {
-    flex: 1 1 220px;
-    min-width: 0;
-  }
-}
-</style>

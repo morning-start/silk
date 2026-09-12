@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Silk 关于页 — 两栏状态 + 资料</title>
+<style>
+/* ================================================================
+   令牌快照（与 src/style.css 保持一致，仅作静态预览用）
+   ================================================================ */
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-alt: #f5f5f5;
+  --fg: #0a0a0a;
+  --fg-2: #171717;
+  --muted: #737373;
+  --border: #e5e5e5;
+  --border-soft: #ededed;
+  --accent: #0e7490;
+  --accent-soft: rgba(14, 116, 144, 0.08);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 10px;
+  --transition: 150ms ease;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', 'Menlo', monospace;
+  --success: #16a34a;
+  --warn: #d97706;
+  --warn-soft: rgba(217, 119, 6, 0.10);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.10);
+  --hover-bg: #f5f5f5;
+}
+
+body.dark {
+  --bg: #0a0a0a;
+  --surface: #171717;
+  --surface-alt: #262626;
+  --fg: #fafafa;
+  --fg-2: #e5e5e5;
+  --muted: #a1a1a1;
+  --border: #282828;
+  --border-soft: #202020;
+  --accent: #67e8f9;
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --success: #4ade80;
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --hover-bg: #262626;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+  padding: 28px;
+  transition: background var(--transition), color var(--transition);
+}
+
+.page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 6px; }
+.page-head h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+.page-head p { color: var(--muted); font-size: 13px; }
+.theme-toggle { margin-left: auto; }
+
+.text-mono { font-family: var(--font-mono); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ================================================================
+   外壳：AppPageShell 的近似（toolbar + 内容区）
+   ================================================================ */
+.shell { display: flex; flex-direction: column; gap: 18px; margin-top: 22px; }
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+}
+
+.toolbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.page-title { font-size: 19px; font-weight: 650; letter-spacing: -0.02em; margin: 0; }
+.toolbar-right { display: flex; align-items: center; gap: 8px; flex: none; }
+
+/* NaiveUI 组件近似 */
+.n-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  font-size: 12px;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.n-tag.is-info {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.n-tag.is-success {
+  border-color: color-mix(in srgb, var(--success) 32%, var(--border));
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
+.n-tag.is-warning {
+  border-color: color-mix(in srgb, var(--warn) 32%, var(--border));
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.n-tag.is-tiny { height: 18px; padding: 0 6px; font-size: 11px; }
+
+.n-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition), border-color var(--transition);
+}
+.n-button:hover { background: var(--hover-bg); }
+.n-button.is-secondary { background: var(--surface-alt); }
+.n-button.is-primary { background: var(--fg); border-color: var(--fg); color: var(--surface); }
+.n-button.is-quaternary {
+  height: 22px;
+  padding: 0 7px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.n-button.is-quaternary:hover { color: var(--fg-2); background: var(--hover-bg); }
+
+.ico { font-size: 12px; line-height: 1; }
+
+.n-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+.n-progress span { display: block; height: 100%; background: var(--accent); }
+
+/* ================================================================
+   关于页（ab-*，与 src/views/AboutView.vue 的 scoped 样式同步）
+   ================================================================ */
+
+/* 两栏铺满：左栏「会变的东西」（状态、更新），右栏「不变的东西」（资料） */
+.ab-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  width: 100%;
+}
+
+.ab-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+.ab-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.ab-state.is-online { color: var(--fg-2); }
+
+.ab-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--muted); }
+.ab-state.is-online .ab-dot { background: var(--success); }
+.ab-dot--accent { background: var(--accent); }
+.ab-dot--ok { background: var(--success); }
+.ab-dot--error { background: var(--danger); }
+
+.ab-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.ab-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ab-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ab-head-meta { font-size: 11px; letter-spacing: 0.06em; color: var(--muted); }
+.ab-card-body { padding: 16px 18px; }
+
+.ab-id { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+
+.ab-mark {
+  width: 36px; height: 36px; flex: none;
+  display: grid; place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.ab-name { margin: 0 0 3px; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--fg); }
+.ab-sub { margin: 0; font-size: 12.5px; color: var(--muted); }
+
+.ab-kv { margin: 0; display: flex; flex-direction: column; }
+
+.ab-kv-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-soft);
+  min-width: 0;
+}
+
+.ab-kv-row dt { flex: none; width: 76px; font-size: 12.5px; color: var(--muted); }
+
+.ab-kv-row dd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--fg-2);
+}
+
+.ab-strong { color: var(--fg); }
+.ab-note { font-size: 12px; color: var(--muted); }
+.ab-ico { color: var(--muted); }
+
+.ab-chip {
+  padding: 1px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+.ab-facts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.ab-facts li { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.6; color: var(--fg-2); }
+.ab-fact-ico { flex: none; margin-top: 2px; color: var(--success); font-size: 12px; line-height: 1.3; }
+
+.ab-hint { margin: 0 0 12px; }
+
+.ab-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--fg-2); }
+.ab-line--ok { color: var(--success); }
+.ab-line--error { color: var(--danger); }
+.ab-muted { font-size: 12.5px; color: var(--muted); }
+
+.ab-notes {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg-2);
+}
+
+.ab-progress { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.ab-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* 状态变体并排展示用的窄容器 */
+.state-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+.state-strip .ab-card-body { padding: 14px 16px; }
+
+/* ================================================================
+   页面装饰
+   ================================================================ */
+.section-label {
+  margin: 34px 0 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.note-list {
+  margin-top: 26px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.note-list h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+.note-list ol { margin-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.note-list li { font-size: 13px; color: var(--fg-2); }
+.note-list code { font-family: var(--font-mono); font-size: 12px; background: var(--surface-alt); border: 1px solid var(--border-soft); border-radius: 4px; padding: 1px 5px; }
+
+@media (max-width: 1024px) {
+  .ab-body { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 720px) {
+  .ab-kv-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .ab-kv-row dt { width: auto; }
+}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div>
+    <h1>关于页</h1>
+    <p>两栏铺满：左栏是会变的状态，右栏是不变的资料</p>
+  </div>
+  <button class="n-button theme-toggle" onclick="document.body.classList.toggle('dark')">切换浅色 / 深色</button>
+</div>
+
+<div class="shell">
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <h2 class="page-title">关于</h2>
+      <span class="n-tag is-info">v0.9.2</span>
+      <span class="ab-state is-online"><span class="ab-dot"></span>网关运行中</span>
+    </div>
+    <div class="toolbar-right">
+      <button class="n-button is-secondary"><span class="ico">⟳</span>检查更新</button>
+    </div>
+  </div>
+
+  <div class="ab-body">
+    <!-- ================= 左栏 ================= -->
+    <div class="ab-col">
+
+      <section class="ab-card">
+        <header class="ab-head">
+          <span class="ab-kicker">本机实例</span>
+          <span class="ab-head-meta text-mono">RUNNING</span>
+        </header>
+        <div class="ab-card-body">
+          <div class="ab-id">
+            <span class="ab-mark">S</span>
+            <div>
+              <h3 class="ab-name">Silk 丝路</h3>
+              <p class="ab-sub">本地 AI 多模型中转网关</p>
+            </div>
+          </div>
+
+          <dl class="ab-kv">
+            <div class="ab-kv-row">
+              <dt>监听地址</dt>
+              <dd>
+                <span class="ab-strong text-mono">http://127.0.0.1:1877</span>
+                <button class="n-button is-quaternary">复制</button>
+              </dd>
+            </div>
+            <div class="ab-kv-row">
+              <dt>远程访问</dt>
+              <dd>
+                <span class="n-tag is-success is-tiny">已关闭</span>
+                <span class="ab-note">仅本机可访问</span>
+              </dd>
+            </div>
+            <div class="ab-kv-row">
+              <dt>协议转换</dt>
+              <dd>
+                <span class="ab-chip text-mono">openai</span>
+                <span class="ab-chip text-mono">messages</span>
+                <span class="ab-chip text-mono">responses</span>
+                <span class="ab-chip text-mono">gemini</span>
+                <span class="ab-note">任意互转</span>
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="ab-card">
+        <header class="ab-head">
+          <span class="ab-kicker">软件更新</span>
+          <span class="ab-head-meta text-mono">v0.9.2</span>
+        </header>
+        <div class="ab-card-body">
+          <p class="ab-note ab-hint">更新包从 GitHub Releases 下载并自动安装，完成后需要重启应用。</p>
+
+          <div class="ab-line">
+            <span class="ab-dot ab-dot--accent"></span>
+            发现新版本
+            <span class="ab-strong text-mono">v0.9.3</span>
+            <span class="ab-note">发布于 2026/9/10 14:20:00</span>
+          </div>
+
+          <pre class="ab-notes">## 新增
+- 模型映射支持按渠道单独设置权重
+- 日志详情新增缓存命中标记
+
+## 修复
+- 修复流式响应在超时重试后偶发内容截断的问题
+- 修复渠道测试在网络抖动时误判为失败</pre>
+
+          <div class="ab-progress">
+            <div class="n-progress"><span style="width: 42%"></span></div>
+            <span class="ab-note">正在下载… 42%</span>
+          </div>
+
+          <div class="ab-actions">
+            <button class="n-button is-primary"><span class="ico">↓</span>更新中…</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ================= 右栏 ================= -->
+    <div class="ab-col">
+
+      <section class="ab-card">
+        <header class="ab-head">
+          <span class="ab-kicker">项目信息</span>
+        </header>
+        <div class="ab-card-body">
+          <dl class="ab-kv">
+            <div class="ab-kv-row">
+              <dt>仓库</dt>
+              <dd>
+                <span class="ab-ico">◈</span>
+                <span class="ab-strong text-mono">morning-start/silk</span>
+                <button class="n-button is-quaternary">打开 ↗</button>
+              </dd>
+            </div>
+            <div class="ab-kv-row">
+              <dt>作者</dt>
+              <dd>
+                <span class="ab-ico">◉</span>
+                <span class="ab-strong">morning-start</span>
+                <button class="n-button is-quaternary">主页 ↗</button>
+              </dd>
+            </div>
+            <div class="ab-kv-row">
+              <dt>许可证</dt>
+              <dd>
+                <span class="ab-ico">✓</span>
+                <span class="ab-strong text-mono">AGPL-3.0</span>
+                <span class="ab-note">可自建与修改，衍生分发需同样开源</span>
+              </dd>
+            </div>
+            <div class="ab-kv-row">
+              <dt>技术栈</dt>
+              <dd><span class="ab-note">Tauri 2 · Rust / Axum · Vue 3 · SQLite</span></dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="ab-card">
+        <header class="ab-head">
+          <span class="ab-kicker">数据与隐私</span>
+          <span class="ab-head-meta text-mono">LOCAL-FIRST</span>
+        </header>
+        <div class="ab-card-body">
+          <ul class="ab-facts">
+            <li><span class="ab-fact-ico">✓</span><span>配置与请求日志写入本机 SQLite 数据库，不随任何服务上传。</span></li>
+            <li><span class="ab-fact-ico">✓</span><span>渠道 API Key 使用 AES-GCM 加密后落盘。</span></li>
+            <li><span class="ab-fact-ico">✓</span><span>网关 Key 只保留 SHA-256 哈希，不保存明文。</span></li>
+            <li><span class="ab-fact-ico">✓</span><span>除「检查更新」访问 GitHub Releases 外，不发起其他外部请求。</span></li>
+          </ul>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="section-label">更新卡的其余三种状态</div>
+
+  <div class="state-strip">
+    <section class="ab-card">
+      <header class="ab-head">
+        <span class="ab-kicker">软件更新</span>
+        <span class="ab-head-meta text-mono">CHECKING</span>
+      </header>
+      <div class="ab-card-body">
+        <div class="ab-line ab-muted">正在检查更新…</div>
+      </div>
+    </section>
+
+    <section class="ab-card">
+      <header class="ab-head">
+        <span class="ab-kicker">软件更新</span>
+        <span class="ab-head-meta text-mono">LATEST</span>
+      </header>
+      <div class="ab-card-body">
+        <div class="ab-line ab-line--ok"><span class="ab-dot ab-dot--ok"></span>已是最新版本</div>
+      </div>
+    </section>
+
+    <section class="ab-card">
+      <header class="ab-head">
+        <span class="ab-kicker">软件更新</span>
+        <span class="ab-head-meta text-mono">ERROR</span>
+      </header>
+      <div class="ab-card-body">
+        <div class="ab-line ab-line--error">
+          <span class="ab-dot ab-dot--error"></span>
+          检查更新失败，请确认网络后重试
+          <span class="ab-note text-mono">network error</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="note-list">
+  <h2>这一版改了什么</h2>
+  <ol>
+    <li><b>去掉渐变标识块。</b>原来首卡是渐变方块 + 渐变顶边，属于设计基线里明确要避免的「品牌表达压过操作效率」。改成中性底 + 1px 描边的等宽字母标记，页面重心从「宣传」移回「状态」。</li>
+    <li><b>两栏铺满。</b>单列 880px 在大屏会空掉半屏，也违反「页面横向内容宽度铺满可用区域，不做营销式窄容器」。左栏放会变的东西（实例状态、更新），右栏放不变的东西（项目资料、隐私），栏宽比 1.35:1 让发布说明保持可读行宽。</li>
+    <li><b>页面头部接管主操作。</b>「检查更新」上移到 <code>AppPageShell</code> 的 actions 位，更新卡内不再重复放同一个按钮，只在「可更新」时才出现「下载并安装」。</li>
+    <li><b>状态用等宽 + 语义色。</b>地址、版本、协议名、许可证全部走 mono；运行状态由<span class="ab-state is-online" style="vertical-align:middle"><span class="ab-dot"></span>状态点</span>承担，隐私要点用成功色对勾，更新失败用危险色。颜色只表示语义，不做装饰。</li>
+    <li><b>隐私是「可核对」而不是「宣称」。</b>监听地址与远程访问开关直接读运行时状态，显示的是当前实例的真实配置，而不是一句静态保证。</li>
+    <li><b>更新状态收成一行。</b>检查中 / 已是最新 / 有新版 / 失败四种状态用同一套行结构（状态点 + 文案），不再混用 Alert 与自定义块。</li>
+  </ol>
+</div>
+
+</body>
+</html>

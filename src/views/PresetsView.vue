@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { NButton, NInput, NInputNumber, NModal, NSelect, NTag, useMessage } from "naive-ui";
+import { NButton, NInput, NInputNumber, NModal, NSelect, useMessage } from "naive-ui";
 import { presetsApi } from "../api/presets";
 import { providersApi } from "../api/providers";
 import type { AgentTypeInfo, Preset, Provider, ProviderModelInfo } from "../api";
 import { formSpecFor, officialCredentialFields, type HarnessField, type HarnessFormSpec } from "../config/harnessForms";
 import ModalAdvanced from "../components/ModalAdvanced.vue";
+import AppPageShell from "../components/AppPageShell.vue";
 import { useConfirm } from "../utils/confirm";
 
 const message = useMessage();
@@ -62,6 +63,13 @@ const channelOptions = computed(() =>
   })),
 );
 
+/** 页头说明：对齐原 page-header 的 subtitle 文案 */
+const pageDesc = computed(() => {
+  if (activeTab.value === "opencode" && openCodeActiveCount.value > 0) return `已激活 ${openCodeActiveCount.value} 个配置`;
+  if (currentPreset.value) return `当前激活：${currentPreset.value.name}`;
+  return "未激活任何预设（live 配置保持原状）";
+});
+
 async function loadChannels() {
   if (channelsLoading.value) return;
   channelsLoading.value = true;
@@ -93,6 +101,8 @@ function applyChannelFill(channelId: string | null) {
   if (activeTab.value === "claude_code") endpoint = endpoint.replace(/\/+$/, "").replace(/\/v1$/i, "");
   // Key：优先取启用中的第一个，其次取第一个
   const apiKey = channel.keys.find((key) => key.enabled)?.value ?? channel.keys[0]?.value ?? "";
+  // 自动将渠道名填入预设名称
+  formName.value = channel.name;
   formValues.value[target.endpointKey] = endpoint;
   formValues.value[target.apiKeyField] = apiKey;
   // 多协议 harness（opencode/hermes）：按渠道协议联动协议选择器
@@ -109,7 +119,7 @@ function applyChannelFill(channelId: string | null) {
   if (!compatible) {
     channelFillHint.value = `该渠道协议为 ${channel.protocols.join("/")}，与 ${tabLabel(activeTab.value)} 原生协议（${target.nativeProtocols.join("/")}）不匹配，直连可能失败；经 silk 网关转换则无此问题`;
   }
-  message.success(`已从渠道「${channel.name}」填充端点与 Key，可点击「获取模型」加载模型列表`);
+  message.success(`已从渠道「${channel.name}」填充名称、端点与 Key，可点击「获取模型」加载模型列表`);
   channelFillId.value = null; // 每次选择后复位，便于再次选择
 }
 
@@ -604,197 +614,218 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="presets-page">
-    <div class="agent-tabs">
-      <button v-for="agent in agentTypes" :key="agent.id" class="agent-tab" :class="{ active: activeTab === agent.id }" @click="activeTab = agent.id">
-        {{ agent.name }}
-      </button>
-    </div>
-
-    <div class="page-header">
-      <div>
-        <h2>{{ tabLabel(activeTab) }} 预设</h2>
-        <p class="subtitle">{{ activeTab === 'opencode' && openCodeActiveCount > 0 ? `已激活 ${openCodeActiveCount} 个配置` : currentPreset ? `当前激活：${currentPreset.name}` : "未激活任何预设（live 配置保持原状）" }}</p>
-      </div>
-      <NButton type="primary" @click="openAdd">+ 新建预设</NButton>
-    </div>
-
-    <div v-if="loading" class="empty-desc">加载中…</div>
-    <div v-else-if="presets.length === 0" class="empty-state"><p class="empty-desc">暂无预设，点击右上角「新建预设」创建</p></div>
-    <div v-else class="preset-grid">
-      <div v-for="preset in presets" :key="preset.id" class="preset-card" :class="{ active: preset.is_active, dragging: draggingId === preset.id, official: isOfficialPreset(preset) }" :draggable="!isOfficialPreset(preset)" @dragstart="draggingId = preset.id" @dragover.prevent @drop.prevent="onDrop(preset)">
-        <div class="preset-card-head">
-          <span class="preset-name">{{ preset.name }}</span>
-          <div class="preset-tags">
-            <NTag v-if="isOfficialPreset(preset)" size="small" type="info">官方</NTag>
-            <NTag v-if="preset.is_active && activeTab === 'opencode'" type="success" size="small">已激活</NTag>
-            <NTag v-else-if="preset.is_active && activeTab !== 'opencode'" type="success" size="small">当前</NTag>
-          </div>
-        </div>
-        <p v-if="isOfficialPreset(preset)" class="preset-desc">{{ officialDesc(preset.agent_type) }}</p>
-        <p v-else-if="preset.notes" class="preset-desc">{{ preset.notes }}</p>
-        <div class="preset-actions">
-          <!-- 单激活应用（claude_code/codex/hermes/gemini_cli）对齐 cc-switch：激活项无“取消激活”，
-               主按钮禁用显示“当前激活”，切换只能点其他卡片；opencode 为累加模式保留独立启停 -->
-          <NButton v-if="activeTab !== 'opencode' && preset.is_active" size="small" disabled>当前激活</NButton>
-          <NButton v-else size="small" type="primary" ghost @click="activate(preset)">{{ activeTab === "opencode" && preset.is_active ? "取消激活" : "激活" }}</NButton>
-          <!-- 官方直连行：凭据可编辑 + 一键恢复默认，不允许删除 -->
-          <template v-if="isOfficialPreset(preset)">
-            <NButton size="small" @click="openOfficialEdit(preset)">编辑</NButton>
-            <NButton size="small" @click="resetOfficial(preset)">恢复默认</NButton>
-          </template>
-          <template v-else>
-            <NButton size="small" @click="openEdit(preset)">编辑</NButton>
-            <NButton size="small" type="error" ghost :disabled="preset.is_active" @click="remove(preset)">删除</NButton>
-          </template>
-        </div>
-      </div>
-    </div>
-  <NModal
-    v-model:show="showModal"
-    preset="card"
-    :title="editingId ? '编辑预设' : '新建预设'"
-    style="width: min(600px, calc(100vw - 32px))"
-    :bordered="false"
-    :segmented="{ footer: true }"
+  <AppPageShell
+    :title="`${tabLabel(activeTab)} 预设`"
+    :desc="pageDesc"
+    :loading="loading"
+    :empty="presets.length === 0"
+    empty-title="暂无预设"
+    empty-description="点击右上角「新建预设」创建"
   >
-    <template v-if="spec">
-      <div class="m-body">
-        <p v-if="nativeProtocolHint()" class="m-tip">{{ nativeProtocolHint() }}</p>
+    <template #actions>
+      <NButton type="primary" @click="openAdd">+ 新建预设</NButton>
+    </template>
 
-        <!-- 1. 基本信息：名称 + 从渠道一键填充 -->
-        <section class="m-section">
-          <div class="m-sec-head">
-            <span class="m-sec-title">基本信息</span>
-            <span class="m-sec-meta">{{ spec.label }}</span>
-          </div>
-          <div class="m-grid">
-            <div class="m-field">
-              <label class="m-label">预设名称</label>
-              <NInput v-model:value="formName" placeholder="请输入预设名称" @keydown.enter="save(false)" />
-            </div>
-            <div class="m-field">
-              <label class="m-label">从渠道填充</label>
-              <NSelect
-                v-model:value="channelFillId"
-                :options="channelOptions"
-                filterable
-                clearable
-                :loading="channelsLoading"
-                :disabled="channels.length === 0"
-                :placeholder="channels.length === 0 ? '暂无渠道，请先在「渠道」页配置' : '选择渠道，自动填充端点与 Key'"
-                @update:value="applyChannelFill"
-              />
-            </div>
-            <p v-if="channelFillHint" class="m-note m-full">{{ channelFillHint }}</p>
-          </div>
-        </section>
-
-        <!-- 2. 接入参数：端点 / Key / 模型，短字段双栏 -->
-        <section class="m-section">
-          <div class="m-sec-head">
-            <span class="m-sec-title">接入参数</span>
-            <span v-if="fetchedModels.length" class="m-sec-meta">已获取 {{ fetchedModels.length }} 个模型</span>
-            <NButton
-              size="tiny"
-              secondary
-              class="m-sec-action"
-              :loading="fetchingModels"
-              :disabled="!formValues[modelEndpointKey]"
-              @click="fetchModels"
-            >
-              获取模型
-            </NButton>
-          </div>
-
-          <div class="m-grid">
-            <div
-              v-for="field in basicFields"
-              :key="field.key"
-              class="m-field"
-              :class="{ 'm-full': isWideField(field) }"
-            >
-              <label class="m-label">{{ field.label }}</label>
-              <template v-if="field.type === 'model-roles'">
-                <div v-for="role in field.roles || []" :key="role" class="role-row">
-                  <span class="role-label">{{ role }}</span>
-                  <NSelect
-                    :value="(formValues.roles as Record<string, string> || {})[role]"
-                    :options="modelOptions"
-                    filterable
-                    clearable
-                    :disabled="modelSelectorDisabled"
-                    :placeholder="modelSelectorDisabled ? '请先获取模型列表' : `${role} 模型`"
-                    @update:value="(value) => updateRole(role, value)"
-                  />
-                </div>
-              </template>
-              <NSelect
-                v-else-if="field.type === 'model-select'"
-                :value="formValues[field.key] as string"
-                :options="modelOptions"
-                filterable
-                clearable
-                :disabled="modelSelectorDisabled"
-                :placeholder="modelSelectorDisabled ? '请先获取模型列表' : field.placeholder"
-                @update:value="(value) => updateField(field.key, value || '')"
-              />
-              <NSelect
-                v-else-if="field.type === 'select'"
-                :value="String(formValues[field.key] || '')"
-                :options="selectOptions(field).map((option) => ({ label: option.label, value: option.value, disabled: option.disabled }))"
-                :placeholder="field.placeholder"
-                @update:value="(value) => updateField(field.key, value || '')"
-              />
-              <template v-else-if="field.type === 'model-list' || field.type === 'model-map'">
-                <div class="model-list-editor">
-                  <div v-for="(model, index) in modelListValue()" :key="index" class="model-row">
-                    <NSelect :value="String(model.id || '')" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" placeholder="选择模型" @update:value="(value) => updateModelListItem(index, 'id', value || '')" />
-                    <NInput :value="String(model.name || '')" placeholder="显示名称（可选）" @update:value="(value) => updateModelListItem(index, 'name', value)" />
-                    <NInputNumber :value="typeof model.context_length === 'number' ? model.context_length : null" :min="1" placeholder="上下文" @update:value="(value) => updateModelListItem(index, 'context_length', value)" />
-                    <NButton size="small" quaternary type="error" aria-label="删除模型" @click="removeModelListItem(index)">删除</NButton>
-                  </div>
-                  <NButton size="small" dashed :disabled="modelSelectorDisabled" @click="addModelListItem">添加模型</NButton>
-                </div>
-              </template>
-              <NInput v-else-if="field.type === 'secret'" :value="fieldValue(field)" type="password" show-password-on="click" :placeholder="field.placeholder" @update:value="(value) => updateField(field.key, value)" />
-              <NInput v-else :value="fieldValue(field)" :placeholder="field.placeholder" :inputmode="field.type === 'number' ? 'numeric' : undefined" @update:value="(value) => updateField(field.key, value)" />
-              <span v-if="field.hint" class="m-note">{{ field.hint }}</span>
-            </div>
-          </div>
-        </section>
-
-        <!-- 3. 高级配置：原生环境变量 / JSON，改动过才提示 -->
-        <ModalAdvanced
-          v-if="advancedFields.length"
-          :count="advancedFilledCount"
-          hint="环境变量 · 原生 JSON"
+    <template #before>
+      <div class="agent-tabs">
+        <button
+          v-for="agent in agentTypes"
+          :key="agent.id"
+          class="agent-tab"
+          :class="{ active: activeTab === agent.id }"
+          @click="activeTab = agent.id"
         >
-          <div v-for="field in advancedFields" :key="field.key" class="m-field adv-extra">
-            <label class="m-label">
-              {{ field.label }}
-              <span v-if="field.hint" class="m-note">{{ field.hint }}</span>
-            </label>
-            <NInput
-              :value="fieldValue(field)"
-              type="textarea"
-              :autosize="{ minRows: 3, maxRows: 8 }"
-              :placeholder="field.placeholder"
-              @update:value="(value) => updateField(field.key, value)"
-            />
+          {{ agent.name }}
+        </button>
+      </div>
+    </template>
+
+    <div class="s-grid-auto">
+      <div
+        v-for="preset in presets"
+        :key="preset.id"
+        class="s-card"
+        :class="{ 'is-active': preset.is_active, 'is-dragging': draggingId === preset.id }"
+        :draggable="!isOfficialPreset(preset)"
+        @dragstart="draggingId = preset.id"
+        @dragover.prevent
+        @drop.prevent="onDrop(preset)"
+      >
+        <div class="s-card-head">
+          <span class="s-card-title">{{ preset.name }}</span>
+          <div class="preset-tags">
+            <span v-if="isOfficialPreset(preset)" class="s-badge s-badge--accent">官方</span>
+            <span v-if="preset.is_active && activeTab === 'opencode'" class="s-badge s-badge--success">已激活</span>
+            <span v-else-if="preset.is_active && activeTab !== 'opencode'" class="s-badge s-badge--success">当前</span>
           </div>
-        </ModalAdvanced>
+        </div>
+        <div class="s-card-body">
+          <p v-if="isOfficialPreset(preset)" class="preset-desc">{{ officialDesc(preset.agent_type) }}</p>
+          <p v-else-if="preset.notes" class="preset-desc">{{ preset.notes }}</p>
+          <div class="preset-actions">
+            <!-- 单激活应用（claude_code/codex/hermes/gemini_cli）对齐 cc-switch：激活项无“取消激活”，
+                 主按钮禁用显示“当前激活”，切换只能点其他卡片；opencode 为累加模式保留独立启停 -->
+            <NButton v-if="activeTab !== 'opencode' && preset.is_active" size="small" disabled>当前激活</NButton>
+            <NButton v-else size="small" type="primary" ghost @click="activate(preset)">{{ activeTab === "opencode" && preset.is_active ? "取消激活" : "激活" }}</NButton>
+            <!-- 官方直连行：凭据可编辑 + 一键恢复默认，不允许删除 -->
+            <template v-if="isOfficialPreset(preset)">
+              <NButton size="small" @click="openOfficialEdit(preset)">编辑</NButton>
+              <NButton size="small" @click="resetOfficial(preset)">恢复默认</NButton>
+            </template>
+            <template v-else>
+              <NButton size="small" @click="openEdit(preset)">编辑</NButton>
+              <NButton size="small" type="error" ghost :disabled="preset.is_active" @click="remove(preset)">删除</NButton>
+            </template>
+          </div>
+        </div>
       </div>
-    </template>
-    <p v-else class="empty-desc">该 Agent 类型暂无结构化表单</p>
-    <template #footer>
-      <div class="modal-actions">
-        <NButton size="small" @click="showModal = false">取消</NButton>
-        <NButton size="small" type="primary" ghost @click="save(true)">保存并激活</NButton>
-        <NButton size="small" type="primary" @click="save(false)">保存</NButton>
-      </div>
-    </template>
-  </NModal>
+    </div>
+
+    <NModal
+      v-model:show="showModal"
+      preset="card"
+      :title="editingId ? '编辑预设' : '新建预设'"
+      style="width: min(600px, calc(100vw - 32px))"
+      :bordered="false"
+      :segmented="{ footer: true }"
+    >
+      <template v-if="spec">
+        <div class="m-body">
+          <p v-if="nativeProtocolHint()" class="m-tip">{{ nativeProtocolHint() }}</p>
+
+          <!-- 1. 基本信息：名称 + 从渠道一键填充 -->
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">基本信息</span>
+              <span class="m-sec-meta">{{ spec.label }}</span>
+            </div>
+            <div class="m-grid">
+              <div class="m-field">
+                <label class="m-label">预设名称</label>
+                <NInput v-model:value="formName" placeholder="请输入预设名称" @keydown.enter="save(false)" />
+              </div>
+              <div class="m-field">
+                <label class="m-label">从渠道填充</label>
+                <NSelect
+                  v-model:value="channelFillId"
+                  :options="channelOptions"
+                  filterable
+                  clearable
+                  :loading="channelsLoading"
+                  :disabled="channels.length === 0"
+                  :placeholder="channels.length === 0 ? '暂无渠道，请先在「渠道」页配置' : '选择渠道，自动填充名称、端点与 Key'"
+                  @update:value="applyChannelFill"
+                />
+              </div>
+              <p v-if="channelFillHint" class="m-note m-full">{{ channelFillHint }}</p>
+            </div>
+          </section>
+
+          <!-- 2. 接入参数：端点 / Key / 模型，短字段双栏 -->
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">接入参数</span>
+              <span v-if="fetchedModels.length" class="m-sec-meta">已获取 {{ fetchedModels.length }} 个模型</span>
+              <NButton
+                size="tiny"
+                secondary
+                class="m-sec-action"
+                :loading="fetchingModels"
+                :disabled="!formValues[modelEndpointKey]"
+                @click="fetchModels"
+              >
+                获取模型
+              </NButton>
+            </div>
+
+            <div class="m-grid">
+              <div
+                v-for="field in basicFields"
+                :key="field.key"
+                class="m-field"
+                :class="{ 'm-full': isWideField(field) }"
+              >
+                <label class="m-label">{{ field.label }}</label>
+                <template v-if="field.type === 'model-roles'">
+                  <div v-for="role in field.roles || []" :key="role" class="role-row">
+                    <span class="role-label">{{ role }}</span>
+                    <NSelect
+                      :value="(formValues.roles as Record<string, string> || {})[role]"
+                      :options="modelOptions"
+                      filterable
+                      clearable
+                      :disabled="modelSelectorDisabled"
+                      :placeholder="modelSelectorDisabled ? '请先获取模型列表' : `${role} 模型`"
+                      @update:value="(value) => updateRole(role, value)"
+                    />
+                  </div>
+                </template>
+                <NSelect
+                  v-else-if="field.type === 'model-select'"
+                  :value="formValues[field.key] as string"
+                  :options="modelOptions"
+                  filterable
+                  clearable
+                  :disabled="modelSelectorDisabled"
+                  :placeholder="modelSelectorDisabled ? '请先获取模型列表' : field.placeholder"
+                  @update:value="(value) => updateField(field.key, value || '')"
+                />
+                <NSelect
+                  v-else-if="field.type === 'select'"
+                  :value="String(formValues[field.key] || '')"
+                  :options="selectOptions(field).map((option) => ({ label: option.label, value: option.value, disabled: option.disabled }))"
+                  :placeholder="field.placeholder"
+                  @update:value="(value) => updateField(field.key, value || '')"
+                />
+                <template v-else-if="field.type === 'model-list' || field.type === 'model-map'">
+                  <div class="model-list-editor">
+                    <div v-for="(model, index) in modelListValue()" :key="index" class="model-row">
+                      <NSelect :value="String(model.id || '')" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" placeholder="选择模型" @update:value="(value) => updateModelListItem(index, 'id', value || '')" />
+                      <NInput :value="String(model.name || '')" placeholder="显示名称（可选）" @update:value="(value) => updateModelListItem(index, 'name', value)" />
+                      <NInputNumber :value="typeof model.context_length === 'number' ? model.context_length : null" :min="1" placeholder="上下文" @update:value="(value) => updateModelListItem(index, 'context_length', value)" />
+                      <NButton size="small" quaternary type="error" aria-label="删除模型" @click="removeModelListItem(index)">删除</NButton>
+                    </div>
+                    <NButton size="small" dashed :disabled="modelSelectorDisabled" @click="addModelListItem">添加模型</NButton>
+                  </div>
+                </template>
+                <NInput v-else-if="field.type === 'secret'" :value="fieldValue(field)" type="password" show-password-on="click" :placeholder="field.placeholder" @update:value="(value) => updateField(field.key, value)" />
+                <NInput v-else :value="fieldValue(field)" :placeholder="field.placeholder" :inputmode="field.type === 'number' ? 'numeric' : undefined" @update:value="(value) => updateField(field.key, value)" />
+                <span v-if="field.hint" class="m-note">{{ field.hint }}</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- 3. 高级配置：原生环境变量 / JSON，改动过才提示 -->
+          <ModalAdvanced
+            v-if="advancedFields.length"
+            :count="advancedFilledCount"
+            hint="环境变量 · 原生 JSON"
+          >
+            <div v-for="field in advancedFields" :key="field.key" class="m-field adv-extra">
+              <label class="m-label">
+                {{ field.label }}
+                <span v-if="field.hint" class="m-note">{{ field.hint }}</span>
+              </label>
+              <NInput
+                :value="fieldValue(field)"
+                type="textarea"
+                :autosize="{ minRows: 3, maxRows: 8 }"
+                :placeholder="field.placeholder"
+                @update:value="(value) => updateField(field.key, value)"
+              />
+            </div>
+          </ModalAdvanced>
+        </div>
+      </template>
+      <p v-else class="s-state-desc">该 Agent 类型暂无结构化表单</p>
+      <template #footer>
+        <div class="modal-actions">
+          <NButton size="small" @click="showModal = false">取消</NButton>
+          <NButton size="small" type="primary" ghost @click="save(true)">保存并激活</NButton>
+          <NButton size="small" type="primary" @click="save(false)">保存</NButton>
+        </div>
+      </template>
+    </NModal>
 
     <!-- 官方直连配置编辑：端点/模型锚定官方，仅凭据可填（与后端清洗白名单对齐） -->
     <NModal
@@ -847,107 +878,129 @@ onMounted(async () => {
         </div>
       </template>
     </NModal>
-  </div>
+  </AppPageShell>
 </template>
 
 <style scoped>
-.presets-page { width: 100%; }
+/* 卡片 / 页头 / 统计 / 徽标 / 表格 / 弹窗分区全部走 style.css 的 p-* / s-* / m-* 规范，
+   这里只保留本页特有的「预设卡 / 模型编辑器 / 分段控件」等业务造型。 */
 
+/* 分段控件：造型保留，间距 / 字号 / 圆角 / 颜色全部走令牌 */
 .agent-tabs {
   display: inline-flex;
-  gap: 4px;
-  margin-bottom: 24px;
-  padding: 4px;
-  background: var(--surface-alt, #f5f5f5);
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: var(--radius, 8px);
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-6);
+  padding: var(--sp-1);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
 .agent-tab {
   min-width: 100px;
-  padding: 7px 16px;
+  padding: var(--sp-2) var(--sp-4);
   border: 0;
-  border-radius: var(--radius, 8px);
+  border-radius: var(--radius);
   background: transparent;
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 500;
-  color: var(--muted, #737373);
+  color: var(--muted);
   transition: background-color 120ms ease, color 120ms ease;
 }
 
 .agent-tab:hover {
-  background: var(--hover-bg, #f5f5f5);
-  color: var(--fg-2, #171717);
+  background: var(--hover-bg);
+  color: var(--fg-2);
 }
 
 .agent-tab.active {
-  background: var(--fg, #0a0a0a);
-  color: var(--surface, #ffffff);
+  background: var(--fg);
+  color: var(--surface);
   font-weight: 600;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-}
-
-.page-header h2 {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.012em;
-}
-
-.subtitle, .empty-desc, .fetch-count { color: var(--muted, #737373); font-size: 13px; }
-.subtitle { margin: 0; }
-
-.preset-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.preset-card {
-  padding: 16px;
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: var(--radius-lg, 10px);
-  background: var(--surface, #ffffff);
+/* 整卡可拖拽：仅保留 grab 光标与激活 / 拖拽态，其余走 .s-card */
+.s-card {
   cursor: grab;
-  transition: border-color 120ms ease;
 }
 
-.preset-card:hover {
-  border-color: #d4d4d4;
+.s-card.is-active {
+  border-color: var(--success);
 }
 
-.model-list-editor { display: flex; flex-direction: column; gap: 8px; }
-.model-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 110px auto; gap: 6px; align-items: center; }
-@media (max-width: 700px) {
-  .model-row { grid-template-columns: 1fr 1fr; }
+.s-card.is-dragging {
+  opacity: 0.55;
+  border-style: dashed;
 }
 
-/* 激活态：仅 1px 绿色描边，零辉光 */
-.preset-card.active {
-  border-color: var(--success, #16a34a);
+.preset-tags {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
 }
 
-.preset-card.dragging { opacity: 0.55; border-style: dashed; }
+.preset-desc {
+  margin: 0 0 var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
 
-.preset-card-head, .preset-actions, .modal-actions, .role-row { display: flex; align-items: center; }
-.preset-card-head { justify-content: space-between; margin-bottom: 12px; }
-.preset-tags { display: flex; align-items: center; gap: 4px; }
-.preset-desc { margin: 0 0 10px; color: var(--muted, #737373); font-size: 12px; line-height: 1.5; }
-.preset-name { font-size: 14px; font-weight: 600; color: var(--fg, #0a0a0a); letter-spacing: -0.01em; }
-.preset-actions, .modal-actions { gap: 6px; }
+.preset-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
 
-.empty-state { padding: 48px 0; text-align: center; }
+/* 模型列表编辑器：条目的列宽用 flex-wrap 自适应，不再写私有 @media */
+.model-list-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
 
-.active-count { color: var(--muted, #737373); font-size: 13px; margin-left: 8px; }
-.role-row { gap: 10px; }
-.role-label { width: 70px; color: var(--muted, #737373); font-size: 13px; font-weight: 500; }
-.modal-actions { justify-content: flex-end; }
+.model-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.model-row > :nth-child(1) {
+  flex: 2 1 160px;
+}
+
+.model-row > :nth-child(2) {
+  flex: 1 1 120px;
+}
+
+.model-row > :nth-child(3) {
+  flex: 0 0 110px;
+}
+
+.model-row > :nth-child(4) {
+  flex: 0 0 auto;
+}
+
+.role-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.role-label {
+  width: 70px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
 </style>

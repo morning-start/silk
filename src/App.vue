@@ -12,19 +12,24 @@ const showSplash = ref(true);
 const FONT_SANS =
   "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif";
 
-/** 基础令牌：与 style.css 的 :root 保持一致，形状类由 CSS 变量驱动 */
+/** 形状类令牌：与 style.css 的 :root 对应 */
 const baseOverrides = {
   fontFamily: FONT_SANS,
-  fontSize: "13px",
-  fontSizeSmall: "12px",
+  fontSize: "13.5px",
+  fontSizeSmall: "12.5px",
   heightSmall: "26px",
   heightMedium: "32px",
   heightLarge: "38px",
-  successColor: "#0f9b6c",
-  warningColor: "#d97706",
-  errorColor: "#dc2626",
 };
 
+/* ----------------------------------------------------------------
+   以下色值与 style.css 的 :root / body.dark 一一对应。
+   naive-ui 需要字面量色值，无法直接吃 CSS 变量，所以这里是唯一
+   允许与令牌重复的地方 —— 改色时必须两边同改，否则原生控件
+   （输入框 / 表格 / 弹窗 / 分页）会和自定义 CSS 出现两套色系。
+   ---------------------------------------------------------------- */
+
+/** 浅色：--bg --surface --surface-alt --fg --fg-2 --muted --border --border-soft --hover-bg */
 const themeOverrides: GlobalThemeOverrides = {
   common: {
     ...baseOverrides,
@@ -34,53 +39,57 @@ const themeOverrides: GlobalThemeOverrides = {
     infoColor: "#4f46e5",
     infoColorHover: "#4338ca",
     infoColorPressed: "#3730a3",
+    successColor: "#16a34a",
+    warningColor: "#d97706",
+    errorColor: "#dc2626",
     borderRadius: "8px",
     borderRadiusSmall: "6px",
-    bodyColor: "#f7f8fa",
+    bodyColor: "#fafafa",
     cardColor: "#ffffff",
     modalColor: "#ffffff",
     popoverColor: "#ffffff",
     tableColor: "#ffffff",
-    tableHeaderColor: "#f2f4f7",
-    borderColor: "#e2e6eb",
-    dividerColor: "#eceff2",
-    textColor1: "#10141a",
-    textColor2: "#3f4652",
-    textColor3: "#6b7480",
-    textColorDisabled: "#a3abb6",
-    placeholderColor: "#9aa3b0",
-    hoverColor: "#f3f5f8",
+    tableHeaderColor: "#f5f5f5",
+    borderColor: "#e5e5e5",
+    dividerColor: "#ededed",
+    textColor1: "#0a0a0a",
+    textColor2: "#171717",
+    textColor3: "#737373",
+    textColorDisabled: "#a3a3a3",
+    placeholderColor: "#a3a3a3",
+    hoverColor: "#f5f5f5",
   },
 };
 
+/** 深色：--bg --surface --surface-alt --fg --fg-2 --muted --border --border-soft --hover-bg */
 const darkOverrides: GlobalThemeOverrides = {
   common: {
     ...baseOverrides,
-    successColor: "#34d399",
-    warningColor: "#fbbf24",
-    errorColor: "#f87171",
     primaryColor: "#22d3ee",
     primaryColorHover: "#67e8f9",
     primaryColorPressed: "#06b6d4",
     infoColor: "#818cf8",
     infoColorHover: "#a5b4fc",
     infoColorPressed: "#6366f1",
+    successColor: "#62d178",
+    warningColor: "#fbbf24",
+    errorColor: "#ff6166",
     borderRadius: "8px",
     borderRadiusSmall: "6px",
-    bodyColor: "#0b0e14",
-    cardColor: "#121722",
-    modalColor: "#121722",
-    popoverColor: "#161d29",
-    tableColor: "#121722",
-    tableHeaderColor: "#171d29",
-    borderColor: "#232c3b",
-    dividerColor: "#1a2130",
-    textColor1: "#e8edf4",
-    textColor2: "#b7c1cf",
-    textColor3: "#7f8b9c",
-    textColorDisabled: "#5b6675",
-    placeholderColor: "#5b6675",
-    hoverColor: "#171d29",
+    bodyColor: "#0a0a0a",
+    cardColor: "#171717",
+    modalColor: "#171717",
+    popoverColor: "#171717",
+    tableColor: "#171717",
+    tableHeaderColor: "#262626",
+    borderColor: "#282828",
+    dividerColor: "#202020",
+    textColor1: "#fafafa",
+    textColor2: "#e5e5e5",
+    textColor3: "#a1a1a1",
+    textColorDisabled: "#525252",
+    placeholderColor: "#525252",
+    hoverColor: "#262626",
   },
 };
 

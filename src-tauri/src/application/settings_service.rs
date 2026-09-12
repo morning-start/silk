@@ -3,7 +3,7 @@ use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::error::{bad_request, ServiceError};
-use crate::models::GatewaySettings;
+use crate::models::{GatewaySettings, NullableUpdate};
 use crate::persistence::GatewaySettingsRepo;
 use crate::AppState;
 
@@ -43,12 +43,15 @@ pub struct UpdateSettingsPayload {
     pub minimize_to_tray: Option<bool>,
     pub close_to_tray: Option<bool>,
     pub auto_start_gateway: Option<bool>,
-    pub default_provider_id: Option<String>,
+    /// 默认渠道 ID；显式传 null 表示清除（见 `NullableUpdate`）
+    #[serde(default, deserialize_with = "crate::models::double_option")]
+    pub default_provider_id: NullableUpdate<String>,
     pub rate_limit_enabled: Option<bool>,
     pub rate_limit_max_requests_per_minute: Option<i64>,
     pub rate_limit_max_tokens_per_minute: Option<i64>,
-    /// 全局默认代理地址（渠道未配置代理时使用）
-    pub proxy_url: Option<String>,
+    /// 全局默认代理地址（渠道未配置代理时使用）；显式传 null 表示清除
+    #[serde(default, deserialize_with = "crate::models::double_option")]
+    pub proxy_url: NullableUpdate<String>,
     /// 是否启用 prism 日志追踪（调试用）
     pub trace_enabled: Option<bool>,
     /// 全局日志级别

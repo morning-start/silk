@@ -1,6 +1,7 @@
 use crate::crypto::hash_api_key;
 use crate::gateway::context::{GatewayContext, RequestContext};
 use crate::gateway::error::GatewayError;
+use crate::gateway::is_gateway_path;
 use crate::gateway::pipeline::StageError;
 use axum::http::HeaderMap;
 
@@ -41,9 +42,13 @@ pub async fn run(
 ) -> Result<RequestContext, StageError> {
     let error_ctx = ctx.clone();
 
-    // 仅校验 /v1/* 路径
-    if !ctx.path.starts_with("/v1/") {
-        return Ok(ctx);
+    // 仅校验 /v1/* 路径。路由器已把非 /v1/ 请求挡在管道之外，此处再
+    // fail-closed 复核一次，避免将来新增路由时被静默跳过认证。
+    if !is_gateway_path(&ctx.path) {
+        return Err(StageError::new(
+            error_ctx,
+            GatewayError::NotFound(format!("未知路径: {}", ctx.path)),
+        ));
     }
 
     // 提取 token：按优先级尝试多种方式

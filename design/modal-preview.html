@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Silk 弹窗布局规范 — 分区 / 网格 / 折叠</title>
+<style>
+/* ================================================================
+   令牌快照（与 src/style.css v4 保持一致，仅作静态预览用）
+   ================================================================ */
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-alt: #f5f5f5;
+  --fg: #0a0a0a;
+  --fg-2: #171717;
+  --muted: #737373;
+  --border: #e5e5e5;
+  --border-soft: #ededed;
+  --accent: #0e7490;
+  --accent-soft: rgba(14, 116, 144, 0.08);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 10px;
+  --transition: 150ms ease;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', 'Menlo', monospace;
+  --success: #16a34a;
+  --warn: #d97706;
+  --warn-soft: rgba(217, 119, 6, 0.10);
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.10);
+  --hover-bg: #f5f5f5;
+}
+
+body.dark {
+  --bg: #0a0a0a;
+  --surface: #171717;
+  --surface-alt: #262626;
+  --fg: #fafafa;
+  --fg-2: #e5e5e5;
+  --muted: #a1a1a1;
+  --border: #282828;
+  --border-soft: #202020;
+  --accent: #67e8f9;
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --success: #4ade80;
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --hover-bg: #262626;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+  padding: 28px;
+  transition: background var(--transition), color var(--transition);
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+
+.page-head h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+
+.page-head p { color: var(--muted); font-size: 13px; }
+
+.mock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(680px, 1fr));
+  gap: 28px;
+  margin-top: 24px;
+  align-items: start;
+}
+
+.caption {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 10px 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.caption b {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+/* ================================================================
+   弹框外壳（NaiveUI preset="card" 的近似实现）
+   ================================================================ */
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.modal-head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.modal-body {
+  padding: 18px 20px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface-alt);
+}
+
+.modal-foot .modal-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.modal-foot-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+/* ================================================================
+   弹窗内部布局系统 m-*（与 src/style.css 一致）
+   ================================================================ */
+.m-body { display: flex; flex-direction: column; gap: 18px; }
+.m-section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.m-section + .m-section { padding-top: 18px; border-top: 1px solid var(--border-soft); }
+
+.m-sec-head { display: flex; align-items: center; gap: 8px; min-height: 24px; flex-wrap: wrap; }
+
+.m-sec-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.m-sec-meta { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.m-sec-action { margin-left: auto; }
+.m-sec-search { width: 168px; flex: none; }
+
+.m-sec-desc { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+
+.m-sec-desc code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  border: 1px solid var(--border-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+.m-grid {
+  display: grid;
+  gap: 12px 16px;
+  grid-template-columns: repeat(var(--m-cols, 2), minmax(0, 1fr));
+  align-items: start;
+}
+
+.m-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.m-full { grid-column: 1 / -1; }
+.m-span-2 { grid-column: span 2; }
+.m-span-3 { grid-column: span 3; }
+
+.m-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
+  min-height: 18px;
+}
+
+.m-req { font-style: normal; font-weight: 400; color: var(--danger); }
+.m-note { font-size: 12px; line-height: 1.55; color: var(--muted); }
+.m-switch { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+
+.m-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-inline-end { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.m-inline .n-input { flex: 1; min-width: 0; }
+
+.m-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.m-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.m-item-soft { background: var(--surface-alt); }
+
+.m-list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.m-empty {
+  padding: 14px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ---- 折叠面板 ---- */
+.m-adv { border-top: 1px solid var(--border-soft); padding-top: 4px; }
+
+.m-adv-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 2px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--fg-2);
+}
+
+.m-adv-chevron { flex: none; font-size: 10px; color: var(--muted); transition: transform var(--transition); }
+.m-adv.open .m-adv-chevron { transform: rotate(90deg); }
+
+.m-adv-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.m-adv.open .m-adv-title { color: var(--fg-2); }
+
+.m-adv-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--border));
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.m-adv-badge.is-default {
+  border-color: var(--border);
+  background: var(--surface-alt);
+  color: var(--muted);
+}
+
+.m-adv-hint { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+.m-adv-body {
+  margin-top: 4px;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.adv-extra + .adv-extra { margin-top: 12px; }
+
+.m-tip {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.modal-summary { display: flex; align-items: center; gap: 8px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.modal-summary-dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.5; flex: none; }
+
+/* ================================================================
+   日志详情：概览条 + 双栏 key-value
+   ================================================================ */
+.log-detail { display: flex; flex-direction: column; gap: 18px; }
+
+.log-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.ls-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 10px 12px; background: var(--surface-alt); }
+
+.ls-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ls-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ls-value.is-mono { font-family: var(--font-mono); font-size: 13px; }
+.ls-value.is-ok { color: var(--success); }
+.ls-value.is-error { color: var(--danger); }
+
+.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 20px; }
+.dg-item { display: flex; align-items: baseline; gap: 10px; min-width: 0; padding: 3px 0; }
+.dg-full { grid-column: 1 / -1; }
+.dg-value-row { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.dg-arrow { font-size: 12px; color: var(--muted); }
+
+.detail-label {
+  flex: none;
+  min-width: 72px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.detail-value { flex: 1; min-width: 0; font-size: 13px; color: var(--fg-2); word-break: break-all; }
+.dg-sub { margin-left: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.dg-saved { margin-left: 8px; color: var(--success); }
+
+.error-box {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+}
+
+.error-line { display: flex; align-items: baseline; gap: 10px; }
+.error-line + .error-line { margin-top: 6px; }
+.error-line .detail-label, .error-line .detail-value { color: var(--danger); }
+
+/* ================================================================
+   NaiveUI 控件的静态替身
+   ================================================================ */
+.n-input, .n-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.n-input.is-placeholder, .n-select.is-placeholder { color: var(--muted); }
+.n-select::after { content: "⌄"; margin-left: auto; color: var(--muted); font-size: 12px; }
+.n-input.is-small, .n-select.is-small { min-height: 28px; padding: 0 10px; font-size: 12.5px; }
+.n-input.is-textarea { min-height: 62px; align-items: flex-start; padding-top: 8px; }
+.n-input.is-number { justify-content: flex-start; }
+.n-input.is-number .n-num { font-variant-numeric: tabular-nums; }
+.n-input.is-number::after { content: "▲▼"; margin-left: auto; font-size: 8px; color: var(--muted); letter-spacing: -1px; }
+
+.n-checkbox { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 8px; cursor: pointer; }
+.n-checkbox .box {
+  width: 14px; height: 14px; flex: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  display: grid; place-items: center;
+  font-size: 10px; color: var(--surface);
+}
+.n-checkbox.checked .box { background: var(--accent); border-color: var(--accent); }
+.n-checkbox .label { font-family: var(--font-mono); font-size: 12px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.n-switch {
+  width: 34px; height: 18px; flex: none;
+  border-radius: 999px;
+  background: var(--border);
+  position: relative;
+  transition: background var(--transition);
+}
+.n-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; transition: transform var(--transition);
+}
+.n-switch.on { background: var(--accent); }
+.n-switch.on::after { transform: translateX(16px); }
+
+.n-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-2);
+  font-size: 13px; font-family: inherit;
+  cursor: pointer; white-space: nowrap;
+}
+.n-button.is-primary { background: var(--fg); border-color: var(--fg); color: var(--surface); }
+.n-button.is-secondary { background: var(--surface-alt); border-color: var(--border); }
+.n-button.is-tiny { height: 24px; padding: 0 9px; font-size: 12px; }
+.n-button.is-text { border-color: transparent; background: transparent; color: var(--muted); padding: 0 6px; }
+.n-button.is-danger { color: var(--danger); }
+.n-button.is-circle { width: 26px; height: 26px; padding: 0; border-radius: 50%; font-size: 14px; }
+
+.n-tag {
+  display: inline-flex; align-items: center;
+  height: 20px; padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--fg-2);
+  font-size: 11px; font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.n-tag.is-info { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); background: var(--accent-soft); color: var(--accent); }
+.n-tag.is-success { border-color: color-mix(in srgb, var(--success) 32%, var(--border)); background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.n-tag.is-error { border-color: color-mix(in srgb, var(--danger) 32%, var(--border)); background: var(--danger-soft); color: var(--danger); }
+.n-tag.is-warn { border-color: color-mix(in srgb, var(--warn) 32%, var(--border)); background: var(--warn-soft); color: var(--warn); }
+
+.key-head-weight { flex: none; width: 40px; }
+.key-head-name { flex: none; width: 110px; }
+.key-head-value { flex: 1; min-width: 0; }
+
+.model-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 2px 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.channel-list { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+
+.channel-item { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+
+.channel-item-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; cursor: pointer;
+  font-size: 13px;
+}
+
+.channel-item-head:hover { background: var(--surface-alt); }
+.channel-arrow { font-size: 11px; color: var(--muted); }
+.channel-name { font-weight: 600; font-size: 13px; }
+.channel-meta { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+.channel-expand-hint { margin-left: auto; font-size: 12px; font-weight: 600; font-family: var(--font-mono); }
+
+.cmg-list { border-top: 1px solid var(--border-soft); background: var(--surface-alt); padding: 4px 0; }
+
+.cmg-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px 6px 24px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cmg-item:hover { background: var(--hover-bg); }
+.cmg-item .cmg-check {
+  width: 14px; height: 14px; flex: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  display: grid; place-items: center;
+  font-size: 10px; color: transparent;
+}
+.cmg-item.selected .cmg-check { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.cmg-model { font-family: var(--font-mono); font-size: 12px; }
+
+/* ================================================================
+   统一确认弹窗（cf-*，与 src/style.css 同步）
+   ================================================================ */
+.dlg {
+  width: 424px;
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.dlg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 18px 0;
+}
+
+.dlg-icon {
+  width: 20px; height: 20px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12px; font-weight: 700;
+}
+
+.dlg-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+
+.dlg-body { padding: 14px 18px 0; }
+
+.dlg-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 18px;
+}
+
+.n-button.is-error { background: var(--danger); border-color: var(--danger); color: #fff; }
+body.dark .n-button.is-error { color: #1a1a1a; }
+
+/* ---- 确认框内容：说明 → 对象 → 要点 ---- */
+.cf { display: flex; flex-direction: column; gap: 12px; }
+.cf-desc { margin: 0; font-size: 13px; line-height: 1.65; color: var(--fg-2); }
+
+.cf-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+.cf-target-label { flex: none; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); }
+.cf-target-name { min-width: 0; font-family: var(--font-mono); font-size: 12px; color: var(--fg); word-break: break-all; }
+
+.cf-impacts { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.cf-impact { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.cf-impact::before {
+  content: "";
+  flex: none;
+  width: 3px; height: 3px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+.cf-impact.is-danger::before { background: var(--danger); }
+
+/* ================================================================
+   页面装饰
+   ================================================================ */
+.theme-toggle { margin-left: auto; }
+.note-list { margin-top: 26px; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.note-list h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+.note-list ol { margin-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.note-list li { font-size: 13px; color: var(--fg-2); }
+.note-list code { font-family: var(--font-mono); font-size: 12px; background: var(--surface-alt); border: 1px solid var(--border-soft); border-radius: 4px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div>
+    <h1>弹窗布局规范</h1>
+    <p>分区 → 双栏网格 → 高级折叠；核心结论常驻 footer</p>
+  </div>
+  <button class="n-button theme-toggle" onclick="document.body.classList.toggle('dark')">切换浅色 / 深色</button>
+</div>
+
+<div class="mock-grid">
+
+  <!-- ============ 1. 渠道弹窗 ============ -->
+  <div>
+    <div class="caption"><b>ProvidersView</b><span>新增 / 编辑渠道 · 720px · 五段分区，高级设置折叠</span></div>
+    <div class="modal">
+      <div class="modal-head">编辑渠道</div>
+      <div class="modal-body">
+        <div class="m-body">
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">基本信息</span>
+              <span class="m-sec-meta">编辑已有渠道</span>
+            </div>
+            <div class="m-grid" style="--m-cols: 4">
+              <div class="m-field m-span-2">
+                <label class="m-label">名称<i class="m-req">*</i></label>
+                <div class="n-input">OpenAI 官方</div>
+              </div>
+              <div class="m-field">
+                <label class="m-label">状态</label>
+                <div class="m-switch">
+                  <span class="n-switch on"></span>
+                  <span class="m-note">已启用</span>
+                </div>
+              </div>
+              <div class="m-field">
+                <label class="m-label">模型穿透</label>
+                <div class="m-switch">
+                  <span class="n-switch"></span>
+                  <span class="m-note">/v1/models 可见</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head"><span class="m-sec-title">接入配置</span></div>
+            <div class="m-grid">
+              <div class="m-field">
+                <label class="m-label">接口协议<i class="m-req">*</i></label>
+                <div class="n-select">openai ×</div>
+              </div>
+              <div class="m-field">
+                <label class="m-label">密钥策略</label>
+                <div class="n-select">加权轮询</div>
+                <span class="m-note">多密钥时的调度方式</span>
+              </div>
+              <div class="m-field m-full">
+                <label class="m-label">API 地址<i class="m-req">*</i></label>
+                <div class="n-input">https://api.openai.com</div>
+                <span class="m-note">渠道根地址，末尾不要带 <code>/v1</code></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">API 密钥</span>
+              <span class="m-sec-meta">2/3 启用</span>
+              <button class="n-button is-tiny is-secondary m-sec-action">+ 添加密钥</button>
+            </div>
+            <p class="m-sec-desc">至少需要一个已启用的密钥才能保存。本地中转站可直接查看与复制已保存的渠道 Key。</p>
+            <div class="m-list">
+              <div class="m-list-head">
+                <span class="key-head-weight">权重</span>
+                <span class="key-head-name">名称</span>
+                <span class="key-head-value">API Key</span>
+              </div>
+              <div class="m-item">
+                <div class="n-input is-small" style="width:40px;flex:none">2</div>
+                <div class="n-input is-small" style="width:110px;flex:none">主力</div>
+                <div class="n-input is-small" style="flex:1;min-width:0">sk-proj-•••••••••••••••9f2a</div>
+                <button class="n-button is-text">显示</button>
+                <button class="n-button is-text">复制</button>
+                <span class="n-switch on"></span>
+                <button class="n-button is-text is-circle is-danger">×</button>
+              </div>
+              <div class="m-item">
+                <div class="n-input is-small" style="width:40px;flex:none">1</div>
+                <div class="n-input is-small" style="width:110px;flex:none">备用</div>
+                <div class="n-input is-small" style="flex:1;min-width:0">sk-proj-•••••••••••••••3c71</div>
+                <button class="n-button is-text">显示</button>
+                <button class="n-button is-text">复制</button>
+                <span class="n-switch on"></span>
+                <button class="n-button is-text is-circle is-danger">×</button>
+              </div>
+              <div class="m-item" style="opacity:.55">
+                <div class="n-input is-small" style="width:40px;flex:none">1</div>
+                <div class="n-input is-small is-placeholder" style="width:110px;flex:none">名称</div>
+                <div class="n-input is-small" style="flex:1;min-width:0">sk-old-•••••••••••••••0b45</div>
+                <button class="n-button is-text">显示</button>
+                <button class="n-button is-text">复制</button>
+                <span class="n-switch"></span>
+                <button class="n-button is-text is-circle is-danger">×</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">模型列表</span>
+              <span class="m-sec-meta">18 个模型</span>
+              <button class="n-button is-tiny is-secondary m-sec-action">获取模型</button>
+              <div class="n-input is-small is-placeholder m-sec-search">搜索模型</div>
+            </div>
+            <p class="m-sec-desc">使用第一个已启用且非空的 Key 请求 <code>/v1/models</code>，成功会覆盖下方列表。</p>
+            <div class="model-list">
+              <div class="n-checkbox checked"><span class="box">✓</span><span class="label">gpt-4o</span></div>
+              <div class="n-checkbox checked"><span class="box">✓</span><span class="label">gpt-4o-mini</span></div>
+              <div class="n-checkbox"><span class="box">✓</span><span class="label">gpt-4-turbo</span></div>
+              <div class="n-checkbox"><span class="box">✓</span><span class="label">o1-preview</span></div>
+              <div class="n-checkbox"><span class="box">✓</span><span class="label">text-embedding-3-large</span></div>
+              <div class="n-checkbox checked"><span class="box">✓</span><span class="label">gpt-3.5-turbo</span></div>
+            </div>
+            <div class="m-inline">
+              <div class="n-input is-small is-placeholder">手动输入模型 ID，回车添加</div>
+              <button class="n-button is-tiny is-secondary">添加</button>
+              <div class="m-inline-end">
+                <button class="n-button is-text is-tiny">全选</button>
+                <button class="n-button is-text is-tiny">反选</button>
+                <button class="n-button is-text is-tiny is-danger">删除选中（2）</button>
+              </div>
+            </div>
+          </section>
+
+          <div class="m-adv open">
+            <button class="m-adv-head">
+              <span class="m-adv-chevron">▸</span>
+              <span class="m-adv-title">高级设置</span>
+              <span class="m-adv-badge">已自定义 2 项</span>
+              <span class="m-adv-hint">代理 · 超时 · 重试 · 请求头</span>
+            </button>
+            <div class="m-adv-body">
+              <div class="m-grid" style="--m-cols: 3">
+                <div class="m-field">
+                  <label class="m-label">代理地址</label>
+                  <div class="n-input is-placeholder">可选</div>
+                </div>
+                <div class="m-field">
+                  <label class="m-label">超时（秒）</label>
+                  <div class="n-input is-number"><span class="n-num">45</span></div>
+                </div>
+                <div class="m-field">
+                  <label class="m-label">最大重试</label>
+                  <div class="n-input is-number"><span class="n-num">3</span></div>
+                </div>
+              </div>
+              <div class="m-field" style="margin-top:14px">
+                <label class="m-label">自定义请求头<span class="m-note">覆盖同名的适配器头与转发的客户端头</span></label>
+                <div class="m-list">
+                  <div class="m-item m-item-soft">
+                    <div class="n-input is-small" style="flex:1;min-width:0">X-Provider</div>
+                    <div class="n-input is-small" style="flex:2;min-width:0">silk</div>
+                    <span class="n-switch on"></span>
+                    <button class="n-button is-text is-circle is-danger">×</button>
+                  </div>
+                </div>
+                <div style="margin-top:8px"><button class="n-button is-tiny is-secondary">+ 添加请求头</button></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-foot">
+        <div class="modal-summary">
+          <span>2/3 密钥</span><span class="modal-summary-dot"></span>
+          <span>18 模型</span><span class="modal-summary-dot"></span>
+          <span>openai / messages</span>
+        </div>
+        <div class="modal-foot-actions">
+          <button class="n-button">取消</button>
+          <button class="n-button is-primary">保存修改</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 2. 模型映射弹窗 ============ -->
+  <div>
+    <div class="caption"><b>ModelSquareView</b><span>新增 / 编辑模型映射 · 680px · 向导内部分区</span></div>
+    <div class="modal">
+      <div class="modal-head">编辑模型映射</div>
+      <div class="modal-body">
+        <div class="m-body">
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">模型信息</span>
+              <span class="m-sec-meta">2 渠道 · 5 模型</span>
+            </div>
+            <div class="m-grid" style="--m-cols: 4">
+              <div class="m-field m-span-3">
+                <label class="m-label">模型名称<i class="m-req">*</i></label>
+                <div class="n-input">gpt-4o</div>
+              </div>
+              <div class="m-field">
+                <label class="m-label">启用</label>
+                <div class="m-switch"><span class="n-switch on"></span><span class="m-note">对外可用</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">渠道与模型</span>
+              <div class="n-input is-small is-placeholder m-sec-search m-sec-action">搜索模型名</div>
+            </div>
+            <p class="m-sec-desc">展开渠道并勾选模型，被勾中的渠道即参与本模型的负载均衡。</p>
+            <div class="channel-list">
+              <div class="channel-item">
+                <div class="channel-item-head">
+                  <span class="channel-arrow">▾</span>
+                  <span class="channel-name">OpenAI 官方</span>
+                  <span class="n-tag">openai</span>
+                  <span class="channel-meta">18 模型</span>
+                  <span class="n-tag is-success">健康</span>
+                  <span class="channel-expand-hint">已选 3 个</span>
+                </div>
+                <div class="cmg-list">
+                  <div class="cmg-item selected"><span class="cmg-check">✓</span><span class="cmg-model">gpt-4o</span></div>
+                  <div class="cmg-item selected"><span class="cmg-check">✓</span><span class="cmg-model">gpt-4o-mini</span></div>
+                  <div class="cmg-item selected"><span class="cmg-check">✓</span><span class="cmg-model">o1-preview</span></div>
+                  <div class="cmg-item"><span class="cmg-check">✓</span><span class="cmg-model">gpt-4-turbo</span></div>
+                </div>
+              </div>
+              <div class="channel-item">
+                <div class="channel-item-head">
+                  <span class="channel-arrow">▸</span>
+                  <span class="channel-name">Azure 备用</span>
+                  <span class="n-tag">openai</span>
+                  <span class="channel-meta">6 模型</span>
+                  <span class="n-tag is-warn">检测中</span>
+                  <span class="channel-expand-hint">已选 2 个</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">负载策略</span>
+              <span class="m-sec-meta">多渠道路由方式</span>
+            </div>
+            <div class="m-grid">
+              <div class="m-field"><div class="n-select">加权轮询 (Weighted Round Robin)</div></div>
+            </div>
+            <p class="m-sec-desc">按权重顺序轮询各渠道，权重越高在轮次中出现越频繁。</p>
+          </section>
+
+        </div>
+      </div>
+      <div class="modal-foot">
+        <div class="modal-summary">
+          <span>gpt-4o</span><span class="modal-summary-dot"></span>
+          <span>2 渠道</span><span class="modal-summary-dot"></span>
+          <span>5 模型</span>
+        </div>
+        <div class="modal-foot-actions">
+          <button class="n-button">取消</button>
+          <button class="n-button is-primary">下一步</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 3. 日志详情 ============ -->
+  <div>
+    <div class="caption"><b>LogsView</b><span>日志详情 · 720px · 概览条 + 双栏明细 + 更多信息折叠</span></div>
+    <div class="modal">
+      <div class="modal-head">日志详情</div>
+      <div class="modal-body">
+        <div class="log-detail">
+
+          <div class="log-summary">
+            <div class="ls-cell"><span class="ls-label">状态码</span><span class="ls-value is-error">429</span></div>
+            <div class="ls-cell"><span class="ls-label">总耗时</span><span class="ls-value">1.4s</span></div>
+            <div class="ls-cell"><span class="ls-label">模型</span><span class="ls-value is-mono">gpt-4o</span></div>
+            <div class="ls-cell"><span class="ls-label">渠道</span><span class="ls-value">OpenAI 官方</span></div>
+          </div>
+
+          <section class="m-section">
+            <div class="m-sec-head"><span class="m-sec-title">请求</span></div>
+            <div class="detail-grid">
+              <div class="dg-item">
+                <span class="detail-label">Request ID</span>
+                <span class="detail-value" style="font-family:var(--font-mono)">req_9f2ac71b4e08</span>
+              </div>
+              <div class="dg-item">
+                <span class="detail-label">时间</span>
+                <span class="detail-value">2026-09-12 10:41:07</span>
+              </div>
+              <div class="dg-item dg-full">
+                <span class="detail-label">请求</span>
+                <span class="dg-value-row">
+                  <span class="n-tag is-info">POST</span>
+                  <span class="detail-value" style="font-family:var(--font-mono)">/v1/messages</span>
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head"><span class="m-sec-title">执行结果</span></div>
+            <div class="detail-grid">
+              <div class="dg-item"><span class="detail-label">状态码</span><span class="n-tag is-error">429</span></div>
+              <div class="dg-item"><span class="detail-label">首次响应</span><span class="detail-value">312ms</span></div>
+              <div class="dg-item"><span class="detail-label">总耗时</span><span class="detail-value">1.4s</span></div>
+              <div class="dg-item"><span class="detail-label">重试</span><span class="n-tag is-warn">2</span></div>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head"><span class="m-sec-title">路由信息</span></div>
+            <div class="detail-grid">
+              <div class="dg-item">
+                <span class="detail-label">协议转换</span>
+                <span class="dg-value-row">
+                  <span class="n-tag">messages</span><span class="dg-arrow">→</span><span class="n-tag">openai</span>
+                </span>
+              </div>
+              <div class="dg-item">
+                <span class="detail-label">渠道</span>
+                <span class="detail-value">OpenAI 官方<span class="dg-sub">openai-official</span></span>
+              </div>
+              <div class="dg-item">
+                <span class="detail-label">模型</span>
+                <span class="detail-value">gpt-4o<span class="dg-sub">gpt-4o-2024-11-20</span></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head"><span class="m-sec-title">错误信息</span></div>
+            <div class="error-box">
+              <div class="error-line">
+                <span class="detail-label">错误码</span>
+                <span class="n-tag is-error">rate_limit_exceeded</span>
+              </div>
+              <div class="error-line">
+                <span class="detail-label">错误</span>
+                <span class="detail-value">Rate limit reached for gpt-4o in organization org-xxx on requests per min.</span>
+              </div>
+            </div>
+          </section>
+
+          <div class="m-adv">
+            <button class="m-adv-head">
+              <span class="m-adv-chevron">▸</span>
+              <span class="m-adv-title">更多信息</span>
+              <span class="m-adv-hint">数据量 · 缓存 · 认证 Key</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-foot">
+        <div class="modal-summary"><span>429 失败</span><span class="modal-summary-dot"></span><span>1.4s</span><span class="modal-summary-dot"></span><span>2 次重试</span></div>
+        <div class="modal-foot-actions">
+          <button class="n-button is-tiny is-secondary">复制 JSON</button>
+          <button class="n-button is-tiny">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 4. 预设弹窗 ============ -->
+  <div>
+    <div class="caption"><b>PresetsView</b><span>编辑预设 · 600px · 短字段双栏，原生 JSON 折叠</span></div>
+    <div class="modal">
+      <div class="modal-head">编辑预设</div>
+      <div class="modal-body">
+        <div class="m-body">
+
+          <p class="m-tip">该预设写入 Anthropic 原生环境变量，端点已锚定本地网关，无需手动改写。</p>
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">基本信息</span>
+              <span class="m-sec-meta">Claude Code</span>
+            </div>
+            <div class="m-grid">
+              <div class="m-field">
+                <label class="m-label">预设名称</label>
+                <div class="n-input">本机 Claude Code</div>
+              </div>
+              <div class="m-field">
+                <label class="m-label">从渠道填充</label>
+                <div class="n-select">OpenAI 官方</div>
+              </div>
+              <p class="m-note m-full">已填充端点与 Key，可在下方单独调整。</p>
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">接入参数</span>
+              <span class="m-sec-meta">已获取 18 个模型</span>
+              <button class="n-button is-tiny is-secondary m-sec-action">获取模型</button>
+            </div>
+            <div class="m-grid">
+              <div class="m-field">
+                <label class="m-label">API 端点</label>
+                <div class="n-input" style="font-family:var(--font-mono);font-size:12px">http://127.0.0.1:1877</div>
+              </div>
+              <div class="m-field">
+                <label class="m-label">API Key</label>
+                <div class="n-input is-placeholder">sk-••••••••••••••</div>
+              </div>
+              <div class="m-field">
+                <label class="m-label">主模型</label>
+                <div class="n-select">claude-sonnet-4</div>
+              </div>
+              <div class="m-field">
+                <label class="m-label">子代理模型</label>
+                <div class="n-select is-placeholder">可选</div>
+              </div>
+              <div class="m-field m-full">
+                <label class="m-label">角色模型</label>
+                <div class="m-list">
+                  <div class="m-item" style="gap:10px">
+                    <span style="width:70px;color:var(--muted);font-size:13px">sonnet</span>
+                    <div class="n-select is-small" style="flex:1">claude-sonnet-4</div>
+                  </div>
+                  <div class="m-item" style="gap:10px">
+                    <span style="width:70px;color:var(--muted);font-size:13px">opus</span>
+                    <div class="n-select is-small" style="flex:1">claude-opus-4</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="m-adv">
+            <button class="m-adv-head">
+              <span class="m-adv-chevron">▸</span>
+              <span class="m-adv-title">高级设置</span>
+              <span class="m-adv-badge">已自定义 1 项</span>
+              <span class="m-adv-hint">环境变量 · 原生 JSON</span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-foot">
+        <div class="modal-foot-actions" style="margin-left:auto">
+          <button class="n-button is-tiny">取消</button>
+          <button class="n-button is-tiny is-secondary">保存并激活</button>
+          <button class="n-button is-tiny is-primary">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 6. 统一确认弹窗 · 破坏性 ============ -->
+  <div>
+    <div class="caption"><b>ConfirmDialog</b><span>删除类操作 · 424px · 说明 → 对象 → 要点，确认按钮标红</span></div>
+    <div class="dlg">
+      <div class="dlg-head">
+        <span class="dlg-icon">!</span>
+        <span class="dlg-title">删除渠道</span>
+      </div>
+      <div class="dlg-body">
+        <div class="cf">
+          <p class="cf-desc">该渠道的 API Key 与模型列表配置会一并移除。</p>
+          <div class="cf-target">
+            <span class="cf-target-label">渠道</span>
+            <span class="cf-target-name">OpenAI 官方</span>
+          </div>
+          <ul class="cf-impacts">
+            <li class="cf-impact is-danger">引用该渠道的模型映射会失去这条链路，需要重新指定渠道</li>
+            <li class="cf-impact is-danger">此操作不可撤销</li>
+          </ul>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button class="n-button is-tiny">取消</button>
+        <button class="n-button is-tiny is-error">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 7. 统一确认弹窗 · 非破坏性 ============ -->
+  <div>
+    <div class="caption"><b>ConfirmDialog</b><span>影响外部但无数据丢失 · 确认按钮保持主色</span></div>
+    <div class="dlg">
+      <div class="dlg-head">
+        <span class="dlg-icon">!</span>
+        <span class="dlg-title">刷新本地 API Key</span>
+      </div>
+      <div class="dlg-body">
+        <div class="cf">
+          <p class="cf-desc">重新生成网关的内置 Key，旧 Key 立即作废。</p>
+          <ul class="cf-impacts">
+            <li class="cf-impact">正在使用旧 Key 的客户端会立刻收到鉴权失败</li>
+            <li class="cf-impact">需要把新 Key 同步更新到各客户端配置中</li>
+          </ul>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button class="n-button is-tiny">取消</button>
+        <button class="n-button is-tiny is-primary">刷新</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="note-list">
+  <h2>这套规范想解决的几件事</h2>
+  <ol>
+    <li><b>分区代替平铺。</b>每个弹窗拆成 3–5 个 <code>.m-section</code>，用 1px 分隔线而不是大留白区分；分区标题是 mono 小字眉标，不去抢字段的注意力。</li>
+    <li><b>短字段并排，长字段独占。</b><code>.m-grid</code> + <code>--m-cols</code> 控制列数；URL / Key / 列表类字段用 <code>.m-full</code> 占整行，弹窗宽度因此可以收窄（渠道 760 → 720）。</li>
+    <li><b>数量与状态常驻标题行。</b>"2/3 启用""18 个模型""已选 3 个" 这类计数放在分区标题右侧，列表再长也不用翻到底去找。</li>
+    <li><b>高级项折叠但可见。</b><code>ModalAdvanced</code> 折叠区带"已自定义 N 项"徽标：没改过显示灰底"使用默认值"，改过显示琥珀色计数，不会因为藏起来就被忘掉。</li>
+    <li><b>确认弹窗同构。</b>删除 / 重置 / 刷新这类操作全部走 <code>useConfirm()</code>，形态固定为"说明 → 对象 → 要点"三段；名称用等宽字体标出避免认错，要点回答"为什么要谨慎"。危险程度只由确认按钮颜色区分，图标一律用警示三角——叉号读起来像"已经出错了"。执行期间按钮自动转圈，防重复提交。</li>
+  </ol>
+</div>
+
+</body>
+</html>

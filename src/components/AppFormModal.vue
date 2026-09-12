@@ -92,14 +92,4 @@ function close() {
   gap: 8px;
   flex: none;
 }
-
-@media (max-width: 560px) {
-  .app-form-modal-body {
-    max-height: calc(100vh - 148px);
-  }
-
-  .modal-footer-main :deep(.n-button) {
-    flex: 1;
-  }
-}
 </style>

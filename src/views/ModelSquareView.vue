@@ -2,7 +2,6 @@
 import { ref, onMounted, computed, watch } from "vue";
 import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
 import {
-  NCard,
   NButton,
   NInput,
   NInputNumber,
@@ -254,18 +253,6 @@ function capabilityLabel(val: string): string {
   return capabilityLabelMap[val] || val;
 }
 
-function capabilityColor(val: string): string {
-  const colors: Record<string, string> = {
-    thinking: "purple",
-    vision: "blue",
-    text: "default",
-    code: "green",
-    image_gen: "orange",
-    audio: "pink",
-  };
-  return colors[val] || "default";
-}
-
 async function loadData() {
   loading.value = true;
   error.value = null;
@@ -420,84 +407,79 @@ watch(
       <NButton type="primary" @click="handleAdd">+ 新增模型映射</NButton>
     </template>
     <template #empty>
-      <div class="empty-state">
-        <div class="empty-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
-        </div>
-        <h3 class="empty-title">暂无模型映射</h3>
-        <p class="empty-desc">先把多个渠道下的模型归并到同一个模型池，再交给路由或默认转发使用。</p>
+      <div class="s-state">
+        <span class="s-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+        </span>
+        <h3 class="s-state-title">暂无模型映射</h3>
+        <p class="s-state-desc">先把多个渠道下的模型归并到同一个模型池，再交给路由或默认转发使用。</p>
         <NButton type="primary" @click="handleAdd">+ 新增模型映射</NButton>
       </div>
     </template>
 
     <NGrid :x-gap="16" :y-gap="16" :cols="3" style="margin-top: 16px">
       <NGi v-for="item in mappings" :key="item.id">
-        <NCard
-          :bordered="false"
-          class="model-card"
+        <div
+          class="s-card"
           :class="{ disabled: !item.enabled }"
         >
-          <div class="mc-header">
-            <div class="mc-name-group">
-              <span class="mc-name">{{ item.model_name }}</span>
-              <NTag size="tiny" type="success" v-if="item.enabled">启用</NTag>
-              <NTag size="tiny" type="warning" v-else>禁用</NTag>
-            </div>
-            <span class="mc-channels-count" v-if="item.channels">
-              {{ item.channels.length }} 渠道
-            </span>
-          </div>
-
-          <div class="mc-desc" v-if="item.description">{{ item.description }}</div>
-
-          <div class="mc-specs" v-if="item.max_context_tokens || item.max_output_tokens || item.max_input_tokens">
-            <template v-if="item.max_input_tokens">
-              <span>输入 <span class="num">{{ formatTokens(item.max_input_tokens) }}</span></span>
-              <span class="sep">·</span>
-            </template>
-            <template v-if="item.max_context_tokens">
-              <span>上下文 <span class="num">{{ formatTokens(item.max_context_tokens) }}</span></span>
-              <span v-if="item.max_context_tokens && item.max_output_tokens" class="sep">·</span>
-            </template>
-            <template v-if="item.max_output_tokens">
-              <span>输出 <span class="num">{{ formatTokens(item.max_output_tokens) }}</span></span>
-            </template>
-          </div>
-
-          <div class="mc-channels" v-if="item.channels && item.channels.length > 0">
-            <div
-              v-for="c in item.channels.slice(0, 3)"
-              :key="c.id"
-              class="channel-badge"
-              :class="{ healthy: c.provider_health === 'healthy' }"
-            >
-              <span class="cb-name">{{ c.provider_name }}</span>
-              <span class="cb-models" v-if="c.selected_models && c.selected_models.length > 0">
-                {{ channelModelSummary(c.selected_models) }}
+          <div class="s-card-body">
+            <div class="mc-header">
+              <div class="mc-name-group">
+                <span class="mc-name">{{ item.model_name }}</span>
+                <NTag size="tiny" type="success" v-if="item.enabled">启用</NTag>
+                <NTag size="tiny" type="warning" v-else>禁用</NTag>
+              </div>
+              <span class="mc-channels-count" v-if="item.channels">
+                {{ item.channels.length }} 渠道
               </span>
             </div>
-            <NTag v-if="item.channels.length > 3" size="tiny" round>
-              +{{ item.channels.length - 3 }}
-            </NTag>
-          </div>
 
-          <div class="mc-caps" v-if="item.capabilities && item.capabilities.length > 0">
-            <NTag
-              v-for="cap in item.capabilities"
-              :key="cap"
-              :type="capabilityColor(cap) as any"
-              size="tiny"
-              round
-            >
-              {{ capabilityLabel(cap) }}
-            </NTag>
-          </div>
+            <div class="mc-desc" v-if="item.description">{{ item.description }}</div>
 
-          <div class="mc-actions">
-            <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
-            <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
+            <div class="mc-specs" v-if="item.max_context_tokens || item.max_output_tokens || item.max_input_tokens">
+              <template v-if="item.max_input_tokens">
+                <span>输入 <span class="num">{{ formatTokens(item.max_input_tokens) }}</span></span>
+                <span class="sep">·</span>
+              </template>
+              <template v-if="item.max_context_tokens">
+                <span>上下文 <span class="num">{{ formatTokens(item.max_context_tokens) }}</span></span>
+                <span v-if="item.max_context_tokens && item.max_output_tokens" class="sep">·</span>
+              </template>
+              <template v-if="item.max_output_tokens">
+                <span>输出 <span class="num">{{ formatTokens(item.max_output_tokens) }}</span></span>
+              </template>
+            </div>
+
+            <div class="mc-channels" v-if="item.channels && item.channels.length > 0">
+              <span
+                v-for="c in item.channels.slice(0, 3)"
+                :key="c.id"
+                class="s-badge"
+                :class="{ 's-badge--success': c.provider_health === 'healthy' }"
+              >
+                <span class="cb-name">{{ c.provider_name }}</span>
+                <span class="cb-models" v-if="c.selected_models && c.selected_models.length > 0">
+                  {{ channelModelSummary(c.selected_models) }}
+                </span>
+              </span>
+              <NTag v-if="item.channels.length > 3" size="tiny" round>
+                +{{ item.channels.length - 3 }}
+              </NTag>
+            </div>
+
+            <div class="mc-caps" v-if="item.capabilities && item.capabilities.length > 0">
+              <span v-for="cap in item.capabilities" :key="cap" class="s-badge s-badge--neutral">
+                {{ capabilityLabel(cap) }}
+              </span>
+            </div>
+
+            <div class="mc-actions">
+              <NButton size="tiny" quaternary @click="handleEdit(item)">编辑</NButton>
+              <NButton size="tiny" quaternary type="error" @click="handleDelete(item)">删除</NButton>
+            </div>
           </div>
-        </NCard>
+        </div>
       </NGi>
     </NGrid>
 
@@ -557,7 +539,7 @@ watch(
                     <div
                       v-for="p in allProviders"
                       :key="p.id"
-                      class="channel-item"
+                      class="channel-item s-card"
                       :class="{
                         selected: selectedProviderIds.includes(p.id),
                         'no-match': isFiltering && channelModelsOf(p.id).length === 0,
@@ -737,87 +719,65 @@ watch(
 </template>
 
 <style scoped>
-/* toolbar overrides — ModelSquareView 使用更紧凑的间距 */
-.toolbar {
-  margin-bottom: 8px;
-}
-.toolbar-right {
-  gap: 8px;
-}
+/* 卡片 / 页头 / 徽标 / 空态 / 弹窗分区全部走 style.css 的 p-* / s-* / m-* 规范，
+   这里只保留本页特有的「模型卡 / 渠道勾选区 / 模型勾选组 / 档位切换」业务造型。 */
 
-.model-card {
-  border-radius: var(--radius-sm, 6px);
-  transition: border-color var(--transition);
-  background: var(--card-bg, #ffffff);
-  border: 1px solid var(--border, #e5e5e5);
-}
-
-.model-card:hover {
-  border-color: var(--muted, #a3a3a3);
-}
-
-.model-card.disabled {
+/* 模型卡与内嵌渠道条目都是 s-card：统一边框/背景，仅在此补充禁用态与悬停描边 */
+.s-card.disabled {
   opacity: 0.5;
+}
+
+.s-card:hover {
+  border-color: var(--muted);
 }
 
 .mc-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 
 .mc-name-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .mc-name {
   font-size: 15px;
   font-weight: 600;
-  color: var(--fg, #0a0a0a);
+  color: var(--fg);
   letter-spacing: -0.01em;
 }
 
 .mc-desc {
-  font-size: 13px;
-  color: var(--fg-2, #171717);
-  margin-bottom: 8px;
+  font-size: var(--fs-base);
+  color: var(--fg-2);
+  margin-bottom: var(--sp-2);
   line-height: 1.4;
 }
 
-.mc-stats {
-  font-size: 12px;
-  color: var(--muted, #737373);
-  margin-bottom: 6px;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+.mc-specs {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  margin-bottom: var(--sp-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  font-family: var(--font-mono);
+}
+
+.sep {
+  color: var(--border);
+  margin: 0 4px;
 }
 
 .mc-channels {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.channel-badge {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg) 8%, var(--surface));
-  color: var(--fg);
-  font-weight: 600;
-  border: 1px solid color-mix(in srgb, var(--fg) 14%, var(--surface));
-}
-
-.channel-badge.healthy {
-  background: color-mix(in srgb, var(--success) 12%, var(--surface));
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 20%, var(--surface));
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
 }
 
 .cb-models {
@@ -827,71 +787,50 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-}
-
-.mc-specs {
-  font-size: 12px;
-  color: var(--muted, #737373);
-  margin-bottom: 6px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-}
-
-.sep {
-  color: var(--border, #e5e5e5);
-  margin: 0 4px;
+  font-family: var(--font-mono);
 }
 
 .mc-caps {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
 }
 
 .mc-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
-  border-top: 1px solid var(--border-soft, #ededed);
-  padding-top: 10px;
-  margin-top: 4px;
+  gap: var(--sp-1);
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--sp-2);
+  margin-top: var(--sp-1);
 }
 
 /* 渠道列表 */
 .channel-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-1);
   max-height: 280px;
   overflow-y: auto;
   align-items: stretch;
 }
 
+/* 渠道条目：s-card 变体，内嵌条目用 --radius */
 .channel-item {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  border-radius: var(--radius-sm, 6px);
-  border: 1px solid var(--border, #e5e5e5);
-  transition: border-color var(--transition);
+  border-radius: var(--radius);
   overflow: hidden;
-  background: var(--card-bg, #ffffff);
-}
-
-.channel-item:hover {
-  border-color: var(--muted, #a3a3a3);
 }
 
 /* 渠道头部行（信息展示，点击展开/收起模型区） */
 .channel-item-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   min-height: 40px;
   cursor: pointer;
   transition: background var(--transition);
@@ -899,13 +838,13 @@ watch(
 }
 
 .channel-item-head:hover {
-  background: var(--surface-alt, #fafafa);
+  background: var(--surface-alt);
 }
 
 /* 展开箭头（收起时右指，展开时旋转下指） */
 .channel-arrow {
   font-size: 12px;
-  color: var(--muted, #737373);
+  color: var(--muted);
   transition: transform var(--transition);
   flex-shrink: 0;
 }
@@ -918,20 +857,19 @@ watch(
 .channel-expand-hint {
   font-size: 12px;
   font-weight: 600;
-  color: var(--fg, #0a0a0a);
+  color: var(--fg);
   margin-left: auto;
   flex-shrink: 0;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  font-family: var(--font-mono);
 }
 
 /* 筛选无匹配渠道：压缩为矮条，淡化提示无匹配 */
 .channel-item.no-match {
   opacity: 0.4;
-  border-color: var(--border, #e5e5e5);
 }
 
 .channel-item.no-match .channel-item-head {
-  padding: 6px 12px;
+  padding: var(--sp-1) var(--sp-3);
   min-height: 0;
   cursor: default;
 }
@@ -941,13 +879,13 @@ watch(
 }
 
 .channel-item.no-match .channel-info {
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 /* 勾选渠道后内嵌的模型勾选区 */
 .channel-item .cmg-list {
-  border-top: 1px solid var(--border-soft, #ededed);
-  background: var(--surface-alt, #fafafa);
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface-alt);
 }
 
 .channel-item .cmg-item {
@@ -957,7 +895,7 @@ watch(
 .channel-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-1);
   flex-wrap: wrap;
   flex: 1;
 }
@@ -966,7 +904,7 @@ watch(
   font-weight: 600;
   font-size: 13px;
   min-width: 60px;
-  color: var(--fg, #0a0a0a);
+  color: var(--fg);
 }
 
 .channel-protocols {
@@ -976,14 +914,14 @@ watch(
 
 .channel-models {
   font-size: 12px;
-  color: var(--muted, #737373);
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  color: var(--muted);
+  font-family: var(--font-mono);
 }
 
 /* 模型分组 */
 .channel-model-group {
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -991,39 +929,39 @@ watch(
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
-  background: var(--surface-alt, #fafafa);
-  border-bottom: 1px solid var(--border-soft, #ededed);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .cmg-name {
   font-weight: 600;
   font-size: 13px;
-  color: var(--fg, #0a0a0a);
+  color: var(--fg);
 }
 
 .cmg-count {
   font-size: 12px;
-  color: var(--muted, #737373);
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  color: var(--muted);
+  font-family: var(--font-mono);
 }
 
 .cmg-weight {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   margin-left: auto;
 }
 
 .cmg-weight-label {
   font-size: 12px;
-  color: var(--muted, #737373);
+  color: var(--muted);
 }
 
 .cmg-empty {
-  padding: 12px;
+  padding: var(--sp-3);
   font-size: 13px;
-  color: var(--muted, #737373);
+  color: var(--muted);
   text-align: center;
 }
 
@@ -1035,11 +973,11 @@ watch(
 .cmg-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   cursor: pointer;
   transition: background var(--transition);
-  border-bottom: 1px solid var(--border-soft, #ededed);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .cmg-item:last-child {
@@ -1047,7 +985,7 @@ watch(
 }
 
 .cmg-item:hover {
-  background: var(--surface-alt, #fafafa);
+  background: var(--surface-alt);
 }
 
 .cmg-item.selected {
@@ -1058,7 +996,7 @@ watch(
   width: 16px;
   height: 16px;
   border-radius: 4px;
-  border: 1.5px solid var(--border, #e5e5e5);
+  border: 1.5px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1070,8 +1008,8 @@ watch(
 }
 
 .cmg-item.selected .cmg-check {
-  background: var(--fg, #0a0a0a);
-  border-color: var(--fg, #0a0a0a);
+  background: var(--fg);
+  border-color: var(--fg);
 }
 
 .cmg-check-icon {
@@ -1081,46 +1019,45 @@ watch(
 .cmg-model {
   font-weight: 600;
   font-size: 13px;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  font-family: var(--font-mono);
   flex: 1;
-  color: var(--fg-2, #171717);
+  color: var(--fg-2);
 }
 
 .cap-checkboxes {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 .cap-checkbox {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   font-size: 13px;
   cursor: pointer;
-  color: var(--fg-2, #171717);
+  color: var(--fg-2);
 }
 
-/* 向导底部按钮（覆盖 AppFormModal 默认 footer） */
 /* 步骤条：固定在滚动区之外，切步骤时位置不跳动 */
 .m-steps {
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-4);
 }
 
 .modal-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-soft, #ededed);
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-soft);
 }
 
 /* 右侧导航按钮组（上一步/下一步/确认） */
 .modal-footer-right {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 /* 步骤切换过渡 */
@@ -1148,37 +1085,37 @@ watch(
 .token-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-1);
   width: 100%;
 }
 
 .token-options {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1);
 }
 
 .token-option {
   font-size: 12px;
-  padding: 3px 10px;
+  padding: 3px var(--sp-2);
   border-radius: 999px;
-  border: 1px solid var(--border, #e5e5e5);
+  border: 1px solid var(--border);
   background: transparent;
-  color: var(--muted, #737373);
+  color: var(--muted);
   cursor: pointer;
   transition: all var(--transition);
   font-weight: 500;
 }
 
 .token-option:hover {
-  border-color: var(--fg, #0a0a0a);
-  color: var(--fg, #0a0a0a);
+  border-color: var(--fg);
+  color: var(--fg);
 }
 
 .token-option.active {
-  background: var(--fg, #0a0a0a);
-  border-color: var(--fg, #0a0a0a);
-  color: var(--surface, #ffffff);
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--surface);
   font-weight: 600;
 }
 </style>

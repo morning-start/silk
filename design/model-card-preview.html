@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Silk 模型池卡片 — 能力标签修复预览</title>
+<style>
+/* ================================================================
+   令牌快照（与 src/style.css 保持一致，仅作静态预览用）
+   ================================================================ */
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-alt: #f5f5f5;
+  --fg: #0a0a0a;
+  --fg-2: #171717;
+  --muted: #737373;
+  --border: #e5e5e5;
+  --border-soft: #ededed;
+  --accent: #0e7490;
+  --accent-soft: rgba(14, 116, 144, 0.08);
+  --success: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 10px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-4: 16px;
+  --fs-kicker: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', 'Consolas', 'Menlo', monospace;
+}
+
+body.dark {
+  --bg: #0a0a0a;
+  --surface: #171717;
+  --surface-alt: #262626;
+  --fg: #fafafa;
+  --fg-2: #e5e5e5;
+  --muted: #a1a1a1;
+  --border: #282828;
+  --border-soft: #202020;
+  --accent: #67e8f9;
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --success: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 32px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1000px; margin: 0 auto; }
+
+h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 6px; }
+h2 {
+  font-size: 13px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin: 40px 0 14px;
+}
+.lede { color: var(--muted); font-size: var(--fs-base); margin: 0 0 8px; }
+
+.note {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+  margin: 16px 0 0;
+}
+.note b { font-weight: 600; }
+.note code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* ---------- 面板 ---------- */
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  padding: 20px;
+}
+.panel--dark { background: #0a0a0a; color: #fafafa; }
+
+/* ---------- 模型卡（与 ModelSquareView 一致） ---------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+.s-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+.s-card-body { padding: var(--sp-4); }
+
+.mc-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: var(--sp-2);
+}
+.mc-name-group { display: flex; align-items: center; gap: var(--sp-2); }
+.mc-name { font-size: 15px; font-weight: 600; color: var(--fg); letter-spacing: -0.01em; }
+.mc-channels-count { font-size: var(--fs-sm); color: var(--muted); font-family: var(--font-mono); }
+.mc-specs {
+  font-size: var(--fs-sm); color: var(--muted); margin-bottom: var(--sp-1);
+  display: flex; flex-wrap: wrap; gap: 2px; font-family: var(--font-mono);
+}
+.mc-specs .sep { color: var(--border); margin: 0 4px; }
+.mc-channels { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: var(--sp-2); }
+.mc-caps { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-bottom: var(--sp-2); }
+.mc-actions {
+  display: flex; justify-content: flex-end; gap: var(--sp-1);
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--sp-2); margin-top: var(--sp-1);
+}
+
+/* ---------- 徽标 / 码片（与 style.css 一致） ---------- */
+.s-badge {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  font-size: var(--fs-kicker);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.s-badge--neutral { background: var(--surface-alt); border-color: var(--border); color: var(--muted); }
+.s-badge--accent {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  color: var(--accent);
+}
+.s-badge--success {
+  background: color-mix(in srgb, var(--success) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--success) 22%, var(--surface));
+  color: var(--success);
+}
+.s-badge--warn {
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--warn) 22%, var(--surface));
+  color: var(--warn);
+}
+.s-badge--danger {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 22%, var(--surface));
+  color: var(--danger);
+}
+.cb-name { font-weight: 600; }
+.cb-models {
+  font-size: 10px; opacity: 0.75; max-width: 120px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+/* ---------- 近似 naive-ui 的控件（仅示意） ---------- */
+.n-btn {
+  border: 0; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-sm);
+  color: var(--fg-2); padding: 3px 8px; border-radius: var(--radius-sm);
+}
+.n-btn:hover { background: var(--surface-alt); }
+.n-btn--error { color: var(--danger); }
+
+/* 修复前后对比行 */
+.before-badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent);
+  font-size: var(--fs-kicker); font-weight: 600;
+  white-space: nowrap;
+}
+.compare { display: flex; gap: 20px; flex-wrap: wrap; }
+.compare > div { flex: 1 1 320px; }
+.compare-label { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>模型池卡片 · 能力标签修复预览</h1>
+  <p class="lede">对照组：修复前的能力标签不可辨识 —— 修复后统一走全站徽标规范，深浅色一致。</p>
+
+  <div class="note">
+    <b>根因：</b>能力标签原先用 <code>&lt;NTag :type="capabilityColor(cap)"&gt;</code>，而
+    <code>capabilityColor()</code> 返回 <code>purple / blue / green / orange / pink</code>。
+    Naive UI 的 Tag 主题只定义了 <code>default / primary / info / success / warning / error</code> 六组颜色变量，
+    其它取值取不到颜色 —— 标签因此退化成不可辨识的填充块。<br />
+    <b>修法：</b>能力标签改用全站统一的 <code>.s-badge</code>（基类自带中性配色），颜色只来自设计令牌，
+    深浅色自动跟随；同时给 <code>.s-badge</code> 补上默认底色，避免裸用徽标退化成纯文字。
+  </div>
+
+  <h2>修复前 / 修复后（浅色）</h2>
+  <div class="compare">
+    <div>
+      <div class="compare-label">修复前（按截图现状复现）：只有 <code>文本</code> 恰好命中合法值，其余标签无字</div>
+      <div class="grid">
+        <div class="s-card">
+          <div class="s-card-body">
+            <div class="mc-header">
+              <div class="mc-name-group">
+                <span class="mc-name">silk-free</span>
+                <span class="s-badge s-badge--success">启用</span>
+              </div>
+              <span class="mc-channels-count">1 渠道</span>
+            </div>
+            <div class="mc-specs">
+              <span>上下文 <span>524.288K</span></span>
+              <span class="sep">·</span>
+              <span>输出 <span>16.384K</span></span>
+            </div>
+            <div class="mc-channels">
+              <span class="s-badge">机器仙 grok-4.6</span>
+            </div>
+            <div class="mc-caps">
+              <span class="s-badge s-badge--neutral">文本</span>
+              <span class="before-badge">思考</span>
+              <span class="before-badge">识图</span>
+              <span class="before-badge">代码</span>
+              <span class="before-badge">语音</span>
+            </div>
+            <div class="mc-actions">
+              <button class="n-btn">编辑</button>
+              <button class="n-btn n-btn--error">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="compare-label">修复后：中性徽标，全部可见</div>
+      <div class="grid">
+        <div class="s-card">
+          <div class="s-card-body">
+            <div class="mc-header">
+              <div class="mc-name-group">
+                <span class="mc-name">silk-free</span>
+                <span class="s-badge s-badge--success">启用</span>
+              </div>
+              <span class="mc-channels-count">1 渠道</span>
+            </div>
+            <div class="mc-specs">
+              <span>上下文 <span>524.288K</span></span>
+              <span class="sep">·</span>
+              <span>输出 <span>16.384K</span></span>
+            </div>
+            <div class="mc-channels">
+              <span class="s-badge">机器仙 grok-4.6</span>
+            </div>
+            <div class="mc-caps">
+              <span class="s-badge s-badge--neutral">文本</span>
+              <span class="s-badge s-badge--neutral">思考</span>
+              <span class="s-badge s-badge--neutral">识图</span>
+              <span class="s-badge s-badge--neutral">代码</span>
+              <span class="s-badge s-badge--neutral">语音</span>
+            </div>
+            <div class="mc-actions">
+              <button class="n-btn">编辑</button>
+              <button class="n-btn n-btn--error">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>修复后（深色）</h2>
+  <div class="panel panel--dark">
+    <div class="grid">
+      <div class="s-card">
+        <div class="s-card-body">
+          <div class="mc-header">
+            <div class="mc-name-group">
+              <span class="mc-name">silk-free</span>
+              <span class="s-badge s-badge--success">启用</span>
+            </div>
+            <span class="mc-channels-count">1 渠道</span>
+          </div>
+          <div class="mc-specs">
+            <span>上下文 <span>524.288K</span></span>
+            <span class="sep">·</span>
+            <span>输出 <span>16.384K</span></span>
+          </div>
+          <div class="mc-channels">
+            <span class="s-badge">机器仙 grok-4.6</span>
+          </div>
+          <div class="mc-caps">
+            <span class="s-badge s-badge--neutral">文本</span>
+            <span class="s-badge s-badge--neutral">思考</span>
+            <span class="s-badge s-badge--neutral">识图</span>
+            <span class="s-badge s-badge--neutral">代码</span>
+            <span class="s-badge s-badge--neutral">语音</span>
+          </div>
+          <div class="mc-actions">
+            <button class="n-btn">编辑</button>
+            <button class="n-btn n-btn--error">删除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="s-card">
+        <div class="s-card-body">
+          <div class="mc-header">
+            <div class="mc-name-group">
+              <span class="mc-name">silk-gpt-5.6-luna</span>
+              <span class="s-badge s-badge--success">启用</span>
+            </div>
+            <span class="mc-channels-count">1 渠道</span>
+          </div>
+          <div class="mc-specs">
+            <span>上下文 <span>1048.576K</span></span>
+            <span class="sep">·</span>
+            <span>输出 <span>32.768K</span></span>
+          </div>
+          <div class="mc-channels">
+            <span class="s-badge s-badge--success">
+              <span class="cb-name">hiyo</span>
+              <span class="cb-models">gpt-5.6-luna</span>
+            </span>
+          </div>
+          <div class="mc-caps">
+            <span class="s-badge s-badge--neutral">文本</span>
+            <span class="s-badge s-badge--neutral">思考</span>
+            <span class="s-badge s-badge--neutral">识图</span>
+          </div>
+          <div class="mc-actions">
+            <button class="n-btn">编辑</button>
+            <button class="n-btn n-btn--error">删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>徽标基类一览</h2>
+  <div class="panel">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <span class="s-badge">裸用（默认中性）</span>
+      <span class="s-badge s-badge--neutral">neutral</span>
+      <span class="s-badge s-badge--accent">accent</span>
+      <span class="s-badge s-badge--success">success</span>
+      <span class="s-badge s-badge--warn">warn</span>
+      <span class="s-badge s-badge--danger">danger</span>
+    </div>
+    <p style="margin:0;font-size:12px;color:var(--muted)">
+      基类现在自带「底色 + 描边 + 文字色」，因此不加色调修饰符也不会变成隐形文字；
+      色调类只覆盖颜色，不改形状。能力标签属于「类别」而非「状态」，统一用 neutral，
+      让颜色只承载状态语义（健康 / 告警 / 错误）。
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

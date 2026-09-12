@@ -1,5 +1,6 @@
 use crate::gateway::context::RequestContext;
 use crate::gateway::error::GatewayError;
+use crate::gateway::is_gateway_path;
 
 // ---------------------------------------------------------------------------
 // Token 估算（无需 tokenizer 的轻量化估计）
@@ -141,7 +142,7 @@ pub async fn run(
     log_sender: &tokio::sync::mpsc::Sender<crate::models::NewRequestLog>,
     ctx: &mut RequestContext,
 ) -> Result<(), GatewayError> {
-    if !ctx.path.starts_with("/v1/") {
+    if !is_gateway_path(&ctx.path) {
         return Ok(());
     }
     let log = build_log(ctx);

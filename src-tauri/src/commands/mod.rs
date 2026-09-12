@@ -8,6 +8,7 @@ pub mod presets;
 pub mod providers;
 pub mod settings;
 pub mod stats;
+pub mod updater;
 
 mod types;
 pub use types::{

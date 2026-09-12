@@ -93,7 +93,27 @@ async fn health_handler() -> impl IntoResponse {
     }))
 }
 
+/// 网关对外接口的前缀
+pub const GATEWAY_PATH_PREFIX: &str = "/v1/";
+
+/// 判断路径是否属于网关对外接口
+///
+/// 网关只服务 `/v1/*`（`/health` 由独立路由处理）。认证、日志、上游转发
+/// 都必须以同一判据为准：只要判据在不同层各写一份，就会出现
+/// “路由器兜底转发、中间件却按路径跳过校验”的缺口。
+pub fn is_gateway_path(path: &str) -> bool {
+    path.starts_with(GATEWAY_PATH_PREFIX)
+}
+
 async fn proxy_handler(State(context): State<GatewayContext>, req: Request<Body>) -> Response {
+    // 兜底路由会接管所有未匹配路径。若不在此处拦截，非 /v1/ 请求会带着
+    // 本地渠道凭据被转发到上游，且不经过认证与请求日志，因此一律拒绝。
+    let path = req.uri().path().to_string();
+    if !is_gateway_path(&path) {
+        tracing::warn!(%path, "拒绝非网关路径请求");
+        return GatewayError::NotFound(format!("未知路径: {path}")).into_response();
+    }
+
     GatewayPipeline::new(context).execute(req).await
 }
 
@@ -200,5 +220,28 @@ async fn flush_batch(pool: &SqlitePool, batch: &mut Vec<NewRequestLog>) {
                 tracing::error!(error = %e, "写入扩展日志失败");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_gateway_path;
+
+    #[test]
+    fn accepts_v1_paths() {
+        assert!(is_gateway_path("/v1/chat/completions"));
+        assert!(is_gateway_path("/v1/messages"));
+        assert!(is_gateway_path("/v1/models"));
+        assert!(is_gateway_path("/v1/responses"));
+    }
+
+    #[test]
+    fn rejects_non_v1_paths() {
+        // Gemini 的 OpenAI 兼容端点曾可绕过认证转发到上游
+        assert!(!is_gateway_path("/v1beta/openai/chat/completions"));
+        assert!(!is_gateway_path("/"));
+        assert!(!is_gateway_path("/v1"));
+        assert!(!is_gateway_path("/v2/chat/completions"));
+        assert!(!is_gateway_path("/health"));
     }
 }

@@ -12,7 +12,6 @@ import {
   NSpace,
   NSelect,
   NPagination,
-  NCard,
   NPopconfirm,
   useMessage,
   type DataTableColumns,
@@ -23,6 +22,7 @@ import type { HourlyStats, ProviderStats, RequestLog } from "../api";
 import { logsApi } from "../api/logs";
 import { statsApi } from "../api/stats";
 import ModalAdvanced from "../components/ModalAdvanced.vue";
+import AppPageShell from "../components/AppPageShell.vue";
 
 const logsStore = useLogsStore();
 const { logs, total, page, totalPages, loading, error } = storeToRefs(logsStore);
@@ -236,38 +236,34 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="logs-page">
-    <!-- 顶部标题 + 快捷指标 -->
-    <div class="page-header">
-      <div class="page-header-left">
-        <h2 class="page-title">请求日志</h2>
-        <NTag size="small" type="info">共 {{ total.toLocaleString() }} 条</NTag>
-      </div>
-      <div class="page-header-stats">
-        <div class="mini-stat">
-          <span class="mini-stat-label">请求</span>
-          <span class="mini-stat-val accent">{{ totalRequestsInRange.toLocaleString() }}</span>
+  <AppPageShell title="请求日志">
+    <template #count>
+      <NTag size="small" type="info">共 {{ total.toLocaleString() }} 条</NTag>
+    </template>
+
+    <template #head-extra>
+      <div class="s-statstrip">
+        <div class="s-statstrip-item">
+          <span class="s-statstrip-label">请求</span>
+          <span class="s-statstrip-value">{{ totalRequestsInRange.toLocaleString() }}</span>
         </div>
-        <div class="mini-stat-divider"></div>
-        <div class="mini-stat">
-          <span class="mini-stat-label">平均</span>
-          <span class="mini-stat-val success">{{ averageDurationInRange }}<span class="mini-unit">ms</span></span>
+        <div class="s-statstrip-item">
+          <span class="s-statstrip-label">平均</span>
+          <span class="s-statstrip-value is-success">{{ averageDurationInRange }}<span class="s-stat-unit">ms</span></span>
         </div>
-        <div class="mini-stat-divider"></div>
-        <div class="mini-stat">
-          <span class="mini-stat-label">Tokens</span>
-          <span class="mini-stat-val accent">{{ (totalTokensInRange / 1000).toFixed(1) }}K</span>
+        <div class="s-statstrip-item">
+          <span class="s-statstrip-label">Tokens</span>
+          <span class="s-statstrip-value">{{ (totalTokensInRange / 1000).toFixed(1) }}K</span>
         </div>
-        <div class="mini-stat-divider"></div>
-        <div class="mini-stat">
-          <span class="mini-stat-label">活跃渠道</span>
-          <span class="mini-stat-val">{{ activeProvidersInRange }}</span>
+        <div class="s-statstrip-item">
+          <span class="s-statstrip-label">活跃渠道</span>
+          <span class="s-statstrip-value">{{ activeProvidersInRange }}</span>
         </div>
       </div>
-    </div>
+    </template>
 
     <!-- 工具栏：筛选 + 操作 -->
-    <div class="toolbar">
+    <div class="s-toolbar">
       <NSpace :size="8">
         <NSelect
           v-model:value="metricRange"
@@ -292,7 +288,7 @@ onMounted(() => {
           size="small"
         />
       </NSpace>
-      <NSpace :size="8">
+      <NSpace :size="8" class="s-toolbar-end">
         <NButton secondary size="small" @click="() => { logsStore.fetchAll(); loadStats(); }">刷新</NButton>
         <NButton secondary size="small" @click="handleExportCsv">导出 CSV</NButton>
         <NButton secondary size="small" @click="handleCleanup">清理 7 天前</NButton>
@@ -306,52 +302,60 @@ onMounted(() => {
     </div>
 
     <!-- 主表格（含分页） -->
-    <NCard :bordered="false" class="table-card" size="small">
-      <!-- Error State -->
-      <template v-if="error">
-        <div class="error-state">
-          <div class="error-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#ef4444"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          </div>
-          <h3 class="error-title">数据加载失败</h3>
-          <p class="error-desc">{{ error }}</p>
+    <section class="s-card">
+      <div class="s-card-body s-card-body--flush">
+        <!-- Error State -->
+        <div v-if="error" class="s-state">
+          <span class="s-state-icon is-error">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:40px;height:40px">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </span>
+          <h3 class="s-state-title">数据加载失败</h3>
+          <p class="s-state-desc">{{ error }}</p>
           <NButton type="primary" @click="logsStore.fetchAll()">重新加载</NButton>
         </div>
-      </template>
-      <!-- Empty State -->
-      <template v-else-if="!loading && filteredLogs.length === 0">
-        <div class="empty-state">
-          <div class="empty-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;color:#94a3b8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-          </div>
-          <h3 class="empty-title">暂无日志记录</h3>
-          <p class="empty-desc">启动网关并发送请求后，日志将实时显示在这里</p>
+        <!-- Empty State -->
+        <div v-else-if="!loading && filteredLogs.length === 0" class="s-state">
+          <span class="s-state-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:40px;height:40px">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+              <polyline points="10 9 9 9 8 9" />
+            </svg>
+          </span>
+          <h3 class="s-state-title">暂无日志记录</h3>
+          <p class="s-state-desc">启动网关并发送请求后，日志将实时显示在这里</p>
         </div>
-      </template>
-      <template v-else>
-        <NDataTable
-          :columns="columns"
-          :data="filteredLogs"
-          :loading="loading"
-          :bordered="false"
-          :single-line="false"
-          :scroll-x="1000"
-          striped
-          size="small"
-        />
-        <!-- 分页整合在表格卡片内 -->
-        <div class="table-pagination">
-          <NText depth="3" style="font-size: 12px">{{ paginationText }}</NText>
-          <NPagination
-            v-model:page="page"
-            :page-count="totalPages"
-            :page-size="50"
-            :show-size-picker="false"
-            @update:page="logsStore.fetchPage"
+        <template v-else>
+          <NDataTable
+            :columns="columns"
+            :data="filteredLogs"
+            :loading="loading"
+            :bordered="false"
+            :single-line="false"
+            :scroll-x="1000"
+            striped
+            size="small"
           />
-        </div>
-      </template>
-    </NCard>
+        </template>
+      </div>
+      <!-- 分页整合在表格卡片内 -->
+      <div v-if="!error && !( !loading && filteredLogs.length === 0 )" class="s-card-foot">
+        <NText depth="3" style="font-size: 12px">{{ paginationText }}</NText>
+        <NPagination
+          v-model:page="page"
+          :page-count="totalPages"
+          :page-size="50"
+          :show-size-picker="false"
+          @update:page="logsStore.fetchPage"
+        />
+      </div>
+    </section>
 
     <!-- 日志详情弹窗 -->
     <!-- 日志详情：顶部先给结论（状态 / 耗时 / 模型 / 渠道），明细走双栏，低频字段折叠 -->
@@ -546,158 +550,12 @@ onMounted(() => {
         </div>
       </template>
     </NModal>
-  </div>
+  </AppPageShell>
 </template>
 
 <style scoped>
-.logs-page {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* 顶部标题 + mini-stat 行 */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.page-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.page-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--fg, #0a0a0a);
-  margin: 0;
-  letter-spacing: -0.01em;
-}
-
-.page-header-stats {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  background: var(--card-bg, #fff);
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: var(--radius-sm, 6px);
-  padding: 6px 12px;
-  overflow: hidden;
-  flex-shrink: 1;
-}
-
-.mini-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 0 10px;
-  min-width: 0;
-}
-
-.mini-stat-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted, #737373);
-  font-weight: 600;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  white-space: nowrap;
-}
-
-.mini-stat-val {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--fg, #0a0a0a);
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  white-space: nowrap;
-}
-
-.mini-stat-val.accent {
-  color: var(--accent, #2563eb);
-}
-
-.mini-stat-val.success {
-  color: var(--success, #16a34a);
-}
-
-.mini-unit {
-  font-size: 11px;
-  font-weight: 500;
-  opacity: 0.65;
-  margin-left: 1px;
-}
-
-.mini-stat-divider {
-  width: 1px;
-  background: var(--border, #e5e5e5);
-  margin: 4px 0;
-  flex-shrink: 0;
-}
-
-/* 工具栏 */
-.toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* 表格卡片 */
-.table-card {
-  border-radius: var(--radius-sm, 6px);
-  background: var(--card-bg, #ffffff);
-  border: 1px solid var(--border, #e5e5e5);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.table-pagination {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border-soft, #ededed);
-  flex-shrink: 0;
-}
-
-/* 空态 / 错误 */
-.error-state, .empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 48px 16px;
-  text-align: center;
-}
-
-.error-icon, .empty-icon {
-  opacity: 0.6;
-}
-
-.error-title, .empty-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg, #0a0a0a);
-  margin: 0;
-}
-
-.error-desc, .empty-desc {
-  font-size: 13px;
-  color: var(--muted, #737373);
-  margin: 0;
-  max-width: 320px;
-}
+/* 页面骨架、页头、统计条、工具栏、卡片、空态/错误态、表格全部走 style.css，
+   这里只保留日志详情弹窗特有的造型。 */
 
 /* 详情弹窗 */
 .log-detail {
@@ -706,10 +564,10 @@ onMounted(() => {
   gap: 18px;
 }
 
-/* 概览条：4 格等宽，滚动之前先看到结论 */
+/* 概览条：4 格等宽，滚动之前先看到结论（用 auto-fit 自适应窄窗，不另写媒体查询） */
 .log-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 1px;
   background: var(--border-soft);
   border: 1px solid var(--border-soft);
@@ -758,10 +616,10 @@ onMounted(() => {
   color: var(--danger);
 }
 
-/* 明细：双栏 key-value，代替原来的单列长列表 */
+/* 明细：双栏 key-value，代替原来的单列长列表（窄窗自动单列） */
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 8px 20px;
 }
 
@@ -804,7 +662,7 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
   font-size: 13px;
-  color: var(--fg-2, #171717);
+  color: var(--fg-2);
   word-break: break-all;
 }
 
@@ -848,19 +706,5 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-@media (max-width: 640px) {
-  .log-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .detail-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .dg-full {
-    grid-column: 1;
-  }
 }
 </style>
