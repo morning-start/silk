@@ -236,7 +236,7 @@ h1, h2, h3, h4 {
 }
 
 .n-card:hover {
-  border-color: #d4d4d4 !important;
+  border-color: color-mix(in srgb, var(--fg) 18%, var(--border-color)) !important;
   box-shadow: var(--shadow-card) !important;
 }
 
@@ -323,7 +323,7 @@ h1, h2, h3, h4 {
 }
 
 .n-data-table .n-data-table-tr--striped {
-  background: #fafbfc !important;
+  background: color-mix(in srgb, var(--surface-alt) 42%, var(--surface)) !important;
 }
 
 .n-data-table .n-data-table-td {
@@ -620,4 +620,459 @@ body.dark ::-webkit-scrollbar-thumb:active {
     width: 100%;
     flex-wrap: wrap;
   }
+}
+
+/* ================================================================
+   弹窗内部布局系统 (m-*)
+   ----------------------------------------------------------------
+   目标：在有限的弹窗高度里做到「信息分层清楚 + 高级项可折叠」。
+   规则：
+   1. 一个弹窗 = 若干 m-section（分区），分区之间用 1px 分隔线，
+      而不是靠留白硬撑；分区标题用 mono 小写字距眉标，不抢内容。
+   2. 字段用 m-grid 排布，短字段并排（--m-cols 控制列数），
+      长字段（URL / Key / textarea / 列表）用 m-full 独占整行。
+   3. 列表类内容走 m-list + m-list-scroll 限高，弹窗不随条目增长。
+   4. 高级项统一收进 ModalAdvanced（"已自定义 N 项" 徽标提示非默认值）。
+   5. 所有颜色走设计令牌，浅色/深色自动一致。
+   ================================================================ */
+
+/* ---------- 弹窗主体：分区容器 ---------- */
+.m-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.m-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.m-section + .m-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ---------- 分区标题行 ---------- */
+.m-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  flex-wrap: wrap;
+}
+
+.m-sec-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* 右侧元信息：数量 / 已选统计等，滚动时仍能看清当前状态 */
+.m-sec-meta {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* 分区内的主操作（添加密钥 / 获取模型）与搜索框，自动靠右 */
+.m-sec-action {
+  margin-left: auto;
+}
+
+.m-sec-action + .m-sec-search {
+  margin-left: 0;
+}
+
+.m-sec-search {
+  width: 168px;
+  flex: none;
+}
+
+.m-sec-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.m-sec-desc code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  border: 1px solid var(--border-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+/* ---------- 字段网格 ---------- */
+.m-grid {
+  display: grid;
+  gap: 12px 16px;
+  grid-template-columns: repeat(var(--m-cols, 2), minmax(0, 1fr));
+  align-items: start;
+}
+
+.m-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 跨列：长字段独占整行；m-span-2 用于名称这类需要更宽的字段 */
+.m-full {
+  grid-column: 1 / -1;
+}
+
+.m-span-2 {
+  grid-column: span 2;
+}
+
+.m-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
+  min-height: 18px;
+}
+
+.m-req {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--danger);
+}
+
+.m-note {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* 开关行：和输入框高度对齐，避免网格错位 */
+.m-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.m-switch .m-note {
+  white-space: nowrap;
+}
+
+/* ---------- 行内工具条 ---------- */
+.m-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.m-inline-end {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.m-inline .n-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- 条目列表（Key / 请求头 / 模型） ---------- */
+.m-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.m-list-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.m-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  transition: border-color var(--transition);
+}
+
+.m-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+}
+
+.m-item-soft {
+  background: var(--surface-alt);
+}
+
+/* 列表表头（仅加权策略下显示）：低干扰的字段名提示 */
+.m-list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.m-empty {
+  padding: 14px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* ---------- 折叠面板：高级设置 ---------- */
+.m-adv {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 4px;
+}
+
+.m-adv-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 2px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--fg-2);
+  transition: color var(--transition);
+}
+
+.m-adv-head:hover {
+  color: var(--fg);
+}
+
+.m-adv-chevron {
+  flex: none;
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform var(--transition);
+}
+
+.m-adv.open .m-adv-chevron {
+  transform: rotate(90deg);
+}
+
+.m-adv-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.m-adv.open .m-adv-title {
+  color: var(--fg-2);
+}
+
+/* 徽标：一眼看出高级区是否被改过，避免"藏起来就忘了" */
+.m-adv-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--border));
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.m-adv-badge.is-default {
+  border-color: var(--border);
+  background: var(--surface-alt);
+  color: var(--muted);
+}
+
+.m-adv-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.m-adv-body {
+  margin-top: 4px;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+/* 折叠区内的连续字段之间留节奏 */
+.adv-extra + .adv-extra {
+  margin-top: 12px;
+}
+
+/* ---------- 弹窗顶部提示条 ---------- */
+.m-tip {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ---------- footer 常驻摘要 ---------- */
+.modal-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.modal-summary-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+  flex: none;
+}
+
+@media (max-width: 720px) {
+  .m-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .m-full,
+  .m-span-2 {
+    grid-column: 1 / -1;
+  }
+
+  .m-sec-search {
+    width: 100%;
+  }
+
+  .modal-summary {
+    display: none;
+  }
+}
+
+/* ================================================================
+   统一确认弹窗 (cf-*)
+   ----------------------------------------------------------------
+   所有「删除 / 重置 / 刷新」这类破坏性或不可逆操作共用同一形态，
+   由 src/utils/confirm.ts 渲染，结构固定三段：
+     说明（会发生什么）→ 对象（对谁）→ 要点（为什么要谨慎）
+   要点列表是关键：让人在点确认之前就知道后果，而不是点完才发现。
+   ================================================================ */
+
+/* 宽度由 confirm.ts 以 inline style 传入（要压过 naive-ui 运行时注入的
+   .n-dialog 默认宽度），这里只作为样式钩子与危险态选择器。 */
+.cf-dialog {
+  /* 仅作锚点，不设宽度 */
+}
+
+.cf {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cf-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--fg-2);
+}
+
+/* 被操作对象：类型标签 + 等宽名称。
+   用中性底色承载而非红色，避免整框都在"喊"，危险程度交给按钮颜色。 */
+.cf-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.cf-target-label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.cf-target-name {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.cf-impacts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cf-impact {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.cf-impact::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  height: 3px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+/* 破坏性操作：要点用危险色，与红色确认按钮呼应 */
+.cf-dialog.is-danger .cf-impact::before {
+  background: var(--danger);
 }

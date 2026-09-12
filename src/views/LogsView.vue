@@ -22,6 +22,7 @@ import { storeToRefs } from "pinia";
 import type { HourlyStats, ProviderStats, RequestLog } from "../api";
 import { logsApi } from "../api/logs";
 import { statsApi } from "../api/stats";
+import ModalAdvanced from "../components/ModalAdvanced.vue";
 
 const logsStore = useLogsStore();
 const { logs, total, page, totalPages, loading, error } = storeToRefs(logsStore);
@@ -353,121 +354,193 @@ onMounted(() => {
     </NCard>
 
     <!-- 日志详情弹窗 -->
+    <!-- 日志详情：顶部先给结论（状态 / 耗时 / 模型 / 渠道），明细走双栏，低频字段折叠 -->
     <NModal
       v-model:show="showDetail"
       preset="card"
       title="日志详情"
-      style="max-width: 700px"
+      style="width: min(720px, calc(100vw - 32px))"
       :bordered="false"
       :segmented="{ footer: true }"
     >
       <div v-if="selectedLog" class="log-detail">
-        <div class="detail-group">
-          <div class="detail-group-title">基本信息</div>
-          <div class="detail-row">
-            <span class="detail-label">Request ID</span>
-            <span class="detail-value text-mono">{{ selectedLog.request_id }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">时间</span>
-            <span class="detail-value">{{ selectedLog.timestamp }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">请求</span>
-            <NTag size="small" type="info">{{ selectedLog.method }}</NTag>
-            <span class="detail-value text-mono" style="margin-left: 8px">{{ selectedLog.path }}</span>
-          </div>
-        </div>
-        <div class="detail-group">
-          <div class="detail-group-title">执行结果</div>
-          <div class="detail-row" v-if="selectedLog.response_status">
-            <span class="detail-label">状态码</span>
-            <NTag size="small" :type="selectedLog.response_status < 300 ? 'success' : 'error'">
-              {{ selectedLog.response_status }}
-            </NTag>
-          </div>
-          <div class="detail-row" v-if="selectedLog.resp_ms != null">
-            <span class="detail-label">响应</span>
-            <span class="detail-value">{{ selectedLog.resp_ms }}ms</span>
-          </div>
-          <div class="detail-row" v-if="selectedLog.total_duration_ms != null">
-            <span class="detail-label">耗时</span>
-            <span class="detail-value">{{ selectedLog.total_duration_ms }}ms</span>
-          </div>
-          <div class="detail-row" v-if="selectedLog.retry_count > 0">
-            <span class="detail-label">重试</span>
-            <NTag size="small" type="warning">{{ selectedLog.retry_count }}</NTag>
-          </div>
-        </div>
-        <div class="detail-group">
-          <div class="detail-group-title">路由信息</div>
-          <div class="detail-row" v-if="selectedLog.inbound_protocol || selectedLog.outbound_protocol">
-            <span class="detail-label">协议转换</span>
-            <NTag size="small">{{ selectedLog.inbound_protocol || '-' }}</NTag>
-            <span style="margin: 0 4px; color: var(--muted)">→</span>
-            <NTag size="small">{{ selectedLog.outbound_protocol || '-' }}</NTag>
-          </div>
-          <div class="detail-row" v-if="selectedLog.provider_id">
-            <span class="detail-label">渠道</span>
-            <span class="detail-value">{{ selectedLog.provider_name || selectedLog.provider_id }}</span>
-            <span v-if="selectedLog.provider_name && selectedLog.provider_name !== selectedLog.provider_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.provider_id }})</span>
-          </div>
-          <div class="detail-row" v-if="selectedLog.model_id || selectedLog.model_name">
-            <span class="detail-label">模型</span>
-            <span class="detail-value">{{ selectedLog.model_name || selectedLog.model_id }}</span>
-            <span v-if="selectedLog.model_name && selectedLog.model_id && selectedLog.model_name !== selectedLog.model_id" class="detail-value text-mono" style="color: #94a3b8; font-size: 12px">({{ selectedLog.model_id }})</span>
-          </div>
-          <div class="detail-row" v-if="selectedLog.auth_key_name">
-            <span class="detail-label">认证 Key</span>
-            <NTag size="small" type="success">{{ selectedLog.auth_key_name }}</NTag>
-          </div>
-          <div class="detail-row" v-if="selectedLog.channel_key_name">
-            <span class="detail-label">渠道 Key</span>
-            <NTag size="small" type="info">{{ selectedLog.channel_key_name }}</NTag>
-          </div>
-        </div>
-        <div class="detail-group">
-          <div class="detail-group-title">数据量</div>
-          <div class="detail-row">
-            <span class="detail-label">请求大小</span>
-            <span class="detail-value">{{ (selectedLog.request_size_bytes || 0).toLocaleString() }} bytes</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">响应大小</span>
-            <span class="detail-value">{{ (selectedLog.response_size_bytes || 0).toLocaleString() }} bytes</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">Tokens</span>
-            <span class="detail-value">
-              输入 {{ selectedLog.tokens_input || 0 }} / 发送 {{ selectedLog.tokens_sent || 0 }} / 输出 {{ selectedLog.tokens_output || 0 }}
-              <span v-if="selectedLog.tokens_input != null && selectedLog.tokens_sent != null && selectedLog.tokens_input > selectedLog.tokens_sent" style="color: var(--success, #10b981); margin-left: 8px">
-                优化 -{{ selectedLog.tokens_input - selectedLog.tokens_sent }}
-              </span>
+        <!-- 概览条：一眼确认"成功没 / 多快 / 走的谁" -->
+        <div class="log-summary">
+          <div class="ls-cell">
+            <span class="ls-label">状态码</span>
+            <span
+              class="ls-value"
+              :class="selectedLog.response_status && selectedLog.response_status >= 400 ? 'is-error' : 'is-ok'"
+            >
+              {{ selectedLog.response_status ?? "—" }}
             </span>
           </div>
-          <div class="detail-row">
-            <span class="detail-label">流式</span>
-            <NTag size="small" :type="selectedLog.stream_enabled ? 'info' : 'default'">{{ selectedLog.stream_enabled ? '是' : '否' }}</NTag>
+          <div class="ls-cell">
+            <span class="ls-label">总耗时</span>
+            <span class="ls-value">{{ formatMs(selectedLog.total_duration_ms) }}</span>
           </div>
-          <div class="detail-row">
-            <span class="detail-label">缓存命中</span>
-            <NTag size="small" :type="selectedLog.cache_hit ? 'success' : 'default'">{{ selectedLog.cache_hit ? '是' : '否' }}</NTag>
+          <div class="ls-cell">
+            <span class="ls-label">模型</span>
+            <span class="ls-value is-mono">{{ selectedLog.model_name || selectedLog.model_id || "—" }}</span>
           </div>
-        </div>
-        <div class="detail-group" v-if="selectedLog.error_message || selectedLog.error_code">
-          <div class="detail-group-title">错误信息</div>
-          <div class="detail-row" v-if="selectedLog.error_message">
-            <span class="detail-label" style="color: #ef4444">错误</span>
-            <span class="detail-value" style="color: #ef4444">{{ selectedLog.error_message }}</span>
-          </div>
-          <div class="detail-row" v-if="selectedLog.error_code">
-            <span class="detail-label">错误码</span>
-            <NTag size="small" type="error">{{ selectedLog.error_code }}</NTag>
+          <div class="ls-cell">
+            <span class="ls-label">渠道</span>
+            <span class="ls-value">{{ selectedLog.provider_name || selectedLog.provider_id || "—" }}</span>
           </div>
         </div>
+
+        <section class="m-section">
+          <div class="m-sec-head">
+            <span class="m-sec-title">请求</span>
+          </div>
+          <div class="detail-grid">
+            <div class="dg-item">
+              <span class="detail-label">Request ID</span>
+              <span class="detail-value text-mono">{{ selectedLog.request_id }}</span>
+            </div>
+            <div class="dg-item">
+              <span class="detail-label">时间</span>
+              <span class="detail-value">{{ selectedLog.timestamp }}</span>
+            </div>
+            <div class="dg-item dg-full">
+              <span class="detail-label">请求</span>
+              <span class="dg-value-row">
+                <NTag size="small" type="info">{{ selectedLog.method }}</NTag>
+                <span class="detail-value text-mono">{{ selectedLog.path }}</span>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section class="m-section">
+          <div class="m-sec-head">
+            <span class="m-sec-title">执行结果</span>
+          </div>
+          <div class="detail-grid">
+            <div class="dg-item">
+              <span class="detail-label">状态码</span>
+              <NTag
+                v-if="selectedLog.response_status"
+                size="small"
+                :type="selectedLog.response_status < 300 ? 'success' : 'error'"
+              >
+                {{ selectedLog.response_status }}
+              </NTag>
+              <span v-else class="detail-value">—</span>
+            </div>
+            <div class="dg-item">
+              <span class="detail-label">首次响应</span>
+              <span class="detail-value">{{ formatMs(selectedLog.resp_ms) }}</span>
+            </div>
+            <div class="dg-item">
+              <span class="detail-label">总耗时</span>
+              <span class="detail-value">{{ formatMs(selectedLog.total_duration_ms) }}</span>
+            </div>
+            <div class="dg-item">
+              <span class="detail-label">重试</span>
+              <NTag v-if="selectedLog.retry_count > 0" size="small" type="warning">{{ selectedLog.retry_count }}</NTag>
+              <span v-else class="detail-value">未重试</span>
+            </div>
+          </div>
+        </section>
+        <section class="m-section">
+          <div class="m-sec-head">
+            <span class="m-sec-title">路由信息</span>
+          </div>
+          <div class="detail-grid">
+            <div class="dg-item" v-if="selectedLog.inbound_protocol || selectedLog.outbound_protocol">
+              <span class="detail-label">协议转换</span>
+              <span class="dg-value-row">
+                <NTag size="small">{{ selectedLog.inbound_protocol || "-" }}</NTag>
+                <span class="dg-arrow">→</span>
+                <NTag size="small">{{ selectedLog.outbound_protocol || "-" }}</NTag>
+              </span>
+            </div>
+            <div class="dg-item" v-if="selectedLog.provider_id">
+              <span class="detail-label">渠道</span>
+              <span class="detail-value">
+                {{ selectedLog.provider_name || selectedLog.provider_id }}
+                <span v-if="selectedLog.provider_name && selectedLog.provider_name !== selectedLog.provider_id" class="dg-sub">
+                  {{ selectedLog.provider_id }}
+                </span>
+              </span>
+            </div>
+            <div class="dg-item" v-if="selectedLog.model_id || selectedLog.model_name">
+              <span class="detail-label">模型</span>
+              <span class="detail-value">
+                {{ selectedLog.model_name || selectedLog.model_id }}
+                <span v-if="selectedLog.model_name && selectedLog.model_id && selectedLog.model_name !== selectedLog.model_id" class="dg-sub">
+                  {{ selectedLog.model_id }}
+                </span>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="selectedLog.error_message || selectedLog.error_code" class="m-section">
+          <div class="m-sec-head">
+            <span class="m-sec-title">错误信息</span>
+          </div>
+          <div class="error-box">
+            <div v-if="selectedLog.error_code" class="error-line">
+              <span class="detail-label">错误码</span>
+              <NTag size="small" type="error">{{ selectedLog.error_code }}</NTag>
+            </div>
+            <div v-if="selectedLog.error_message" class="error-line">
+              <span class="detail-label">错误</span>
+              <span class="detail-value">{{ selectedLog.error_message }}</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 低频排障字段收进折叠区，主流程不被数据量/缓存类信息淹没 -->
+        <ModalAdvanced title="更多信息" hint="数据量 · 缓存 · 认证 Key">
+          <div class="detail-grid">
+            <div class="dg-item">
+              <span class="detail-label">请求大小</span>
+              <span class="detail-value">{{ (selectedLog.request_size_bytes || 0).toLocaleString() }} bytes</span>
+            </div>
+            <div class="dg-item">
+              <span class="detail-label">响应大小</span>
+              <span class="detail-value">{{ (selectedLog.response_size_bytes || 0).toLocaleString() }} bytes</span>
+            </div>
+            <div class="dg-item">
+              <span class="detail-label">Tokens</span>
+              <span class="detail-value">
+                输入 {{ selectedLog.tokens_input || 0 }} / 发送 {{ selectedLog.tokens_sent || 0 }} / 输出 {{ selectedLog.tokens_output || 0 }}
+                <span
+                  v-if="selectedLog.tokens_input != null && selectedLog.tokens_sent != null && selectedLog.tokens_input > selectedLog.tokens_sent"
+                  class="dg-saved"
+                >
+                  优化 -{{ selectedLog.tokens_input - selectedLog.tokens_sent }}
+                </span>
+              </span>
+            </div>
+            <div class="dg-item">
+              <span class="detail-label">流式</span>
+              <NTag size="small" :type="selectedLog.stream_enabled ? 'info' : 'default'">
+                {{ selectedLog.stream_enabled ? "是" : "否" }}
+              </NTag>
+            </div>
+            <div class="dg-item">
+              <span class="detail-label">缓存命中</span>
+              <NTag size="small" :type="selectedLog.cache_hit ? 'success' : 'default'">
+                {{ selectedLog.cache_hit ? "是" : "否" }}
+              </NTag>
+            </div>
+            <div class="dg-item" v-if="selectedLog.auth_key_name">
+              <span class="detail-label">认证 Key</span>
+              <NTag size="small" type="success">{{ selectedLog.auth_key_name }}</NTag>
+            </div>
+            <div class="dg-item" v-if="selectedLog.channel_key_name">
+              <span class="detail-label">渠道 Key</span>
+              <NTag size="small" type="info">{{ selectedLog.channel_key_name }}</NTag>
+            </div>
+          </div>
+        </ModalAdvanced>
       </div>
       <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 8px">
+        <div class="detail-footer">
           <NButton size="small" @click="copyDetail">复制 JSON</NButton>
           <NButton size="small" @click="showDetail = false">关闭</NButton>
         </div>
@@ -630,55 +703,164 @@ onMounted(() => {
 .log-detail {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 18px;
 }
 
-.detail-group {
-  border: 1px solid var(--border, #e5e5e5);
-  border-radius: var(--radius-sm, 6px);
+/* 概览条：4 格等宽，滚动之前先看到结论 */
+.log-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
-.detail-group-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 700;
-  color: var(--muted, #737373);
-  background: var(--surface-alt, #fafafa);
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border, #e5e5e5);
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-}
-
-.detail-row {
+.ls-cell {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border-soft, #ededed);
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--surface-alt);
 }
 
-.detail-row:last-child {
-  border-bottom: none;
+.ls-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ls-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ls-value.is-mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.ls-value.is-ok {
+  color: var(--success);
+}
+
+.ls-value.is-error {
+  color: var(--danger);
+}
+
+/* 明细：双栏 key-value，代替原来的单列长列表 */
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+}
+
+.dg-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 3px 0;
+}
+
+.dg-full {
+  grid-column: 1 / -1;
+}
+
+.dg-value-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.dg-arrow {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .detail-label {
-  font-size: 12px;
+  flex: none;
+  min-width: 72px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 600;
-  min-width: 90px;
-  color: var(--muted, #737373);
-  text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-family: var(--font-mono, 'JetBrains Mono', ui-monospace, monospace);
-  flex-shrink: 0;
-  padding-top: 1px;
+  color: var(--muted);
 }
 
 .detail-value {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: var(--fg-2, #171717);
-  flex: 1;
   word-break: break-all;
+}
+
+/* 名称之外的原始 ID，弱化但可查 */
+.dg-sub {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.dg-saved {
+  margin-left: 8px;
+  color: var(--success);
+}
+
+/* 错误区：整块高亮，排障时第一眼命中 */
+.error-box {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+}
+
+.error-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.error-line + .error-line {
+  margin-top: 6px;
+}
+
+.error-line .detail-label,
+.error-line .detail-value {
+  color: var(--danger);
+}
+
+.detail-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .log-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dg-full {
+    grid-column: 1;
+  }
 }
 </style>

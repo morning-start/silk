@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NEmpty, NSpin } from "naive-ui";
+import { NButton, NEmpty, NSpin, NTag } from "naive-ui";
 
 defineProps<{
   title: string;
@@ -64,8 +64,10 @@ const emit = defineEmits<{
 .app-page-shell {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
 }
 
 .toolbar {
@@ -73,6 +75,7 @@ const emit = defineEmits<{
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 34px;
 }
 
 .toolbar-left {
@@ -83,8 +86,8 @@ const emit = defineEmits<{
 }
 
 .page-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 650;
   color: var(--fg, #0a0a0a);
   margin: 0;
   letter-spacing: -0.02em;
@@ -95,6 +98,10 @@ const emit = defineEmits<{
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.toolbar-right :deep(.n-input) {
+  min-width: 220px;
 }
 
 .error-state {
@@ -127,5 +134,21 @@ const emit = defineEmits<{
   color: var(--muted, #737373);
   margin: 0;
   max-width: 360px;
+}
+
+@media (max-width: 680px) {
+  .toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar-right {
+    flex-wrap: wrap;
+  }
+
+  .toolbar-right :deep(.n-input) {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
 }
 </style>

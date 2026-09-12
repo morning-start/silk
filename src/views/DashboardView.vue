@@ -3,20 +3,27 @@ import { ref, onMounted, watch, computed } from "vue";
 import { useRouter } from "vue-router";
 import { formatMs } from "../utils/format";
 import {
+  NIcon,
   NSpin,
   useMessage,
-  useDialog,
 } from "naive-ui";
+import {
+  ArrowForwardOutline,
+  CopyOutline,
+  KeyOutline,
+  RefreshOutline,
+} from "@vicons/ionicons5";
 import { statsApi } from "../api/stats";
 import { configApi } from "../api/config";
 import type { DashboardStats, RequestLog } from "../api";
 import { useGatewayStore } from "../stores/gateway";
 import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
+import { useConfirm } from "../utils/confirm";
 
 const router = useRouter();
 const gatewayStore = useGatewayStore();
 const message = useMessage();
-const dialog = useDialog();
+const { confirm } = useConfirm();
 
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -67,21 +74,21 @@ function copyGatewayKey() {
   });
 }
 
-async function resetGatewayKey() {
-  dialog.warning({
-    title: "刷新 API Key",
-    content: "刷新后，正在使用此 Key 的客户端将立即失效，需要更新为新 Key。确定刷新？",
-    positiveText: "确定刷新",
-    negativeText: "取消",
-    onPositiveClick: async () => {
-      try {
-        const res = await configApi.resetBuiltinGatewayKey();
-        gatewayKey.value = res.plain_key;
-        message.success("API Key 已刷新，请更新客户端配置");
-      } catch (e: any) {
-        message.error(e?.message || "刷新 API Key 失败");
-      }
+function resetGatewayKey() {
+  confirm({
+    title: "刷新本地 API Key",
+    description: "重新生成网关的内置 Key，旧 Key 立即作废。",
+    impacts: [
+      "正在使用旧 Key 的客户端会立刻收到鉴权失败",
+      "需要把新 Key 同步更新到各客户端配置中",
+    ],
+    positiveText: "刷新",
+    onConfirm: async () => {
+      const res = await configApi.resetBuiltinGatewayKey();
+      gatewayKey.value = res.plain_key;
+      message.success("API Key 已刷新，请更新客户端配置");
     },
+    onError: (e: any) => message.error(e?.message || "刷新 API Key 失败"),
   });
 }
 
@@ -137,9 +144,18 @@ watch(
               <span class="badge badge-neutral">运行中</span>
             </div>
             <div class="row gap-md mt-20 welcome-actions">
-              <button class="btn btn-primary" @click="copyGatewayAddress">复制本地 API 地址</button>
-              <button class="btn btn-secondary" @click="copyGatewayKey">复制 API Key</button>
-              <button class="btn btn-secondary" @click="resetGatewayKey">刷新 API Key</button>
+              <button class="btn btn-primary" @click="copyGatewayAddress">
+                <NIcon :size="14"><CopyOutline /></NIcon>
+                复制本地 API 地址
+              </button>
+              <button class="btn btn-secondary" @click="copyGatewayKey">
+                <NIcon :size="14"><KeyOutline /></NIcon>
+                复制 API Key
+              </button>
+              <button class="btn btn-secondary" @click="resetGatewayKey">
+                <NIcon :size="14"><RefreshOutline /></NIcon>
+                刷新 API Key
+              </button>
             </div>
           </div>
           <div class="welcome-right">
@@ -175,24 +191,24 @@ watch(
 
       <!-- Stat Cards Row -->
       <div class="stat-grid">
-        <div class="stat-card">
+        <div class="stat-card stat-card--accent">
           <div class="stat-label">今日请求数</div>
           <div class="stat-value accent">{{ stats?.today_requests?.toLocaleString() || 0 }}</div>
           <div class="stat-sub" v-if="stats">
             {{ stats.yesterday_requests ? ((stats.today_requests / stats.yesterday_requests - 1) * 100).toFixed(1) : 0 }}% 较昨日
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--success">
           <div class="stat-label">平均响应时间</div>
           <div class="stat-value success">{{ Math.round(stats?.today_avg_duration_ms || 0) }}<span class="stat-unit">ms</span></div>
           <div class="stat-sub">网关整体延迟</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--indigo">
           <div class="stat-label">今日 Token 消耗</div>
           <div class="stat-value accent">{{ (stats?.today_tokens ? (stats.today_tokens / 1000).toFixed(1) : '0') + 'K' }}</div>
           <div class="stat-sub">总 Token 用量</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card stat-card--neutral">
           <div class="stat-label">活跃渠道</div>
           <div class="stat-value">{{ stats?.active_providers || 0 }}</div>
           <div class="stat-sub">全部已配置</div>
@@ -204,7 +220,10 @@ watch(
         <div class="card">
           <div class="card-header">
             <h3>最新请求</h3>
-            <button class="btn btn-ghost btn-sm" @click="goToLogs">全部日志 →</button>
+            <button class="btn btn-ghost btn-sm" @click="goToLogs">
+              全部日志
+              <NIcon :size="14"><ArrowForwardOutline /></NIcon>
+            </button>
           </div>
           <div class="card-body" style="padding:0">
             <div class="table-wrap">
@@ -407,7 +426,23 @@ watch(
   padding: 18px 20px;
   box-shadow: var(--shadow-card, 0 1px 0 0 rgba(0,0,0,0.02));
   transition: border-color var(--transition);
+  position: relative;
+  overflow: hidden;
 }
+
+.stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 2px;
+  background: var(--border);
+}
+
+.stat-card--accent::before { background: var(--accent); }
+.stat-card--success::before { background: var(--success); }
+.stat-card--indigo::before { background: var(--brand-2); }
+.stat-card--neutral::before { background: var(--muted); }
 
 .stat-card:hover {
   border-color: var(--muted, #a3a3a3);
@@ -499,6 +534,10 @@ watch(
   font-family: inherit;
   background: var(--surface, #ffffff);
   color: var(--fg-2, #171717);
+}
+
+.btn :deep(.n-icon) {
+  flex: 0 0 auto;
 }
 
 .btn-primary {

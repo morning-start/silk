@@ -4,8 +4,6 @@ import { useDataChangeSignal } from "../composables/useCrossStoreNotify";
 import {
   NCard,
   NButton,
-  NForm,
-  NFormItem,
   NInput,
   NInputNumber,
   NSelect,
@@ -13,23 +11,21 @@ import {
   NTag,
   NGrid,
   NGi,
-  NIcon,
   NSteps,
   NStep,
   useMessage,
-  useDialog,
 } from "naive-ui";
-import { SearchOutline } from "@vicons/ionicons5";
 import { modelMappingsApi, type CreateModelMappingPayload } from "../api/model-mappings";
 import { providersApi } from "../api/providers";
 import type { ModelMapping, NewMappingChannel, Provider, SelectedModel } from "../api";
 import { formatTokens } from "../utils/format";
 import { healthStatusLabel, healthStatusType } from "../utils/health";
+import { useConfirm } from "../utils/confirm";
 import AppFormModal from "../components/AppFormModal.vue";
 import AppPageShell from "../components/AppPageShell.vue";
 
 const message = useMessage();
-const dialog = useDialog();
+const { confirm } = useConfirm();
 
 const mappings = ref<ModelMapping[]>([]);
 const allProviders = ref<Provider[]>([]);
@@ -94,6 +90,33 @@ function prevStep() {
 const isWeightedStrategy = computed(
   () => formValue.value.strategy === "round_robin" || formValue.value.strategy === "weighted"
 );
+
+// 参与渠道的模型总数（分区统计 + footer 摘要共用）
+const totalSelectedModels = computed(() =>
+  selectedProviderIds.value.reduce(
+    (sum, pid) => sum + (formValue.value.selectedModelsMap[pid] || []).length,
+    0
+  )
+);
+
+// 负载策略说明：让用户不用查文档就知道选哪个
+const strategyHint = computed(() => {
+  switch (formValue.value.strategy) {
+    case "weighted":
+      return "按权重随机分配请求，权重越高被选中的概率越大。";
+    case "least_conn":
+      return "优先选择当前并发请求最少的渠道，适合响应时长差异大的场景。";
+    default:
+      return "按权重顺序轮询各渠道，权重越高在轮次中出现越频繁。";
+  }
+});
+
+// footer 常驻摘要：滚到权重/规格深处仍能看到这次在配什么
+const modalSummary = computed(() => [
+  formValue.value.model_name.trim() || "未命名",
+  `${selectedProviderIds.value.length} 渠道`,
+  `${totalSelectedModels.value} 模型`,
+]);
 
 // 某渠道已选中的模型列表（带权重）
 function selectedModelsOf(providerId: string): SelectedModel[] {
@@ -307,20 +330,23 @@ function handleEdit(row: ModelMapping) {
 }
 
 function handleDelete(row: ModelMapping) {
-  dialog.warning({
-    title: "确认删除",
-    content: `确定要删除模型映射 "${row.model_name}" 吗？`,
+  confirm({
+    title: "删除模型映射",
+    description: "该模型名将不再指向任何渠道。",
+    targetLabel: "模型",
+    target: row.model_name,
+    impacts: [
+      "客户端使用该模型名的请求将无法命中链路",
+      "此操作不可撤销",
+    ],
     positiveText: "删除",
-    negativeText: "取消",
-    onPositiveClick: async () => {
-      try {
-        await modelMappingsApi.remove(row.id);
-        mappings.value = mappings.value.filter((m) => m.id !== row.id);
-        message.success("删除成功");
-      } catch {
-        message.error("删除失败");
-      }
+    destructive: true,
+    onConfirm: async () => {
+      await modelMappingsApi.remove(row.id);
+      mappings.value = mappings.value.filter((m) => m.id !== row.id);
+      message.success("删除成功");
     },
+    onError: () => message.error("删除失败"),
   });
 }
 
@@ -479,39 +505,55 @@ watch(
       <AppFormModal
         v-model:show="showModal"
         :title="editingId ? '编辑模型映射' : '新增模型映射'"
-        width="640px"
+        width="680px"
+        :summary="modalSummary"
         @submit="handleSubmit"
       >
-        <NSteps :current="currentStep" size="small" style="margin-bottom: 16px">
+        <NSteps :current="currentStep" size="small" class="m-steps">
           <NStep title="基础配置" description="名称、渠道与模型" />
           <NStep title="权重与参数" description="模型权重与规格" />
         </NSteps>
 
         <Transition name="step-fade" mode="out-in">
-          <NForm :key="currentStep" :model="formValue" label-placement="left" label-width="90">
-            <!-- 步骤 0：基础配置（名称 + 渠道 + 模型） -->
+          <div :key="currentStep" class="m-body">
+            <!-- 步骤 0：模型信息 / 渠道与模型 / 负载策略 -->
             <template v-if="currentStep === 0">
-              <NFormItem label="模型名称" required>
-                <NInput v-model:value="formValue.model_name" placeholder="例如：gpt-4、claude-3-opus" />
-              </NFormItem>
+              <section class="m-section">
+                <div class="m-sec-head">
+                  <span class="m-sec-title">模型信息</span>
+                  <span class="m-sec-meta">{{ selectedProviderIds.length }} 渠道 · {{ totalSelectedModels }} 模型</span>
+                </div>
+                <div class="m-grid" style="--m-cols: 4">
+                  <div class="m-field m-span-3">
+                    <label class="m-label">模型名称<i class="m-req">*</i></label>
+                    <NInput v-model:value="formValue.model_name" placeholder="例如：gpt-4、claude-3-opus" />
+                  </div>
+                  <div class="m-field">
+                    <label class="m-label">启用</label>
+                    <div class="m-switch">
+                      <NSwitch v-model:value="formValue.enabled" />
+                      <span class="m-note">{{ formValue.enabled ? "对外可用" : "已停用" }}</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
 
-              <NFormItem label="渠道与模型">
-                <div style="width: 100%; display: flex; flex-direction: column; gap: 10px">
+              <section class="m-section">
+                <div class="m-sec-head">
+                  <span class="m-sec-title">渠道与模型</span>
                   <NInput
                     v-model:value="modelSearchKeyword"
-                    placeholder="搜索模型名，点击模型切换选中..."
+                    placeholder="搜索模型名"
+                    size="small"
                     clearable
-                  >
-                    <template #prefix>
-                      <NIcon><SearchOutline /></NIcon>
-                    </template>
-                  </NInput>
+                    class="m-sec-search m-sec-action"
+                  />
+                </div>
+                <p class="m-sec-desc">展开渠道并勾选模型，被勾中的渠道即参与本模型的负载均衡。</p>
 
-                  <div v-if="allProviders.length === 0" style="font-size: 13px; color: #94a3b8; padding: 8px 0">
-                    暂无可用渠道，请先在「渠道管理」中添加
-                  </div>
+                <div v-if="allProviders.length === 0" class="m-empty">暂无可用渠道，请先在「渠道管理」中添加</div>
 
-                  <div v-else class="channel-list">
+                <div v-else class="channel-list">
                     <div
                       v-for="p in allProviders"
                       :key="p.id"
@@ -558,25 +600,37 @@ watch(
                       </div>
                     </div>
                   </div>
-                </div>
-              </NFormItem>
+              </section>
 
-              <NFormItem label="负载策略">
-                <NSelect
-                  v-model:value="formValue.strategy"
-                  :options="[
-                    { label: '加权轮询 (Weighted Round Robin)', value: 'round_robin' },
-                    { label: '加权随机 (Weighted Random)', value: 'weighted' },
-                    { label: '最少连接 (Least Conn)', value: 'least_conn' },
-                  ]"
-                />
-              </NFormItem>
+              <section class="m-section">
+                <div class="m-sec-head">
+                  <span class="m-sec-title">负载策略</span>
+                  <span class="m-sec-meta">多渠道路由方式</span>
+                </div>
+                <div class="m-grid">
+                  <div class="m-field">
+                    <NSelect
+                      v-model:value="formValue.strategy"
+                      :options="[
+                        { label: '加权轮询 (Weighted Round Robin)', value: 'round_robin' },
+                        { label: '加权随机 (Weighted Random)', value: 'weighted' },
+                        { label: '最少连接 (Least Conn)', value: 'least_conn' },
+                      ]"
+                    />
+                  </div>
+                </div>
+                <p class="m-sec-desc">{{ strategyHint }}</p>
+              </section>
             </template>
 
-            <!-- 步骤 1：权重与参数 -->
+            <!-- 步骤 1：权重 / 规格 / 描述与能力 -->
             <template v-else>
-              <NFormItem v-if="isWeightedStrategy" label="模型权重">
-                <div style="width: 100%; display: flex; flex-direction: column; gap: 10px">
+              <section v-if="isWeightedStrategy" class="m-section">
+                <div class="m-sec-head">
+                  <span class="m-sec-title">模型权重</span>
+                  <span class="m-sec-meta">{{ selectedProviderIds.length }} 渠道 · {{ totalSelectedModels }} 模型</span>
+                </div>
+                <div class="m-list">
                   <div
                     v-for="grp in selectedProviders"
                     :key="grp.id"
@@ -605,50 +659,58 @@ watch(
                       </div>
                     </div>
                   </div>
-                  <div style="font-size: 12px; color: #94a3b8">
-                    权重决定流量分配比例，默认 1；数值越大，被选中的概率/频次越高。
-                  </div>
                 </div>
-              </NFormItem>
+                <p class="m-sec-desc">
+                  权重决定流量分配比例，默认 1；数值越大，被选中的概率/频次越高。
+                </p>
+              </section>
 
-              <div class="form-row">
-                <NFormItem v-for="field in tokenFields" :key="field.key" :label="field.label" style="flex: 1">
-                  <div class="token-field">
-                    <NInputNumber v-model:value="formValue[field.key]" placeholder="请输入数值，留空则使用最佳默认值" :min="0" style="width: 100%" />
-                    <div class="token-options">
-                      <button
-                        v-for="opt in field.options"
-                        :key="opt.value"
-                        type="button"
-                        class="token-option"
-                        :class="{ active: formValue[field.key] === opt.value }"
-                        @click="toggleTokenValue(field.key, opt.value)"
-                      >{{ opt.label }}</button>
+              <section class="m-section">
+                <div class="m-sec-head">
+                  <span class="m-sec-title">模型规格</span>
+                  <span class="m-sec-meta">留空则使用最佳默认值</span>
+                </div>
+                <div class="m-grid">
+                  <div v-for="field in tokenFields" :key="field.key" class="m-field">
+                    <label class="m-label">{{ field.label }}</label>
+                    <div class="token-field">
+                      <NInputNumber v-model:value="formValue[field.key]" placeholder="留空用默认值" :min="0" style="width: 100%" />
+                      <div class="token-options">
+                        <button
+                          v-for="opt in field.options"
+                          :key="opt.value"
+                          type="button"
+                          class="token-option"
+                          :class="{ active: formValue[field.key] === opt.value }"
+                          @click="toggleTokenValue(field.key, opt.value)"
+                        >{{ opt.label }}</button>
+                      </div>
                     </div>
                   </div>
-                </NFormItem>
-              </div>
-
-              <NFormItem label="描述">
-                <NInput v-model:value="formValue.description" placeholder="模型描述，如 '最新 GPT-4 模型，支持多模态'" type="textarea" :rows="2" />
-              </NFormItem>
-
-              <NFormItem label="模型能力">
-                <div class="cap-checkboxes">
-                  <label v-for="cap in capabilityOptions" :key="cap.value" class="cap-checkbox">
-                    <input type="checkbox" :value="cap.value" :checked="formValue.capabilities.includes(cap.value)"
-                      @change="(e: any) => toggleCapability(cap.value, e.target.checked)"
-                    />
-                    {{ cap.label }}
-                  </label>
                 </div>
-              </NFormItem>
+              </section>
 
-              <NFormItem label="启用">
-                <NSwitch v-model:value="formValue.enabled" />
-              </NFormItem>
+              <section class="m-section">
+                <div class="m-sec-head">
+                  <span class="m-sec-title">描述与能力</span>
+                </div>
+                <div class="m-field">
+                  <NInput v-model:value="formValue.description" placeholder="模型描述，如 '最新 GPT-4 模型，支持多模态'" type="textarea" :rows="2" />
+                </div>
+                <div class="m-field">
+                  <label class="m-label">模型能力</label>
+                  <div class="cap-checkboxes">
+                    <label v-for="cap in capabilityOptions" :key="cap.value" class="cap-checkbox">
+                      <input type="checkbox" :value="cap.value" :checked="formValue.capabilities.includes(cap.value)"
+                        @change="(e: any) => toggleCapability(cap.value, e.target.checked)"
+                      />
+                      {{ cap.label }}
+                    </label>
+                  </div>
+                </div>
+              </section>
             </template>
-          </NForm>
+          </div>
         </Transition>
 
         <template #footer>
@@ -1040,6 +1102,11 @@ watch(
 }
 
 /* 向导底部按钮（覆盖 AppFormModal 默认 footer） */
+/* 步骤条：固定在滚动区之外，切步骤时位置不跳动 */
+.m-steps {
+  margin-bottom: 16px;
+}
+
 .modal-footer {
   display: flex;
   justify-content: space-between;

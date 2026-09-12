@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { NButton, NInput, NInputNumber, NModal, NSelect, NTag, useDialog, useMessage } from "naive-ui";
+import { NButton, NInput, NInputNumber, NModal, NSelect, NTag, useMessage } from "naive-ui";
 import { presetsApi } from "../api/presets";
 import { providersApi } from "../api/providers";
 import type { AgentTypeInfo, Preset, Provider, ProviderModelInfo } from "../api";
 import { formSpecFor, officialCredentialFields, type HarnessField, type HarnessFormSpec } from "../config/harnessForms";
+import ModalAdvanced from "../components/ModalAdvanced.vue";
+import { useConfirm } from "../utils/confirm";
 
 const message = useMessage();
-const dialog = useDialog();
+const { confirm } = useConfirm();
 const agentTypes = ref<AgentTypeInfo[]>([]);
 const activeTab = ref("claude_code");
 const presets = ref<Preset[]>([]);
@@ -182,20 +184,23 @@ async function saveOfficial() {
   }
 }
 function resetOfficial(preset: Preset) {
-  dialog.warning({
+  confirm({
     title: "恢复官方默认",
-    content: `将「${preset.name}」恢复为官方默认（清空已填写的 API Key 凭据）？`,
+    description: "端点与模型将重置为官方默认值。",
+    targetLabel: "预设",
+    target: preset.name,
+    impacts: [
+      "已填写的 API Key 凭据会被清空",
+      "重置后需要重新填写凭据才能使用",
+    ],
     positiveText: "恢复默认",
-    negativeText: "取消",
-    onPositiveClick: async () => {
-      try {
-        await presetsApi.resetOfficial(preset.id);
-        message.success("已恢复官方默认");
-        await loadPresets();
-      } catch (error: any) {
-        message.error(error?.message || "操作失败");
-      }
+    destructive: true,
+    onConfirm: async () => {
+      await presetsApi.resetOfficial(preset.id);
+      message.success("已恢复官方默认");
+      await loadPresets();
     },
+    onError: (error: any) => message.error(error?.message || "操作失败"),
   });
 }
 const openCodeActiveCount = computed(() => {
@@ -203,6 +208,25 @@ const openCodeActiveCount = computed(() => {
   return presets.value.filter((preset) => preset.is_active).length;
 });
 const spec = computed<HarnessFormSpec | undefined>(() => formSpecFor(activeTab.value));
+
+/** 高级字段：原生环境变量 / JSON 片段，低频且容易写错，折叠起来 */
+const ADVANCED_FIELD_TYPES = new Set(["key-value", "json"]);
+function isAdvancedField(field: HarnessField): boolean {
+  return ADVANCED_FIELD_TYPES.has(field.type);
+}
+
+/** 需要占整行的字段：模型角色 / 模型列表这类多行编辑器放半栏会挤成一团 */
+function isWideField(field: HarnessField): boolean {
+  return ["model-roles", "model-list", "model-map"].includes(field.type);
+}
+
+const basicFields = computed(() => (spec.value?.fields || []).filter((field) => !isAdvancedField(field)));
+const advancedFields = computed(() => (spec.value?.fields || []).filter(isAdvancedField));
+
+/** 高级区已填写的项数，>0 时折叠标题显示「已自定义 N 项」 */
+const advancedFilledCount = computed(
+  () => advancedFields.value.filter((field) => fieldValue(field).trim().length > 0).length,
+);
 const currentModelIds = computed(() => {
   const ids = new Set<string>();
   for (const field of spec.value?.fields || []) {
@@ -531,20 +555,23 @@ function remove(preset: Preset) {
     message.warning("当前激活的预设不可直接删除，请先取消激活后重试");
     return;
   }
-  dialog.warning({
-    title: "确认删除",
-    content: `确定要删除预设「${preset.name}」吗？`,
+  confirm({
+    title: "删除预设",
+    description: "删除后将无法再用该预设启动对应 Agent。",
+    targetLabel: "预设",
+    target: preset.name,
+    impacts: [
+      "预设内的配置与已填写的凭据将被移除",
+      "此操作不可撤销，需要重新配置才能恢复",
+    ],
     positiveText: "删除",
-    negativeText: "取消",
-    onPositiveClick: async () => {
-      try {
-        await presetsApi.remove(preset.id);
-        message.success("已删除");
-        await loadPresets();
-      } catch (error: any) {
-        message.error(error?.message || "删除失败");
-      }
+    destructive: true,
+    onConfirm: async () => {
+      await presetsApi.remove(preset.id);
+      message.success("已删除");
+      await loadPresets();
     },
+    onError: (error: any) => message.error(error?.message || "删除失败"),
   });
 }
 
@@ -623,71 +650,195 @@ onMounted(async () => {
         </div>
       </div>
     </div>
-  <NModal v-model:show="showModal" preset="card" :title="editingId ? '编辑预设' : '新建预设'" style="width: 560px">
-      <template v-if="spec">
-        <p v-if="nativeProtocolHint()" class="official-tip">{{ nativeProtocolHint() }}</p>
-        <div class="form-item">
-          <label>从渠道快速填充（可选）</label>
-          <NSelect v-model:value="channelFillId" :options="channelOptions" filterable clearable :loading="channelsLoading" :disabled="channels.length === 0" :placeholder="channels.length === 0 ? '暂无渠道，请先在「渠道」页配置' : '选择已有渠道，自动填充 API 端点与 Key'" @update:value="applyChannelFill" />
-          <p v-if="channelFillHint" class="channel-fill-hint">{{ channelFillHint }}</p>
-        </div>
-        <div class="form-item">
-          <label>预设名称</label>
-          <NInput v-model:value="formName" placeholder="请输入预设名称" @keydown.enter="save(false)" />
-        </div>
-        <div class="form-item fetch-row">
-          <label>模型列表</label>
-          <NButton size="small" type="primary" ghost :loading="fetchingModels" :disabled="!formValues[modelEndpointKey]" @click="fetchModels">获取模型</NButton>
-          <span v-if="fetchedModels.length" class="fetch-count">已获取 {{ fetchedModels.length }} 个</span>
-        </div>
-        <div v-for="field in spec.fields" :key="field.key" class="form-item">
-          <label>{{ field.label }}</label>
-          <template v-if="field.type === 'model-roles'">
-            <div v-for="role in field.roles || []" :key="role" class="role-row">
-              <span class="role-label">{{ role }}</span>
-              <NSelect :value="(formValues.roles as Record<string, string> || {})[role]" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" :placeholder="modelSelectorDisabled ? '请先获取模型列表' : `${role} 模型`" @update:value="(value) => updateRole(role, value)" />
+  <NModal
+    v-model:show="showModal"
+    preset="card"
+    :title="editingId ? '编辑预设' : '新建预设'"
+    style="width: min(600px, calc(100vw - 32px))"
+    :bordered="false"
+    :segmented="{ footer: true }"
+  >
+    <template v-if="spec">
+      <div class="m-body">
+        <p v-if="nativeProtocolHint()" class="m-tip">{{ nativeProtocolHint() }}</p>
+
+        <!-- 1. 基本信息：名称 + 从渠道一键填充 -->
+        <section class="m-section">
+          <div class="m-sec-head">
+            <span class="m-sec-title">基本信息</span>
+            <span class="m-sec-meta">{{ spec.label }}</span>
+          </div>
+          <div class="m-grid">
+            <div class="m-field">
+              <label class="m-label">预设名称</label>
+              <NInput v-model:value="formName" placeholder="请输入预设名称" @keydown.enter="save(false)" />
             </div>
-          </template>
-          <NSelect v-else-if="field.type === 'model-select'" :value="formValues[field.key] as string" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" :placeholder="modelSelectorDisabled ? '请先获取模型列表' : field.placeholder" @update:value="(value) => updateField(field.key, value || '')" />
-          <NSelect v-else-if="field.type === 'select'" :value="String(formValues[field.key] || '')" :options="selectOptions(field).map((option) => ({ label: option.label, value: option.value, disabled: option.disabled }))" :placeholder="field.placeholder" @update:value="(value) => updateField(field.key, value || '')" />
-          <template v-else-if="field.type === 'model-list' || field.type === 'model-map'">
-            <div class="model-list-editor">
-              <div v-for="(model, index) in modelListValue()" :key="index" class="model-row">
-                <NSelect :value="String(model.id || '')" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" placeholder="选择模型" @update:value="(value) => updateModelListItem(index, 'id', value || '')" />
-                <NInput :value="String(model.name || '')" placeholder="显示名称（可选）" @update:value="(value) => updateModelListItem(index, 'name', value)" />
-                <NInputNumber :value="typeof model.context_length === 'number' ? model.context_length : null" :min="1" placeholder="上下文" @update:value="(value) => updateModelListItem(index, 'context_length', value)" />
-                <NButton size="small" quaternary type="error" aria-label="删除模型" @click="removeModelListItem(index)">删除</NButton>
-              </div>
-              <NButton size="small" dashed :disabled="modelSelectorDisabled" @click="addModelListItem">添加模型</NButton>
+            <div class="m-field">
+              <label class="m-label">从渠道填充</label>
+              <NSelect
+                v-model:value="channelFillId"
+                :options="channelOptions"
+                filterable
+                clearable
+                :loading="channelsLoading"
+                :disabled="channels.length === 0"
+                :placeholder="channels.length === 0 ? '暂无渠道，请先在「渠道」页配置' : '选择渠道，自动填充端点与 Key'"
+                @update:value="applyChannelFill"
+              />
             </div>
-          </template>
-          <NInput v-else-if="field.type === 'secret'" :value="fieldValue(field)" type="password" show-password-on="click" :placeholder="field.placeholder" @update:value="(value) => updateField(field.key, value)" />
-          <NInput v-else-if="['key-value', 'json'].includes(field.type)" :value="fieldValue(field)" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" :placeholder="field.placeholder" @update:value="(value) => updateField(field.key, value)" />
-          <NInput v-else :value="fieldValue(field)" :placeholder="field.placeholder" :inputmode="field.type === 'number' ? 'numeric' : undefined" @update:value="(value) => updateField(field.key, value)" />
-        </div>
-      </template>
-      <p v-else class="empty-desc">该 Agent 类型暂无结构化表单</p>
-      <template #footer>
-        <div class="modal-actions">
-          <NButton size="small" @click="showModal = false">取消</NButton>
-          <NButton size="small" type="primary" ghost @click="save(true)">保存并激活</NButton>
-          <NButton size="small" type="primary" @click="save(false)">保存</NButton>
-        </div>
-      </template>
-    </NModal>
+            <p v-if="channelFillHint" class="m-note m-full">{{ channelFillHint }}</p>
+          </div>
+        </section>
+
+        <!-- 2. 接入参数：端点 / Key / 模型，短字段双栏 -->
+        <section class="m-section">
+          <div class="m-sec-head">
+            <span class="m-sec-title">接入参数</span>
+            <span v-if="fetchedModels.length" class="m-sec-meta">已获取 {{ fetchedModels.length }} 个模型</span>
+            <NButton
+              size="tiny"
+              secondary
+              class="m-sec-action"
+              :loading="fetchingModels"
+              :disabled="!formValues[modelEndpointKey]"
+              @click="fetchModels"
+            >
+              获取模型
+            </NButton>
+          </div>
+
+          <div class="m-grid">
+            <div
+              v-for="field in basicFields"
+              :key="field.key"
+              class="m-field"
+              :class="{ 'm-full': isWideField(field) }"
+            >
+              <label class="m-label">{{ field.label }}</label>
+              <template v-if="field.type === 'model-roles'">
+                <div v-for="role in field.roles || []" :key="role" class="role-row">
+                  <span class="role-label">{{ role }}</span>
+                  <NSelect
+                    :value="(formValues.roles as Record<string, string> || {})[role]"
+                    :options="modelOptions"
+                    filterable
+                    clearable
+                    :disabled="modelSelectorDisabled"
+                    :placeholder="modelSelectorDisabled ? '请先获取模型列表' : `${role} 模型`"
+                    @update:value="(value) => updateRole(role, value)"
+                  />
+                </div>
+              </template>
+              <NSelect
+                v-else-if="field.type === 'model-select'"
+                :value="formValues[field.key] as string"
+                :options="modelOptions"
+                filterable
+                clearable
+                :disabled="modelSelectorDisabled"
+                :placeholder="modelSelectorDisabled ? '请先获取模型列表' : field.placeholder"
+                @update:value="(value) => updateField(field.key, value || '')"
+              />
+              <NSelect
+                v-else-if="field.type === 'select'"
+                :value="String(formValues[field.key] || '')"
+                :options="selectOptions(field).map((option) => ({ label: option.label, value: option.value, disabled: option.disabled }))"
+                :placeholder="field.placeholder"
+                @update:value="(value) => updateField(field.key, value || '')"
+              />
+              <template v-else-if="field.type === 'model-list' || field.type === 'model-map'">
+                <div class="model-list-editor">
+                  <div v-for="(model, index) in modelListValue()" :key="index" class="model-row">
+                    <NSelect :value="String(model.id || '')" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" placeholder="选择模型" @update:value="(value) => updateModelListItem(index, 'id', value || '')" />
+                    <NInput :value="String(model.name || '')" placeholder="显示名称（可选）" @update:value="(value) => updateModelListItem(index, 'name', value)" />
+                    <NInputNumber :value="typeof model.context_length === 'number' ? model.context_length : null" :min="1" placeholder="上下文" @update:value="(value) => updateModelListItem(index, 'context_length', value)" />
+                    <NButton size="small" quaternary type="error" aria-label="删除模型" @click="removeModelListItem(index)">删除</NButton>
+                  </div>
+                  <NButton size="small" dashed :disabled="modelSelectorDisabled" @click="addModelListItem">添加模型</NButton>
+                </div>
+              </template>
+              <NInput v-else-if="field.type === 'secret'" :value="fieldValue(field)" type="password" show-password-on="click" :placeholder="field.placeholder" @update:value="(value) => updateField(field.key, value)" />
+              <NInput v-else :value="fieldValue(field)" :placeholder="field.placeholder" :inputmode="field.type === 'number' ? 'numeric' : undefined" @update:value="(value) => updateField(field.key, value)" />
+              <span v-if="field.hint" class="m-note">{{ field.hint }}</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. 高级配置：原生环境变量 / JSON，改动过才提示 -->
+        <ModalAdvanced
+          v-if="advancedFields.length"
+          :count="advancedFilledCount"
+          hint="环境变量 · 原生 JSON"
+        >
+          <div v-for="field in advancedFields" :key="field.key" class="m-field adv-extra">
+            <label class="m-label">
+              {{ field.label }}
+              <span v-if="field.hint" class="m-note">{{ field.hint }}</span>
+            </label>
+            <NInput
+              :value="fieldValue(field)"
+              type="textarea"
+              :autosize="{ minRows: 3, maxRows: 8 }"
+              :placeholder="field.placeholder"
+              @update:value="(value) => updateField(field.key, value)"
+            />
+          </div>
+        </ModalAdvanced>
+      </div>
+    </template>
+    <p v-else class="empty-desc">该 Agent 类型暂无结构化表单</p>
+    <template #footer>
+      <div class="modal-actions">
+        <NButton size="small" @click="showModal = false">取消</NButton>
+        <NButton size="small" type="primary" ghost @click="save(true)">保存并激活</NButton>
+        <NButton size="small" type="primary" @click="save(false)">保存</NButton>
+      </div>
+    </template>
+  </NModal>
 
     <!-- 官方直连配置编辑：端点/模型锚定官方，仅凭据可填（与后端清洗白名单对齐） -->
-    <NModal v-model:show="officialModal" preset="card" title="官方直连配置" style="width: 480px">
+    <NModal
+      v-model:show="officialModal"
+      preset="card"
+      title="官方直连配置"
+      style="width: min(520px, calc(100vw - 32px))"
+      :bordered="false"
+      :segmented="{ footer: true }"
+    >
       <template v-if="officialEditing">
-        <div class="form-item">
-          <label>预设名称</label>
-          <NInput v-model:value="officialName" placeholder="请输入预设名称" />
+        <div class="m-body">
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">基本信息</span>
+              <span class="m-sec-meta">{{ officialEditing.agent_type }}</span>
+            </div>
+            <div class="m-field">
+              <label class="m-label">预设名称</label>
+              <NInput v-model:value="officialName" placeholder="请输入预设名称" />
+            </div>
+          </section>
+
+          <section class="m-section">
+            <div class="m-sec-head">
+              <span class="m-sec-title">凭据</span>
+              <span class="m-sec-meta">可留空，留空则保持原值</span>
+            </div>
+            <div
+              v-for="field in officialFieldsOf(officialEditing.agent_type)"
+              :key="field.key"
+              class="m-field"
+            >
+              <label class="m-label">{{ field.label }}</label>
+              <NInput
+                v-model:value="officialCredential[field.key]"
+                type="password"
+                show-password-on="click"
+                :placeholder="`${field.label}（可留空）`"
+              />
+            </div>
+            <p class="m-sec-desc">{{ officialModalTip(officialEditing.agent_type) }}</p>
+          </section>
         </div>
-        <div v-for="field in officialFieldsOf(officialEditing.agent_type)" :key="field.key" class="form-item">
-          <label>{{ field.label }}</label>
-          <NInput v-model:value="officialCredential[field.key]" type="password" show-password-on="click" :placeholder="`${field.label}（可留空）`" />
-        </div>
-        <p class="official-tip">{{ officialModalTip(officialEditing.agent_type) }}</p>
       </template>
       <template #footer>
         <div class="modal-actions">
@@ -786,23 +937,17 @@ onMounted(async () => {
 
 .preset-card.dragging { opacity: 0.55; border-style: dashed; }
 
-.preset-card-head, .preset-actions, .modal-actions, .fetch-row, .role-row { display: flex; align-items: center; }
+.preset-card-head, .preset-actions, .modal-actions, .role-row { display: flex; align-items: center; }
 .preset-card-head { justify-content: space-between; margin-bottom: 12px; }
 .preset-tags { display: flex; align-items: center; gap: 4px; }
 .preset-desc { margin: 0 0 10px; color: var(--muted, #737373); font-size: 12px; line-height: 1.5; }
-.official-tip { margin: 0 0 10px; color: var(--muted, #737373); font-size: 12px; line-height: 1.6; }
-.channel-fill-hint { margin: 6px 0 0; color: var(--danger, #dc2626); font-size: 12px; line-height: 1.6; }
 .preset-name { font-size: 14px; font-weight: 600; color: var(--fg, #0a0a0a); letter-spacing: -0.01em; }
 .preset-actions, .modal-actions { gap: 6px; }
 
 .empty-state { padding: 48px 0; text-align: center; }
 
-.form-item { margin-bottom: 12px; }
-.form-item > label { display: block; margin-bottom: 6px; color: var(--fg-2, #171717); font-size: 13px; font-weight: 500; }
-.fetch-row { gap: 10px; }
 .active-count { color: var(--muted, #737373); font-size: 13px; margin-left: 8px; }
-.fetch-row label { margin-bottom: 0; }
-.role-row { gap: 10px; margin-bottom: 6px; }
+.role-row { gap: 10px; }
 .role-label { width: 70px; color: var(--muted, #737373); font-size: 13px; font-weight: 500; }
 .modal-actions { justify-content: flex-end; }
 </style>

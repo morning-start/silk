@@ -9,6 +9,16 @@ on:
 permissions:
   contents: write
 
+# 发布产物由两条路径共同拼成，缺任一条「检查更新」都会失败：
+#   1. 推送 v* tag 触发本工作流：构建四个平台、签名（.sig）、并生成/合并 latest.json
+#   2. 本地 `bun scripts/publish.ts <版本>`：bump 版本、提交、构建并上传 Windows 安装包
+#      与 latest.json，随后 push tag 触发本工作流补齐 mac/linux
+# 因此本仓库需要配置两个 Secret（与本地 ~/.tauri/silk.key 一致）：
+#   TAURI_SIGNING_PRIVATE_KEY          —— 私钥内容或路径
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD —— 私钥口令（--ci 生成的密钥留空即可）
+# 同名资产会先删除再上传，所以 CI 覆盖本地已上传的产物是预期行为，
+# 前提是两边用同一把签名密钥。
+
 jobs:
   publish-tauri:
     strategy:
@@ -73,6 +83,11 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 更新签名私钥：内容与本地 ~/.tauri/silk.key 一致。
+          # 未设置时不会生成 .sig，latest.json 也就没有可下载的更新条目，
+          # 客户端的「检查更新」会一直失败。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseName: Silk v__VERSION__
@@ -80,6 +95,12 @@ jobs:
           releaseDraft: false
           prerelease: false
           tauriScript: bun tauri
-          args: ${{ matrix.args }}
+          # tauri.release.conf.json 开启 createUpdaterArtifacts，让 CI 产物带 .sig。
+          # 该开关放在单独配置里，本地 `bun run tauri build` 才不需要提供私钥。
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+          # 与 scripts/publish.ts 保持一致：Windows 更新指向 NSIS 安装包
+          # （本地脚本只收集 *-setup.exe）。两者指向不同类型会导致
+          # 用 NSIS 安装的用户收到 MSI 更新而安装失败。
+          updaterJsonPreferNsis: true
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: silk-[version]-${{ matrix.bundle_name }}-[bundle]
