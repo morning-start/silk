@@ -41,7 +41,8 @@ impl AgentType {
 
     /// 是否需要重启终端/应用才能生效（与 cc-switch 一致：仅 opencode/hermes 免重启）
     pub fn requires_restart(id: &str) -> bool {
-        !matches!(id, "opencode" | "hermes")
+        // OMP：models.yml 每次调用时读取（对齐 omp-switch 无重启概念），免重启
+        !matches!(id, "opencode" | "hermes" | "omp")
     }
 
     /// silk 网关 prism 可转换的协议全集（与 prism_wasm::map_provider 白名单一致）。

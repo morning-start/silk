@@ -78,7 +78,9 @@ function cleanModels(value: unknown): Array<Record<string, unknown>> {
     }));
 }
 
-/** OMP 结构化模型定义（models.yml models[] 元素）：id/name/api/reasoning/input/cost/contextWindow/maxTokens */
+/** OMP 结构化模型定义（models.yml models[] 元素）。
+ * 核心字段结构化（id/name/api/reasoning/input/cost/contextWindow/maxTokens），
+ * 官方扩展字段（headers/compat/thinking/defaultTemperature 等）经 meta JSON 透传。 */
 function cleanModelDefs(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value
@@ -105,6 +107,57 @@ function cleanModelDefs(value: unknown): Array<Record<string, unknown>> {
         }
         if (Object.keys(cleanCost).length) def.cost = cleanCost;
       }
+      // 官方扩展字段（meta JSON）：headers/compat/thinking/defaultTemperature/
+      // defaultTopP/defaultPresencePenalty/defaultFrequencyPenalty/defaultSeed/
+      // imageInputDecoder/tokenizer/compactionModel
+      const meta = object(item.meta);
+      for (const key of [
+        "headers",
+        "compat",
+        "thinking",
+        "defaultTemperature",
+        "defaultTopP",
+        "defaultPresencePenalty",
+        "defaultFrequencyPenalty",
+        "defaultSeed",
+        "imageInputDecoder",
+        "tokenizer",
+        "compactionModel",
+      ]) {
+        if (meta[key] !== undefined) def[key] = meta[key];
+      }
+      return def;
+    });
+}
+
+/** fromSettings 反向折叠：把 models.yml 条目顶层的官方扩展字段收进 meta（供编辑器回显）。 */
+function modelDefsFromSettings(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => object(item))
+    .filter((item) => string(item.id).trim())
+    .map((item) => {
+      const def: Record<string, unknown> = { id: string(item.id).trim() };
+      for (const key of ["name", "api", "reasoning", "input", "contextWindow", "maxTokens", "cost"]) {
+        if (item[key] !== undefined) def[key] = item[key];
+      }
+      const meta: Record<string, unknown> = {};
+      for (const key of [
+        "headers",
+        "compat",
+        "thinking",
+        "defaultTemperature",
+        "defaultTopP",
+        "defaultPresencePenalty",
+        "defaultFrequencyPenalty",
+        "defaultSeed",
+        "imageInputDecoder",
+        "tokenizer",
+        "compactionModel",
+      ]) {
+        if (item[key] !== undefined) meta[key] = item[key];
+      }
+      if (Object.keys(meta).length) def.meta = meta;
       return def;
     });
 }
@@ -329,12 +382,37 @@ const geminiSpec: HarnessFormSpec = {
   },
 };
 
+// 官方 transports（docs/models.md「Allowed provider/model api values」）：9 种全部列出
 const ompApiOptions = [
   { label: "OpenAI Completions", value: "openai-completions" },
   { label: "OpenAI Responses", value: "openai-responses" },
+  { label: "OpenAI Codex Responses", value: "openai-codex-responses" },
+  { label: "Azure OpenAI Responses", value: "azure-openai-responses" },
   { label: "Anthropic Messages", value: "anthropic-messages" },
+  { label: "Bedrock Converse Stream", value: "bedrock-converse-stream" },
   { label: "Google Gemini", value: "google-generative-ai" },
+  { label: "Google Gemini CLI", value: "google-gemini-cli" },
+  { label: "Google Vertex", value: "google-vertex" },
 ];
+
+const ompAuthOptions = [
+  { label: "API Key（按 env 变量名优先，其次字面量）", value: "apiKey" },
+  { label: "None（无认证端点）", value: "none" },
+  { label: "OAuth（内置 provider 登录流；自定义模型仍需 apiKey）", value: "oauth" },
+];
+
+const ompToggleOptions = [
+  { label: "默认", value: "" },
+  { label: "true", value: "true" },
+  { label: "false", value: "false" },
+];
+
+/** bool ↔ toggle select 三态（默认空 / true / false） */
+function boolToToggle(value: unknown): string {
+  if (value === true) return "true";
+  if (value === false) return "false";
+  return "";
+}
 
 const ompSpec: HarnessFormSpec = {
   agentType: "omp",
@@ -343,9 +421,13 @@ const ompSpec: HarnessFormSpec = {
     { key: "id", label: "Provider ID", type: "text", placeholder: "silk" },
     { key: "name", label: "显示名称", type: "text", placeholder: "可选" },
     { key: "baseUrl", label: "API 端点", type: "text", placeholder: "http://127.0.0.1:1877/v1" },
-    { key: "apiKey", label: "API Key", type: "secret", placeholder: "sk-..." },
+    { key: "apiKey", label: "API Key", type: "secret", placeholder: "env 变量名、字面量或 !命令（如 !op read op://x/key）" },
+    { key: "auth", label: "认证方式", type: "select", options: ompAuthOptions },
     { key: "api", label: "协议", type: "select", options: ompApiOptions },
+    { key: "disableStrictTools", label: "禁用 strict 工具", type: "select", options: ompToggleOptions, hint: "Anthropic 兼容端点拒绝 strict 字段时设 true" },
     { key: "headers", label: "请求头", type: "key-value", placeholder: "{\n  \"X-Provider\": \"silk\"\n}" },
+    { key: "modelOverrides", label: "模型覆盖", type: "json", placeholder: "{\n  \"内置模型id\": { \"name\": \"别名\", \"compat\": {...} }\n}" },
+    { key: "remoteCompaction", label: "远程压缩", type: "json", placeholder: "{\n  \"enabled\": true,\n  \"api\": \"openai-completions\",\n  \"endpoint\": \"...\",\n  \"model\": \"...\"\n}" },
     { key: "models", label: "模型定义", type: "model-defs", placeholder: "请先获取模型列表" },
     { key: "advanced", label: "其他原生配置", type: "json", placeholder: "JSON 对象（可选）" },
   ],
@@ -355,10 +437,24 @@ const ompSpec: HarnessFormSpec = {
     setNested(out, "name", string(form.name).trim());
     setNested(out, "baseUrl", string(form.baseUrl).trim());
     setNested(out, "apiKey", string(form.apiKey).trim());
+    setNested(out, "auth", string(form.auth).trim() || "apiKey");
     setNested(out, "api", string(form.api).trim());
+    // 布尔开关：true/false 写入，空 = 删除（用官方默认）
+    for (const key of ["disableStrictTools"]) {
+      const value = string(form[key]).trim();
+      if (value === "true") out[key] = true;
+      else if (value === "false") out[key] = false;
+      else delete out[key];
+    }
     const headers = cleanKeyValue(form.headers);
     if (Object.keys(headers).length) out.headers = headers;
     else delete out.headers;
+    const modelOverrides = object(form.modelOverrides);
+    if (Object.keys(modelOverrides).length) out.modelOverrides = modelOverrides;
+    else delete out.modelOverrides;
+    const remoteCompaction = object(form.remoteCompaction);
+    if (Object.keys(remoteCompaction).length) out.remoteCompaction = remoteCompaction;
+    else delete out.remoteCompaction;
     const models = cleanModelDefs(form.models);
     if (models.length) out.models = models;
     else delete out.models;
@@ -366,15 +462,19 @@ const ompSpec: HarnessFormSpec = {
   },
   fromSettings(config) {
     const advanced = { ...config };
-    for (const key of ["id", "name", "baseUrl", "apiKey", "api", "headers", "models"]) delete advanced[key];
+    for (const key of ["id", "name", "baseUrl", "apiKey", "auth", "api", "disableStrictTools", "headers", "modelOverrides", "remoteCompaction", "models"]) delete advanced[key];
     return withRaw(config, {
       id: string(config.id),
       name: string(config.name),
       baseUrl: string(config.baseUrl),
       apiKey: string(config.apiKey),
+      auth: string(config.auth) || "apiKey",
       api: string(config.api),
+      disableStrictTools: boolToToggle(config.disableStrictTools),
       headers: cleanKeyValue(config.headers),
-      models: cleanModelDefs(config.models),
+      modelOverrides: config.modelOverrides && typeof config.modelOverrides === "object" && !Array.isArray(config.modelOverrides) ? config.modelOverrides : "",
+      remoteCompaction: config.remoteCompaction && typeof config.remoteCompaction === "object" && !Array.isArray(config.remoteCompaction) ? config.remoteCompaction : "",
+      models: modelDefsFromSettings(config.models),
       advanced,
     });
   },

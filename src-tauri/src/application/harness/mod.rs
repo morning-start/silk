@@ -117,6 +117,9 @@ pub fn writer_for(agent_type: &str) -> Option<Box<dyn HarnessWriter>> {
 }
 
 #[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;

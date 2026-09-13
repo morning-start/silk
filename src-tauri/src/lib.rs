@@ -236,27 +236,42 @@ pub(crate) async fn init_model_catalog(app: &tauri::App, data_dir: &Path) -> Res
     let catalog_path = data_dir.join("model-catalog.json");
 
     if !catalog_path.exists() {
-        let seeded = if let Ok(resource_dir) = app.path().resource_dir() {
-            let seed = resource_dir.join("model-catalog.json");
-            if seed.exists() {
-                std::fs::copy(&seed, &catalog_path).map_err(|e| format!("复制模型目录失败: {e}"))?;
-                tracing::info!("已从资源复制模型目录种子: {}", seed.display());
-                true
-            } else {
-                false
+        // 种子候选路径（按运行布局兼容）：
+        // 1) resource_dir()/model-catalog.json — 打包安装（macOS/Linux/Windows 生产）
+        // 2) resource_dir()/resources/model-catalog.json — Windows dev：resource_dir 恒为 exe 目录
+        //    （tauri-utils `resource_dir_from`：cfg!(windows) 直接返回 exe_dir），而 dev 构建
+        //    把资源复制到 target/debug/resources/ 子目录
+        // 3) 源码仓库资源 — debug 构建兜底（CARGO_MANIFEST_DIR = src-tauri）
+        let seed_candidates: Vec<PathBuf> = {
+            let mut candidates = Vec::new();
+            if let Ok(resource_dir) = app.path().resource_dir() {
+                candidates.push(resource_dir.join("model-catalog.json"));
+                candidates.push(resource_dir.join("resources").join("model-catalog.json"));
             }
-        } else {
-            false
-        };
-
-        if !seeded {
-            // 开发环境无打包资源：写入空目录占位，用户可自行填充
-            let empty = serde_json::json!({ "version": 1, "models": [] });
-            crate::application::config_writer::write_to_path_atomic(&catalog_path, &empty)?;
-            tracing::warn!(
-                "未找到 model-catalog.json 打包资源，已创建空目录（可手动编辑填充）: {}",
-                catalog_path.display()
+            #[cfg(debug_assertions)]
+            candidates.push(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("resources")
+                    .join("model-catalog.json"),
             );
+            candidates
+        };
+        let seed = seed_candidates.iter().find(|p| p.exists());
+
+        match seed {
+            Some(seed) => {
+                std::fs::copy(seed, &catalog_path).map_err(|e| format!("复制模型目录失败: {e}"))?;
+                tracing::info!("已从资源复制模型目录种子: {}", seed.display());
+            }
+            None => {
+                // 无任何可用种子：写入空文件占位，用户可自行填充
+                let empty = serde_json::json!({ "version": 1, "models": [] });
+                crate::application::config_writer::write_to_path_atomic(&catalog_path, &empty)?;
+                tracing::warn!(
+                    "未找到 model-catalog.json 种子资源，已创建空文件（可手动编辑填充）: {}",
+                    catalog_path.display()
+                );
+            }
         }
     }
 

@@ -54,9 +54,9 @@ impl PresetService {
                 .collect();
             let mut active_claimed = regular_existing.iter().any(|preset| preset.is_active);
 
-            // OpenCode 累加模式：live 中存在的 provider 段 = 已激活（对齐 cc-switch isInConfig）。
+            // OpenCode / OMP 累加模式：live 中存在的 provider 段 = 已激活（对齐 cc-switch isInConfig）。
             // 启动时按 live 现状同步存量 preset 的激活位：在 live → 1，不在 live → 0。
-            if agent_type == "opencode" {
+            if agent_type == "opencode" || agent_type == "omp" {
                 let imported_ids: Vec<Option<String>> = imported
                     .iter()
                     .map(|settings| Self::startup_identity(agent_type, settings))
@@ -90,8 +90,8 @@ impl PresetService {
                 let Some(identity) = Self::startup_identity(agent_type, &settings) else { continue };
                 if regular_existing.iter().any(|preset| Self::startup_identity(agent_type, &serde_json::from_str::<serde_json::Value>(&preset.settings_config).unwrap_or(serde_json::Value::Null)) == Some(identity.clone())) { continue; }
                 let id = uuid::Uuid::new_v4().to_string();
-                // opencode 新导入的 provider 来自 live 配置，天然处于激活态
-                let is_active = if agent_type == "opencode" { true } else { !active_claimed };
+                // opencode/omp 新导入的 provider 来自 live 配置，天然处于激活态
+                let is_active = if agent_type == "opencode" || agent_type == "omp" { true } else { !active_claimed };
                 let name = Self::startup_preset_name(agent_type, agent_name, &identity);
                 let settings_text = serde_json::to_string(&settings).map_err(|error| ServiceError::Internal { message: format!("保存 {agent_name} 导入配置失败: {error}"), detail: Some(error.to_string()) })?;
                 sqlx::query(
@@ -123,7 +123,7 @@ impl PresetService {
 
     fn startup_identity(agent_type: &str, settings: &serde_json::Value) -> Option<String> {
         match agent_type {
-            "opencode" => settings.get("id").and_then(|value| value.as_str()).filter(|value| !value.trim().is_empty()).map(ToOwned::to_owned),
+            "opencode" | "omp" => settings.get("id").and_then(|value| value.as_str()).filter(|value| !value.trim().is_empty()).map(ToOwned::to_owned),
             "hermes" => settings.get("name").and_then(|value| value.as_str()).filter(|value| !value.trim().is_empty()).map(ToOwned::to_owned),
             "codex" => settings.get("model_provider").and_then(|value| value.as_str()).filter(|value| !value.trim().is_empty()).map(ToOwned::to_owned),
             "claude_code" | "gemini_cli" => Some("default".to_string()),
@@ -133,7 +133,7 @@ impl PresetService {
 
     fn startup_preset_name(agent_type: &str, agent_name: &str, identity: &str) -> String {
         match agent_type {
-            "opencode" | "hermes" | "codex" => format!("{agent_name} · {identity}"),
+            "opencode" | "omp" | "hermes" | "codex" => format!("{agent_name} · {identity}"),
             _ => format!("{agent_name} · 当前配置"),
         }
         .trim()
@@ -143,6 +143,7 @@ impl PresetService {
     fn is_managed_startup_entry(agent_type: &str, live: &serde_json::Value, settings: &serde_json::Value) -> bool {
         match agent_type {
             "opencode" => settings.get("id").and_then(|value| value.as_str()).and_then(|id| live.get("provider")?.get(id)?.get("_silk_managed")).and_then(|value| value.as_bool()).unwrap_or(false),
+            "omp" => settings.get("id").and_then(|value| value.as_str()).and_then(|id| live.get("providers")?.get(id)?.get("_silk_managed")).and_then(|value| value.as_bool()).unwrap_or(false),
             "hermes" => settings.get("name").and_then(|value| value.as_str()).and_then(|name| live.get("custom_providers")?.as_array()?.iter().find(|entry| entry.get("name").and_then(|value| value.as_str()) == Some(name))?.get("_silk_managed")).and_then(|value| value.as_bool()).unwrap_or(false),
             _ => live.get("_silk_managed").and_then(|value| value.as_bool()).unwrap_or(false),
         }
@@ -373,9 +374,9 @@ impl PresetService {
     /// 切换：写目标 preset 的 live 投影（注入网关 base_url/api_key）→ 更新 is_active。
     /// 写 live 失败时快照已由 writer 回滚，DB 状态不变。
     pub async fn switch(agent_type: String, preset_id: String) -> Result<SwitchResult, ServiceError> {
-        // OpenCode 为累加模式：多个预设可同时激活，“激活”=加入 live 配置并置位自身，
+        // OpenCode / OMP 为累加模式：多个预设可同时激活，“激活”=加入 live 配置并置位自身，
         // 不清除其他预设。与单激活应用（整体切换）语义不同，走独立启停路径。
-        if agent_type == "opencode" {
+        if agent_type == "opencode" || agent_type == "omp" {
             return Self::set_active(agent_type, preset_id, true).await;
         }
         let pool = require_db()?;
@@ -482,22 +483,22 @@ impl PresetService {
         Ok(SwitchResult { success: true, warnings, requires_restart })
     }
 
-    /// OpenCode 累加模式下的独立启停（对齐 cc-switch additive 应用：
-    /// 每个 provider 单独“加入/移出 opencode.json”，多个 preset 可同时激活）。
+    /// OpenCode / OMP 累加模式下的独立启停（对齐 cc-switch additive 应用：
+    /// 每个 provider 单独“加入/移出” live 配置，多个 preset 可同时激活）。
     ///
     /// - active=true：注入网关信息后写 live（合并 provider.<id> 段，保留其他已激活项），
     ///   置 is_active=1（不清除其他 preset 的激活态）；
     /// - active=false：从 live 移除该 preset 的 provider 段，置 is_active=0。
     ///
-    /// 非 opencode 应用为单激活整体切换（switch），不支持独立启停。
+    /// 非累加应用为单激活整体切换（switch），不支持独立启停。
     pub async fn set_active(
         agent_type: String,
         preset_id: String,
         active: bool,
     ) -> Result<SwitchResult, ServiceError> {
-        if agent_type != "opencode" {
+        if agent_type != "opencode" && agent_type != "omp" {
             return Err(ServiceError::BadRequest {
-                message: "仅 OpenCode 支持多预设独立启停，其余应用请使用「激活」切换".to_string(),
+                message: "仅 OpenCode / OMP 支持多预设独立启停，其余应用请使用「激活」切换".to_string(),
                 code: None,
             });
         }
@@ -992,6 +993,10 @@ mod tests {
 
     #[tokio::test]
     async fn imports_existing_opencode_providers_into_presets() {
+        // 隔离真实 omp 配置：本机装有 omp 时 `omp config path` 会命中真实 models.yml，
+        // 导致 import 遍历含 omp 且读到真实 provider。设置 PI_CODING_AGENT_DIR 指向
+        // 临时目录（无 models.yml → omp 导入为空）。与 omp 测试共用 ENV_LOCK 防 env 竞争。
+        let _env_guard = crate::application::harness::ENV_LOCK.lock().unwrap();
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.expect("memory database");
         sqlx::migrate!("./migrations").run(&pool).await.expect("schema");
         // 迁移自带官方直连种子行（category=official：claude_code/codex/gemini_cli），
@@ -1001,6 +1006,8 @@ mod tests {
         assert_eq!(official, 3);
 
         let home = std::env::temp_dir().join(format!("silk-startup-import-{}", uuid::Uuid::new_v4()));
+        // 隔离真实 omp：agent 目录置空（无 models.yml）
+        std::env::set_var("PI_CODING_AGENT_DIR", home.join(".omp").join("agent"));
         let config_path = home.join(".config").join("opencode").join("opencode.json");
         std::fs::create_dir_all(config_path.parent().expect("config parent")).expect("config directory");
         std::fs::write(&config_path, r#"{"provider":{"relay":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"https://relay.example"}},"other":{"npm":"@ai-sdk/openai"}}}"#).expect("config file");

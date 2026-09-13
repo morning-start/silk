@@ -342,8 +342,9 @@ mod tests {
     use crate::application::harness::HarnessWriter;
 
     /// 串行化依赖 `PI_CODING_AGENT_DIR` 环境变量的写测试：
-    /// 本机若装有 omp，`omp config path` 会命中真实配置目录，必须用 env 隔离
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// 本机若装有 omp，`omp config path` 会命中真实配置目录，必须用 env 隔离。
+    /// 共享 harness 模块的 ENV_LOCK（与 preset_service 测试共用，避免并行 env 竞争）。
+    use crate::application::harness::ENV_LOCK;
 
     #[test]
     fn parses_provider_models_table() {

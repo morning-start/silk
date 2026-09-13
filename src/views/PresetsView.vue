@@ -4,6 +4,7 @@ import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, useMessage }
 import { presetsApi } from "../api/presets";
 import { providersApi } from "../api/providers";
 import { discoveryApi } from "../api/discovery";
+import { modelMappingsApi } from "../api/model-mappings";
 import type { AgentTypeInfo, Preset, Provider, ProviderModelInfo } from "../api";
 import { formSpecFor, officialCredentialFields, type HarnessField, type HarnessFormSpec } from "../config/harnessForms";
 import ModalAdvanced from "../components/ModalAdvanced.vue";
@@ -23,6 +24,8 @@ const formValues = ref<Record<string, unknown>>({});
 const fetchedModels = ref<ProviderModelInfo[]>([]);
 const modelsFetched = ref(false);
 const fetchingModels = ref(false);
+/** OMP 探测元数据缓存：id → {contextWindow, maxTokens, reasoning, input}（来自 `omp --list-models`） */
+const ompProbeMeta = ref<Map<string, { contextWindow?: number; maxTokens?: number; reasoning: boolean; input?: string[] }>>(new Map());
 const draggingId = ref<string | null>(null);
 // 官方直连行编辑（仅凭据可填）+ 恢复默认
 const officialModal = ref(false);
@@ -58,6 +61,13 @@ const HERMES_MODE_BY_PROTOCOL: Record<string, string> = {
   messages: "anthropic_messages",
   bedrock: "bedrock_converse",
 };
+/** OMP models.yml 的 api 取值（对齐 ompSpec api 选项）：渠道协议 → OMP api */
+const OMP_API_BY_PROTOCOL: Record<string, string> = {
+  openai: "openai-completions",
+  responses: "openai-responses",
+  messages: "anthropic-messages",
+  gemini: "google-generative-ai",
+};
 const channelOptions = computed(() =>
   channels.value.map((channel) => ({
     label: channel.protocols.length ? `${channel.name}（${channel.protocols.join("/")}）` : channel.name,
@@ -65,9 +75,12 @@ const channelOptions = computed(() =>
   })),
 );
 
+/** 累加模式 harness（多预设可同时激活，live 中存在 provider 段 = 已激活） */
+const ADDITIVE_HARNESSES = new Set(["opencode", "omp"]);
+
 /** 页头说明：对齐原 page-header 的 subtitle 文案 */
 const pageDesc = computed(() => {
-  if (activeTab.value === "opencode" && openCodeActiveCount.value > 0) return `已激活 ${openCodeActiveCount.value} 个配置`;
+  if (ADDITIVE_HARNESSES.has(activeTab.value) && additiveActiveCount.value > 0) return `已激活 ${additiveActiveCount.value} 个配置`;
   if (currentPreset.value) return `当前激活：${currentPreset.value.name}`;
   return "未激活任何预设（live 配置保持原状）";
 });
@@ -115,6 +128,10 @@ function applyChannelFill(channelId: string | null) {
   if (activeTab.value === "hermes") {
     const mode = channel.protocols.map((protocol) => HERMES_MODE_BY_PROTOCOL[protocol]).find(Boolean);
     if (mode) formValues.value.api_mode = mode;
+  }
+  if (activeTab.value === "omp") {
+    const api = channel.protocols.map((protocol) => OMP_API_BY_PROTOCOL[protocol]).find(Boolean);
+    if (api) formValues.value.api = api;
   }
   // 协议兼容提示：单协议 harness 若渠道协议不含原生协议，直连会失败
   const compatible = channel.protocols.length === 0 || channel.protocols.some((protocol) => target.nativeProtocols.includes(protocol));
@@ -215,8 +232,8 @@ function resetOfficial(preset: Preset) {
     onError: (error: any) => message.error(error?.message || "操作失败"),
   });
 }
-const openCodeActiveCount = computed(() => {
-  if (activeTab.value !== 'opencode') return 0;
+const additiveActiveCount = computed(() => {
+  if (!ADDITIVE_HARNESSES.has(activeTab.value)) return 0;
   return presets.value.filter((preset) => preset.is_active).length;
 });
 const spec = computed<HarnessFormSpec | undefined>(() => formSpecFor(activeTab.value));
@@ -348,13 +365,18 @@ function addModelListItem() {
   formValues.value.models = [...modelListValue(), { id: "" }];
 }
 
-/** model-defs 的协议选择项（OMP models.yml api 取值，与 ompSpec 对齐） */
+/** model-defs 的协议选择项（OMP models.yml api 取值，官方 9 种 transports，与 ompSpec 对齐） */
 function ompApiSelectOptions() {
   return [
     { label: "OpenAI Completions", value: "openai-completions" },
     { label: "OpenAI Responses", value: "openai-responses" },
+    { label: "OpenAI Codex Responses", value: "openai-codex-responses" },
+    { label: "Azure OpenAI Responses", value: "azure-openai-responses" },
     { label: "Anthropic Messages", value: "anthropic-messages" },
+    { label: "Bedrock Converse Stream", value: "bedrock-converse-stream" },
     { label: "Google Gemini", value: "google-generative-ai" },
+    { label: "Google Gemini CLI", value: "google-gemini-cli" },
+    { label: "Google Vertex", value: "google-vertex" },
   ];
 }
 
@@ -369,6 +391,153 @@ function toggleModelInput(index: number, inputType: string, checked: boolean) {
   if (values.length) models[index].input = values;
   else delete models[index].input;
   formValues.value.models = models;
+}
+
+// 档位标签 → token 数：k = ×1024，M = ×1024²（如 "526K" → 538624，"1M" → 1048576；对齐模型池快捷输入）
+function tokenFromLabel(label: string): number {
+  const unit = label.slice(-1).toLowerCase();
+  const num = Number(label.slice(0, -1));
+  if (unit === "m") return Math.round(num * 1024 * 1024);
+  if (unit === "k") return Math.round(num * 1024);
+  return Math.round(num);
+}
+
+// model-defs 快捷档位（点击填入，再点取消；对齐 ModelSquareView tokenFields）
+const modelDefTokenOptions: Record<"contextWindow" | "maxTokens", Array<{ label: string; value: number }>> = {
+  contextWindow: ["128k", "256k", "512k", "1M"].map((label) => ({ label, value: tokenFromLabel(label) })),
+  maxTokens: ["16k", "32k", "64k", "128k"].map((label) => ({ label, value: tokenFromLabel(label) })),
+};
+
+/** model-defs：点击快捷档位填入 token 数，再点相同档位取消（置空） */
+function toggleModelToken(index: number, key: "contextWindow" | "maxTokens", value: number) {
+  const models = modelListValue().map((item) => ({ ...item }));
+  if (!models[index]) return;
+  const current = Number(models[index][key]) || 0;
+  if (current === value) delete models[index][key];
+  else models[index][key] = value;
+  formValues.value.models = models;
+}
+
+/** model-defs：更新单价（cost.input/output/cacheRead/cacheWrite，官方按 1M tokens 计价） */
+function updateModelCost(index: number, key: string, value: number | null) {
+  const models = modelListValue().map((item) => ({ ...item }));
+  if (!models[index]) return;
+  const cost = { ...(models[index].cost && typeof models[index].cost === "object" ? models[index].cost as Record<string, unknown> : {}) };
+  if (value === null || value === undefined || value === 0) delete cost[key];
+  else cost[key] = value;
+  if (Object.keys(cost).length) models[index].cost = cost;
+  else delete models[index].cost;
+  formValues.value.models = models;
+}
+
+/** model-defs：把探测到的元数据一键回填到现有模型定义（仅覆盖探测到的字段） */
+function fillProbeMetadata() {
+  const models = modelListValue().map((item) => ({ ...item }));
+  let filled = 0;
+  for (const model of models) {
+    const meta = ompProbeMeta.value.get(String(model.id || ""));
+    if (!meta) continue;
+    if (meta.contextWindow !== undefined) model.contextWindow = meta.contextWindow;
+    if (meta.maxTokens !== undefined) model.maxTokens = meta.maxTokens;
+    model.reasoning = meta.reasoning;
+    if (meta.input?.length) model.input = [...meta.input];
+    filled += 1;
+  }
+  if (!filled) {
+    message.warning("当前模型定义与探测结果无匹配（请先添加模型或重新探测）");
+    return;
+  }
+  formValues.value.models = models;
+  message.success(`已回填 ${filled} 个模型的探测元数据`);
+}
+
+/**
+ * 模型池默认值缓存：model_name → {contextWindow, maxTokens, reasoning, input}
+ * （来自 list_model_mappings，字段经内置模型目录合并补齐）
+ */
+const poolDefaults = ref<Map<string, { contextWindow?: number; maxTokens?: number; reasoning?: boolean; input?: string[] }>>(new Map());
+const poolDefaultsLoaded = ref(false);
+
+/** 懒加载模型池默认值（仅 OMP 模型编辑器需要时调用一次） */
+async function ensurePoolDefaults(): Promise<boolean> {
+  if (poolDefaultsLoaded.value) return true;
+  try {
+    const mappings = await modelMappingsApi.list();
+    const map = new Map<string, { contextWindow?: number; maxTokens?: number; reasoning?: boolean; input?: string[] }>();
+    for (const item of mappings) {
+      const name = String(item.model_name || "").trim();
+      if (!name) continue;
+      map.set(name, {
+        contextWindow: typeof item.max_context_tokens === "number" && item.max_context_tokens > 0 ? item.max_context_tokens : undefined,
+        maxTokens: typeof item.max_output_tokens === "number" && item.max_output_tokens > 0 ? item.max_output_tokens : undefined,
+        reasoning: item.reasoning === true ? true : undefined,
+        input: Array.isArray(item.input_types) ? (item.input_types as string[]).filter((v) => v === "text" || v === "image") : undefined,
+      });
+    }
+    poolDefaults.value = map;
+    poolDefaultsLoaded.value = true;
+    return true;
+  } catch {
+    message.error("加载模型池默认值失败");
+    return false;
+  }
+}
+
+/** model-defs：从模型池一键填充 contextWindow/maxTokens（含推理/输入类型）默认值 */
+async function fillPoolDefaults() {
+  if (!(await ensurePoolDefaults())) return;
+  const models = modelListValue().map((item) => ({ ...item }));
+  let filled = 0;
+  for (const model of models) {
+    const defaults = poolDefaults.value.get(String(model.id || ""));
+    if (!defaults) continue;
+    if (defaults.contextWindow !== undefined) model.contextWindow = defaults.contextWindow;
+    if (defaults.maxTokens !== undefined) model.maxTokens = defaults.maxTokens;
+    if (defaults.reasoning !== undefined) model.reasoning = defaults.reasoning;
+    if (defaults.input?.length) model.input = [...defaults.input];
+    filled += 1;
+  }
+  if (!filled) {
+    message.warning("模型池中无匹配模型（请先添加模型或确认模型池有该模型）");
+    return;
+  }
+  formValues.value.models = models;
+  message.success(`已从模型池回填 ${filled} 个模型的默认值`);
+}
+
+/** model-defs：更新官方扩展元数据（meta JSON：headers/compat/thinking/defaultTemperature 等）。
+ * 保存时 cleanModelDefs 会把 meta 内字段展开到模型条目顶层（对齐 omp.sh 官方 schema）。 */
+function updateModelMeta(index: number, text: string) {
+  const models = modelListValue().map((item) => ({ ...item }));
+  if (!models[index]) return;
+  const trimmed = text.trim();
+  if (!trimmed) {
+    delete models[index].meta;
+  } else {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("必须为 JSON 对象");
+      }
+      models[index].meta = parsed;
+    } catch {
+      // 保留原值，校验由 save 时 validateStructuredValues 兜底
+      models[index].meta = { __invalid: text };
+    }
+  }
+  formValues.value.models = models;
+}
+
+/** model-defs：模型的 meta JSON 文本（用于编辑器回显） */
+function modelMetaText(model: Record<string, unknown>): string {
+  const meta = model.meta;
+  if (!meta || typeof meta !== "object") return "";
+  if (Array.isArray(meta)) return "";
+  const record = meta as Record<string, unknown>;
+  if ("__invalid" in record) return String(record.__invalid);
+  const keys = ["headers", "compat", "thinking", "defaultTemperature", "defaultTopP", "defaultPresencePenalty", "defaultFrequencyPenalty", "defaultSeed", "imageInputDecoder", "tokenizer", "compactionModel"];
+  const present = Object.fromEntries(keys.filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
+  return Object.keys(present).length ? JSON.stringify(present, null, 2) : "";
 }
 
 function removeModelListItem(index: number) {
@@ -454,6 +623,11 @@ function validateStructuredValues(values: Record<string, unknown>) {
           if (model.maxTokens !== undefined && (!Number.isInteger(Number(model.maxTokens)) || Number(model.maxTokens) <= 0)) {
             throw new Error(`${field.label}的最大输出必须是正整数`);
           }
+          // meta JSON 非法标记（updateModelMeta 解析失败时置 __invalid）在保存时拦截
+          const meta = model.meta;
+          if (meta && typeof meta === "object" && !Array.isArray(meta) && "__invalid" in (meta as Record<string, unknown>)) {
+            throw new Error(`${field.label}「${id}」的高级元数据 JSON 格式错误`);
+          }
         }
       }
     }
@@ -473,17 +647,30 @@ async function fetchModels() {
     fetchingModels.value = true;
     modelsFetched.value = false;
     fetchedModels.value = [];
+    ompProbeMeta.value = new Map();
     try {
       const groups = await discoveryApi.listOmpModels();
-      const all: ProviderModelInfo[] = groups.flatMap((group) =>
-        (group.models || []).map((model) => ({
-          id: String(model.id || ""),
-          object: "model",
-          created: null,
-          owned_by: String(group.provider || "omp"),
-          supported_endpoint_types: [],
-        })),
-      );
+      const all: ProviderModelInfo[] = [];
+      for (const group of groups) {
+        for (const model of group.models || []) {
+          const id = String(model.id || "");
+          if (!id) continue;
+          all.push({
+            id,
+            object: "model",
+            created: null,
+            owned_by: String(group.provider || "omp"),
+            supported_endpoint_types: [],
+          });
+          // 探测元数据缓存（供「填充模型元数据」一键回填 contextWindow/maxTokens/reasoning/input）
+          ompProbeMeta.value.set(id, {
+            contextWindow: typeof model.context_window === "number" && model.context_window > 0 ? model.context_window : undefined,
+            maxTokens: typeof model.max_tokens === "number" && model.max_tokens > 0 ? model.max_tokens : undefined,
+            reasoning: model.reasoning === true,
+            input: Array.isArray(model.input_types) ? (model.input_types as string[]).filter((v) => v === "text" || v === "image") : undefined,
+          });
+        }
+      }
       fetchedModels.value = all;
       modelsFetched.value = true;
       message[all.length ? "success" : "warning"](all.length ? `已探测 ${all.length} 个模型` : "未探测到模型（请确认已安装 OMP）");
@@ -544,18 +731,18 @@ function openEdit(preset: Preset) {
 }
 
 async function activate(preset: Preset) {
-  // opencode 为累加模式（对齐 cc-switch additive）：卡片按钮 = 对该预设独立启停，
-  // 激活加入 opencode.json 的 provider 段、取消激活移出，均不影响其他已激活预设。
+  // opencode / omp 为累加模式（对齐 cc-switch additive）：卡片按钮 = 对该预设独立启停，
+  // 激活加入 live 配置、取消激活移出，均不影响其他已激活预设。
   // 其余应用为单激活整体切换（对齐 cc-switch Claude）：激活项主按钮已禁用为“当前激活”，
   // 此处只会被非激活卡片触发 = 切换到该预设并激活。
-  const isOpenCode = activeTab.value === "opencode";
+  const isAdditive = activeTab.value === "opencode" || activeTab.value === "omp";
   const activating = !preset.is_active;
   try {
-    const result = isOpenCode
+    const result = isAdditive
       ? await presetsApi.setActive(activeTab.value, preset.id, activating)
       : await presetsApi.switch(activeTab.value, preset.id);
     message.success(
-      isOpenCode
+      isAdditive
         ? activating
           ? `已激活「${preset.name}」`
           : `已取消激活「${preset.name}」`
@@ -716,8 +903,8 @@ onMounted(async () => {
           <span class="s-card-title">{{ preset.name }}</span>
           <div class="preset-tags">
             <span v-if="isOfficialPreset(preset)" class="s-badge s-badge--accent">官方</span>
-            <span v-if="preset.is_active && activeTab === 'opencode'" class="s-badge s-badge--success">已激活</span>
-            <span v-else-if="preset.is_active && activeTab !== 'opencode'" class="s-badge s-badge--success">当前</span>
+            <span v-if="preset.is_active && ADDITIVE_HARNESSES.has(activeTab)" class="s-badge s-badge--success">已激活</span>
+            <span v-else-if="preset.is_active && !ADDITIVE_HARNESSES.has(activeTab)" class="s-badge s-badge--success">当前</span>
           </div>
         </div>
         <div class="s-card-body">
@@ -725,9 +912,12 @@ onMounted(async () => {
           <p v-else-if="preset.notes" class="preset-desc">{{ preset.notes }}</p>
           <div class="preset-actions">
             <!-- 单激活应用（claude_code/codex/hermes/gemini_cli）对齐 cc-switch：激活项无“取消激活”，
-                 主按钮禁用显示“当前激活”，切换只能点其他卡片；opencode 为累加模式保留独立启停 -->
-            <NButton v-if="activeTab !== 'opencode' && preset.is_active" size="small" disabled>当前激活</NButton>
-            <NButton v-else size="small" type="primary" ghost @click="activate(preset)">{{ activeTab === "opencode" && preset.is_active ? "取消激活" : "激活" }}</NButton>
+                 主按钮禁用显示“当前激活”，切换只能点其他卡片；opencode/omp 为累加模式保留独立启停。
+                 视觉层次（对齐全局样式语言）：激活 = 主色实心（黑底白字，主操作）；
+                 取消激活 = 次级（中性浅灰，非红非黑），激活态由绿色边框 + “已激活”徽标承载 -->
+            <NButton v-if="!ADDITIVE_HARNESSES.has(activeTab) && preset.is_active" size="small" disabled>当前激活</NButton>
+            <NButton v-else-if="ADDITIVE_HARNESSES.has(activeTab) && preset.is_active" size="small" secondary @click="activate(preset)">取消激活</NButton>
+            <NButton v-else size="small" type="primary" @click="activate(preset)">激活</NButton>
             <!-- 官方直连行：凭据可编辑 + 一键恢复默认，不允许删除 -->
             <template v-if="isOfficialPreset(preset)">
               <NButton size="small" @click="openOfficialEdit(preset)">编辑</NButton>
@@ -852,29 +1042,55 @@ onMounted(async () => {
                 <template v-else-if="field.type === 'model-defs'">
                   <div class="model-list-editor">
                     <div v-for="(model, index) in modelListValue()" :key="index" class="model-defs-row">
-                      <div class="model-defs-line">
-                        <NSelect :value="String(model.id || '')" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" placeholder="选择模型" @update:value="(value) => updateModelListItem(index, 'id', value || '')" />
-                        <NInput :value="String(model.name || '')" placeholder="显示名称（可选）" @update:value="(value) => updateModelListItem(index, 'name', value)" />
-                        <NSelect :value="String(model.api || '')" :options="ompApiSelectOptions()" filterable clearable placeholder="协议" @update:value="(value) => updateModelListItem(index, 'api', value || '')" />
-                        <NButton size="small" quaternary type="error" aria-label="删除模型" @click="removeModelListItem(index)">删除</NButton>
+                      <div class="model-defs-head">
+                        <NSelect class="model-defs-id" :value="String(model.id || '')" :options="modelOptions" filterable clearable :disabled="modelSelectorDisabled" placeholder="选择模型" @update:value="(value) => updateModelListItem(index, 'id', value || '')" />
+                        <NInput class="model-defs-name" :value="String(model.name || '')" placeholder="显示名称（可选）" @update:value="(value) => updateModelListItem(index, 'name', value)" />
+                        <NSelect class="model-defs-api" :value="String(model.api || '')" :options="ompApiSelectOptions()" filterable clearable placeholder="协议" @update:value="(value) => updateModelListItem(index, 'api', value || '')" />
+                        <NButton class="model-defs-delete" size="small" quaternary type="error" aria-label="删除模型" @click="removeModelListItem(index)">删除</NButton>
                       </div>
-                      <div class="model-defs-line model-defs-meta">
+                      <div class="model-defs-cap">
                         <span class="model-defs-tag"><NCheckbox :checked="model.reasoning === true" @update:checked="(value) => updateModelListItem(index, 'reasoning', value)">推理</NCheckbox></span>
                         <span class="model-defs-tag">输入
                           <NCheckbox :checked="((model.input as string[]) || []).includes('text')" @update:checked="(value) => toggleModelInput(index, 'text', value)">文本</NCheckbox>
                           <NCheckbox :checked="((model.input as string[]) || []).includes('image')" @update:checked="(value) => toggleModelInput(index, 'image', value)">图像</NCheckbox>
                         </span>
-                        <span class="model-defs-tag">上下文
-                          <NInputNumber size="small" :value="typeof model.contextWindow === 'number' ? model.contextWindow : null" :min="1" placeholder="tokens" @update:value="(value) => updateModelListItem(index, 'contextWindow', value)" />
-                        </span>
-                        <span class="model-defs-tag">输出
-                          <NInputNumber size="small" :value="typeof model.maxTokens === 'number' ? model.maxTokens : null" :min="1" placeholder="tokens" @update:value="(value) => updateModelListItem(index, 'maxTokens', value)" />
-                        </span>
+                      </div>
+                      <div class="model-defs-grid">
+                        <div class="model-defs-field">
+                          <span class="model-defs-label">上下文</span>
+                          <div class="model-defs-control">
+                            <NInputNumber :value="typeof model.contextWindow === 'number' ? model.contextWindow : null" :min="1" placeholder="tokens" @update:value="(value) => updateModelListItem(index, 'contextWindow', value)" />
+                            <span class="token-options">
+                              <button v-for="opt in modelDefTokenOptions.contextWindow" :key="opt.value" type="button" class="token-option" :class="{ active: model.contextWindow === opt.value }" @click="toggleModelToken(index, 'contextWindow', opt.value)">{{ opt.label }}</button>
+                            </span>
+                          </div>
+                        </div>
+                        <div class="model-defs-field">
+                          <span class="model-defs-label">输出</span>
+                          <div class="model-defs-control">
+                            <NInputNumber :value="typeof model.maxTokens === 'number' ? model.maxTokens : null" :min="1" placeholder="tokens" @update:value="(value) => updateModelListItem(index, 'maxTokens', value)" />
+                            <span class="token-options">
+                              <button v-for="opt in modelDefTokenOptions.maxTokens" :key="opt.value" type="button" class="token-option" :class="{ active: model.maxTokens === opt.value }" @click="toggleModelToken(index, 'maxTokens', opt.value)">{{ opt.label }}</button>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="model-defs-cost">
+                        <span class="model-defs-label">单价(1M)</span>
+                        <NInputNumber :value="Number((model.cost as Record<string, unknown> | undefined)?.input) || null" :min="0" step="0.01" placeholder="输入 $" @update:value="(value) => updateModelCost(index, 'input', value)" />
+                        <NInputNumber :value="Number((model.cost as Record<string, unknown> | undefined)?.output) || null" :min="0" step="0.01" placeholder="输出 $" @update:value="(value) => updateModelCost(index, 'output', value)" />
+                        <NInputNumber :value="Number((model.cost as Record<string, unknown> | undefined)?.cacheRead) || null" :min="0" step="0.01" placeholder="读缓存 $" @update:value="(value) => updateModelCost(index, 'cacheRead', value)" />
+                        <NInputNumber :value="Number((model.cost as Record<string, unknown> | undefined)?.cacheWrite) || null" :min="0" step="0.01" placeholder="写缓存 $" @update:value="(value) => updateModelCost(index, 'cacheWrite', value)" />
+                      </div>
+                      <div class="model-defs-advanced">
+                        <NInput type="textarea" :value="modelMetaText(model)" placeholder="高级元数据 JSON（可选）：headers / compat / thinking / imageInputDecoder / tokenizer / compactionModel / defaultTemperature / defaultTopP / defaultPresencePenalty / defaultFrequencyPenalty / defaultSeed" size="small" :autosize="{ minRows: 1, maxRows: 3 }" @update:value="(value) => updateModelMeta(index, value)" />
                       </div>
                     </div>
                     <div class="model-defs-actions">
                       <NButton size="small" dashed :disabled="modelSelectorDisabled" @click="addModelListItem">添加模型</NButton>
                       <NButton size="small" secondary :loading="fetchingModels" @click="fetchModels">从 OMP 探测导入</NButton>
+                      <NButton size="small" tertiary :disabled="ompProbeMeta.size === 0 || modelListValue().length === 0" @click="fillProbeMetadata">填充探测元数据</NButton>
+                      <NButton size="small" tertiary :disabled="modelListValue().length === 0" @click="fillPoolDefaults">填充模型池默认值</NButton>
                     </div>
                   </div>
                 </template>
@@ -1074,7 +1290,8 @@ onMounted(async () => {
   flex: 0 0 auto;
 }
 
-/* OMP 结构化模型定义编辑器：两行布局（首行 id/名称/协议，次行元数据） */
+/* OMP 结构化模型定义编辑器：头部（id/名称/协议/删除）→ 能力（推理/输入）→
+   规格 grid（上下文/输出，各带快捷档位）→ 单价 → 高级元数据 */
 .model-defs-row {
   display: flex;
   flex-direction: column;
@@ -1084,31 +1301,87 @@ onMounted(async () => {
   border-radius: var(--radius);
 }
 
-.model-defs-line {
+.model-defs-head {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
   align-items: center;
 }
 
-.model-defs-line > :nth-child(1) {
+.model-defs-head .model-defs-id {
   flex: 2 1 160px;
 }
 
-.model-defs-line > :nth-child(2) {
+.model-defs-head .model-defs-name {
   flex: 1 1 140px;
 }
 
-.model-defs-line > :nth-child(3) {
+.model-defs-head .model-defs-api {
   flex: 0 0 180px;
 }
 
-.model-defs-line > :nth-child(4) {
+/* 删除按钮固定在行尾（不再被 flex-wrap 挤到下一行悬空） */
+.model-defs-head .model-defs-delete {
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
-.model-defs-meta {
+/* 能力行：推理 / 输入[文本,图像] 紧凑靠左 */
+.model-defs-cap {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-3);
+  align-items: center;
+}
+
+/* 规格 grid：上下文 / 输出 两列，各自「标签 + 输入框 + 快捷档位」垂直排布 */
+.model-defs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.model-defs-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.model-defs-label {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.model-defs-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.model-defs-control .n-input-number {
+  width: 140px;
+}
+
+/* 单价行：标签 + 4 个数字输入横排 */
+.model-defs-cost {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.model-defs-cost .n-input-number {
+  width: 110px;
+}
+
+.model-defs-advanced {
+  padding-top: var(--sp-1);
+}
+
+.model-defs-advanced .n-input {
+  width: 100%;
 }
 
 .model-defs-tag {
@@ -1120,8 +1393,34 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
-.model-defs-tag .n-input-number {
-  width: 110px;
+/* 快捷 token 档位（对齐模型池 ModelSquareView token-options）：点击填入、再点取消 */
+.token-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.token-option {
+  font-size: 12px;
+  padding: 3px var(--sp-2);
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all var(--transition);
+  font-weight: 500;
+}
+
+.token-option:hover {
+  border-color: var(--fg);
+  color: var(--fg);
+}
+
+.token-option.active {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
 }
 
 .model-defs-actions {
