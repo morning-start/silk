@@ -23,6 +23,11 @@ jobs:
   publish-tauri:
     strategy:
       fail-fast: false
+      # tauri-action 的 latest.json 更新是非原子 read-merge-upload：4 平台并行发布
+      # 会竞态（delete-then-upload：A 删除重传后 B 再删已删 asset → 404，间歇性失败，
+      # 见 tauri-apps/tauri-action#1270/#1197）。retryAttempts 无法消除竞态，
+      # 串行化 matrix 是可靠修复（社区验证，如 VoltiusApp/voltius、CallumWatkins/worth）。
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -48,7 +53,7 @@ jobs:
         run: git config --global core.autocrlf false
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # 前置校验：没有签名私钥时 tauri-action 会跳过 .sig 与 latest.json 的上传，
       # 构建却是绿色的 —— 结果就是客户端「检查更新」一直拿不到更新清单。
