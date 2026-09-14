@@ -108,9 +108,11 @@ function applyChannelFill(channelId: string | null) {
     message.warning("该 Agent 类型不支持渠道快速填充");
     return;
   }
-  // 端点：claude_code 自动去除尾部 /v1（与表单 toSettings 行为一致），其余按原样填入
-  let endpoint = (channel.api_base_url || "").trim();
-  if (activeTab.value === "claude_code") endpoint = endpoint.replace(/\/+$/, "").replace(/\/v1$/i, "");
+  // 端点：claude_code 自动去除尾部 /v1（与表单 toSettings 行为一致）；
+  // codex 直接请求 base_url + /responses，渠道存的是无 /v1 的规范形式 → 自动补 /v1
+  let endpoint = (channel.api_base_url || "").trim().replace(/\/+$/, "");
+  if (activeTab.value === "claude_code") endpoint = endpoint.replace(/\/v1$/i, "");
+  else if (activeTab.value === "codex" && endpoint && !/\/v1$/i.test(endpoint)) endpoint += "/v1";
   // Key：优先取启用中的第一个，其次取第一个
   const apiKey = channel.keys.find((key) => key.enabled)?.value ?? channel.keys[0]?.value ?? "";
   // 自动将渠道名填入预设名称

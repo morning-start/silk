@@ -168,6 +168,7 @@ curl -m 10 http://127.0.0.1:1877/v1/messages \
 - **UI 文本**: 中文；代码注释中英文均可
 - **中间件**: `middleware/` 下独立模块，统一 `run(ctx) → Result` 签名
 - **无前端测试框架**，无 CI/CD
+- **预设端点自动补全**: 仅渠道快速填充时做协议适配（如 codex 自动补 `/v1`、claude_code 自动去 `/v1`），以用户为准 —— 用户手动修改的端点不做任何规范化改写（`toSettings` 原样透传）
 
 ## Constraints
 
