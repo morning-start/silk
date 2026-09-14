@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from "vue";
 import { NButton, NCheckbox, NInput, NInputNumber, NModal, NSelect, useMessage } from "naive-ui";
 import { presetsApi } from "../api/presets";
 import { providersApi } from "../api/providers";
-import { discoveryApi } from "../api/discovery";
 import { modelMappingsApi } from "../api/model-mappings";
 import type { AgentTypeInfo, Preset, Provider, ProviderModelInfo } from "../api";
 import { formSpecFor, officialCredentialFields, type HarnessField, type HarnessFormSpec } from "../config/harnessForms";
@@ -24,8 +23,6 @@ const formValues = ref<Record<string, unknown>>({});
 const fetchedModels = ref<ProviderModelInfo[]>([]);
 const modelsFetched = ref(false);
 const fetchingModels = ref(false);
-/** OMP 探测元数据缓存：id → {contextWindow, maxTokens, reasoning, input}（来自 `omp --list-models`） */
-const ompProbeMeta = ref<Map<string, { contextWindow?: number; maxTokens?: number; reasoning: boolean; input?: string[] }>>(new Map());
 const draggingId = ref<string | null>(null);
 // 官方直连行编辑（仅凭据可填）+ 恢复默认
 const officialModal = ref(false);
@@ -430,27 +427,6 @@ function updateModelCost(index: number, key: string, value: number | null) {
   formValues.value.models = models;
 }
 
-/** model-defs：把探测到的元数据一键回填到现有模型定义（仅覆盖探测到的字段） */
-function fillProbeMetadata() {
-  const models = modelListValue().map((item) => ({ ...item }));
-  let filled = 0;
-  for (const model of models) {
-    const meta = ompProbeMeta.value.get(String(model.id || ""));
-    if (!meta) continue;
-    if (meta.contextWindow !== undefined) model.contextWindow = meta.contextWindow;
-    if (meta.maxTokens !== undefined) model.maxTokens = meta.maxTokens;
-    model.reasoning = meta.reasoning;
-    if (meta.input?.length) model.input = [...meta.input];
-    filled += 1;
-  }
-  if (!filled) {
-    message.warning("当前模型定义与探测结果无匹配（请先添加模型或重新探测）");
-    return;
-  }
-  formValues.value.models = models;
-  message.success(`已回填 ${filled} 个模型的探测元数据`);
-}
-
 /**
  * 模型池默认值缓存：model_name → {contextWindow, maxTokens, reasoning, input}
  * （来自 list_model_mappings，字段经内置模型目录合并补齐）
@@ -638,50 +614,11 @@ function endpointCredentials() {
   if (activeTab.value === "claude_code") return { baseUrl: String(form.ANTHROPIC_BASE_URL || ""), apiKey: String(form.ANTHROPIC_AUTH_TOKEN || "") };
   if (activeTab.value === "opencode") return { baseUrl: String(form.baseURL || ""), apiKey: String(form.apiKey || "") };
   if (activeTab.value === "gemini_cli") return { baseUrl: String(form.GOOGLE_GEMINI_BASE_URL || ""), apiKey: String(form.GEMINI_API_KEY || "") };
+  if (activeTab.value === "omp") return { baseUrl: String(form.baseUrl || ""), apiKey: String(form.apiKey || "") };
   return { baseUrl: String(form.base_url || ""), apiKey: String(form.api_key || "") };
 }
 
 async function fetchModels() {
-  // OMP：走 `omp --list-models` 本机探测（无需端点/Key），探测结果填入模型定义
-  if (activeTab.value === "omp") {
-    fetchingModels.value = true;
-    modelsFetched.value = false;
-    fetchedModels.value = [];
-    ompProbeMeta.value = new Map();
-    try {
-      const groups = await discoveryApi.listOmpModels();
-      const all: ProviderModelInfo[] = [];
-      for (const group of groups) {
-        for (const model of group.models || []) {
-          const id = String(model.id || "");
-          if (!id) continue;
-          all.push({
-            id,
-            object: "model",
-            created: null,
-            owned_by: String(group.provider || "omp"),
-            supported_endpoint_types: [],
-          });
-          // 探测元数据缓存（供「填充模型元数据」一键回填 contextWindow/maxTokens/reasoning/input）
-          ompProbeMeta.value.set(id, {
-            contextWindow: typeof model.context_window === "number" && model.context_window > 0 ? model.context_window : undefined,
-            maxTokens: typeof model.max_tokens === "number" && model.max_tokens > 0 ? model.max_tokens : undefined,
-            reasoning: model.reasoning === true,
-            input: Array.isArray(model.input_types) ? (model.input_types as string[]).filter((v) => v === "text" || v === "image") : undefined,
-          });
-        }
-      }
-      fetchedModels.value = all;
-      modelsFetched.value = true;
-      message[all.length ? "success" : "warning"](all.length ? `已探测 ${all.length} 个模型` : "未探测到模型（请确认已安装 OMP）");
-    } catch (error: any) {
-      message.error(error?.message || "探测 OMP 模型失败");
-    } finally {
-      fetchingModels.value = false;
-    }
-    return;
-  }
-
   const { baseUrl, apiKey } = endpointCredentials();
   if (!baseUrl.trim() || !apiKey.trim()) {
     message.warning("请先填写 API 端点与 API Key");
@@ -1088,8 +1025,7 @@ onMounted(async () => {
                     </div>
                     <div class="model-defs-actions">
                       <NButton size="small" dashed :disabled="modelSelectorDisabled" @click="addModelListItem">添加模型</NButton>
-                      <NButton size="small" secondary :loading="fetchingModels" @click="fetchModels">从 OMP 探测导入</NButton>
-                      <NButton size="small" tertiary :disabled="ompProbeMeta.size === 0 || modelListValue().length === 0" @click="fillProbeMetadata">填充探测元数据</NButton>
+                      <NButton size="small" secondary :loading="fetchingModels" @click="fetchModels">获取模型</NButton>
                       <NButton size="small" tertiary :disabled="modelListValue().length === 0" @click="fillPoolDefaults">填充模型池默认值</NButton>
                     </div>
                   </div>

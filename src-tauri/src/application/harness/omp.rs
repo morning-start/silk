@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 use crate::application::config_writer::ConfigFormat;
 use async_trait::async_trait;
@@ -230,112 +229,6 @@ impl super::HarnessWriter for OmpWriter {
     }
 }
 
-/// 调用 `omp --list-models` 探测模型（3 秒超时；未安装/失败/超时均返回空）。
-/// 返回 [{provider, models: [{id, name, context_window, max_tokens, reasoning, input_types}]}]
-pub fn probe_omp_models() -> Vec<serde_json::Value> {
-    for executable in omp_executable_candidates() {
-        let mut command = Command::new(executable);
-        command.arg("--list-models");
-        #[cfg(windows)]
-        command.creation_flags(CREATE_NO_WINDOW);
-
-        if let Ok(output) = run_with_timeout(command, Duration::from_secs(3)) {
-            if output.status.success() {
-                let parsed = parse_omp_list_models(&String::from_utf8_lossy(&output.stdout));
-                if !parsed.is_empty() {
-                    return parsed;
-                }
-            }
-        }
-    }
-    Vec::new()
-}
-
-fn run_with_timeout(mut command: Command, timeout: Duration) -> std::io::Result<std::process::Output> {
-    let mut child = command.spawn()?;
-    let started = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return child.wait_with_output().map(|mut out| {
-                out.status = status;
-                out
-            });
-        }
-        if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "omp --list-models timed out",
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-/// 解析 `omp --list-models` 输出（对齐 omp-switch parse_omp_list_models）：
-/// 表头 "provider model context max-out thinking images"，逐行解析。
-pub fn parse_omp_list_models(output: &str) -> Vec<serde_json::Value> {
-    use std::collections::BTreeMap;
-
-    let mut in_provider_table = false;
-    let mut by_provider: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
-    for raw in output.lines() {
-        let line = raw.trim();
-        if line == "Provider models" {
-            in_provider_table = true;
-            continue;
-        }
-        if !in_provider_table || line.is_empty() || line.starts_with("provider ") {
-            continue;
-        }
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 6 {
-            continue;
-        }
-        let provider_id = parts[0].to_string();
-        let model_id = parts[1].to_string();
-        let mut input_types = vec!["text".to_string()];
-        if parts[5] == "yes" {
-            input_types.push("image".to_string());
-        }
-        let mut model = serde_json::Map::new();
-        model.insert("id".to_string(), serde_json::json!(model_id));
-        model.insert(
-            "context_window".to_string(),
-            serde_json::json!(parse_k_number(parts[2])),
-        );
-        model.insert(
-            "max_tokens".to_string(),
-            serde_json::json!(parse_k_number(parts[3])),
-        );
-        model.insert(
-            "reasoning".to_string(),
-            serde_json::json!(parts[4] != "-"),
-        );
-        model.insert("input_types".to_string(), serde_json::json!(input_types));
-        by_provider
-            .entry(provider_id)
-            .or_default()
-            .push(serde_json::Value::Object(model));
-    }
-    by_provider
-        .into_iter()
-        .map(|(id, models)| {
-            serde_json::json!({ "provider": id, "models": models })
-        })
-        .collect()
-}
-
-fn parse_k_number(value: &str) -> i64 {
-    let n = value.trim_end_matches('K').parse::<f64>().unwrap_or(0.0);
-    if value.ends_with('K') {
-        (n * 1000.0).round() as i64
-    } else {
-        n.round() as i64
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,28 +238,6 @@ mod tests {
     /// 本机若装有 omp，`omp config path` 会命中真实配置目录，必须用 env 隔离。
     /// 共享 harness 模块的 ENV_LOCK（与 preset_service 测试共用，避免并行 env 竞争）。
     use crate::application::harness::ENV_LOCK;
-
-    #[test]
-    fn parses_provider_models_table() {
-        let text = "Provider models\nprovider model context max-out thinking images\ngithub-copilot gpt-5.5 400K 128K low,medium,high,xhigh yes\ngithub-copilot gpt-4 33K 4.1K - no\n";
-        let providers = parse_omp_list_models(text);
-        assert_eq!(providers.len(), 1);
-        assert_eq!(providers[0]["provider"], "github-copilot");
-        let models = providers[0]["models"].as_array().unwrap();
-        assert_eq!(models[0]["context_window"], 400000);
-        assert_eq!(models[0]["max_tokens"], 128000);
-        assert_eq!(models[0]["reasoning"], true);
-        assert_eq!(models[1]["reasoning"], false);
-        assert!(models[0]["input_types"].as_array().unwrap().contains(&serde_json::json!("image")));
-    }
-
-    #[test]
-    fn probe_returns_empty_when_omp_missing() {
-        // 未安装 omp 时：候选命令 spawn 失败 → 返回空，不 panic
-        let result = probe_omp_models();
-        // 本机若真装了 omp 则可能有数据；断言类型而非内容
-        assert!(result.is_empty() || result.iter().all(|v| v.get("provider").is_some()));
-    }
 
     /// 构造临时 home 目录 + 预置 models.yml（含一个未管理 provider），
     /// 并设置 `PI_CODING_AGENT_DIR` 指向临时 agent 目录（避免命中真实 omp 配置）。
