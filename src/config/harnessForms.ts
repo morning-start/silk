@@ -98,14 +98,19 @@ function cleanModelDefs(value: unknown): Array<Record<string, unknown>> {
       }
       if (Number(item.contextWindow) > 0) def.contextWindow = Number(item.contextWindow);
       if (Number(item.maxTokens) > 0) def.maxTokens = Number(item.maxTokens);
+      // 官方 ModelDefinitionSchema：cost 一旦出现必须四键齐全（input/output/cacheRead/
+      // cacheWrite），缺任一键整个 models.yml 校验失败 → 补齐缺失键为 0（免费价合法）。
       const cost = object(item.cost);
-      if (Object.keys(cost).length) {
+      const defined = ["input", "output", "cacheRead", "cacheWrite"].filter((k) => {
+        const n = Number(cost[k]);
+        return cost[k] !== undefined && cost[k] !== null && cost[k] !== "" && Number.isFinite(n) && n >= 0;
+      });
+      if (defined.length) {
         const cleanCost: Record<string, number> = {};
-        for (const [k, v] of Object.entries(cost)) {
-          const n = Number(v);
-          if (Number.isFinite(n) && n > 0) cleanCost[k] = n;
+        for (const k of ["input", "output", "cacheRead", "cacheWrite"]) {
+          cleanCost[k] = defined.includes(k) ? Number(cost[k]) : 0;
         }
-        if (Object.keys(cleanCost).length) def.cost = cleanCost;
+        def.cost = cleanCost;
       }
       // 官方扩展字段（meta JSON）：headers/compat/thinking/defaultTemperature/
       // defaultTopP/defaultPresencePenalty/defaultFrequencyPenalty/defaultSeed/

@@ -34,6 +34,11 @@ const channels = ref<Provider[]>([]);
 const channelsLoading = ref(false);
 const channelFillId = ref<string | null>(null);
 const channelFillHint = ref<string | null>(null);
+// 渠道填充的模型列表来源渠道 id（真实请求 /v1/models 后清空）；用于"短时间内连按两次才发请求"
+const modelsFromChannel = ref<string | null>(null);
+const lastModelsActionAt = ref(0);
+/** 渠道填充后，该窗口内的再次点击「获取模型」视为明确要求实时刷新 */
+const CHANNEL_REFETCH_WINDOW_MS = 3000;
 
 /** 各 harness 表单的端点/Key 字段 + 原生协议（对齐 harnessForms.ts 字段契约与 AgentType 能力表） */
 const channelFillTargets: Record<string, { endpointKey: string; apiKeyField: string; nativeProtocols: string[] }> = {
@@ -65,6 +70,13 @@ const OMP_API_BY_PROTOCOL: Record<string, string> = {
   messages: "anthropic-messages",
   gemini: "google-generative-ai",
 };
+/** 渠道协议 → OMP api 取值（models.yml provider/model 级 api，对齐 ompSpec 9 种 transports） */
+function ompApiForChannel(channel: Provider): string | undefined {
+  return channel.protocols.map((protocol) => OMP_API_BY_PROTOCOL[protocol]).find(Boolean);
+}
+/** omp 源码中直接拼接 {baseUrl}/chat/completions、{baseUrl}/responses 的 OpenAI 系 transports：
+ *  baseUrl 必须带 /v1；其余原样透传（anthropic-messages 由 SDK 自行剥/拼，google 系自带版本段）。 */
+const OMP_OPENAI_FAMILY_APIS = new Set(["openai-completions", "openai-responses", "openai-codex-responses", "azure-openai-responses"]);
 const channelOptions = computed(() =>
   channels.value.map((channel) => ({
     label: channel.protocols.length ? `${channel.name}（${channel.protocols.join("/")}）` : channel.name,
@@ -109,10 +121,18 @@ function applyChannelFill(channelId: string | null) {
     return;
   }
   // 端点：claude_code 自动去除尾部 /v1（与表单 toSettings 行为一致）；
-  // codex 直接请求 base_url + /responses，渠道存的是无 /v1 的规范形式 → 自动补 /v1
+  // codex 直接请求 base_url + /responses，渠道存的是无 /v1 的规范形式 → 自动补 /v1；
+  // omp 按 transport 的实际拼 URL 规则处理：
+  //   OpenAI 系（completions/responses/codex/azure）拼 {baseUrl}/chat/completions、
+  //     {baseUrl}/responses → 必须带 /v1（缺则补）；
+  //   anthropic-messages → SDK 先剥尾部 /v1 再拼 /v1/messages → 不补；
+  //   google 系 baseUrl 自带版本段（v1beta / v1/projects/…）→ 原样透传，不做改写。
   let endpoint = (channel.api_base_url || "").trim().replace(/\/+$/, "");
+  const ompApi = activeTab.value === "omp" ? ompApiForChannel(channel) : undefined;
+  const ompNeedsV1 = ompApi !== undefined && OMP_OPENAI_FAMILY_APIS.has(ompApi);
   if (activeTab.value === "claude_code") endpoint = endpoint.replace(/\/v1$/i, "");
   else if (activeTab.value === "codex" && endpoint && !/\/v1$/i.test(endpoint)) endpoint += "/v1";
+  else if (ompNeedsV1 && endpoint && !/\/v1$/i.test(endpoint)) endpoint += "/v1";
   // Key：优先取启用中的第一个，其次取第一个
   const apiKey = channel.keys.find((key) => key.enabled)?.value ?? channel.keys[0]?.value ?? "";
   // 自动将渠道名填入预设名称
@@ -128,16 +148,25 @@ function applyChannelFill(channelId: string | null) {
     const mode = channel.protocols.map((protocol) => HERMES_MODE_BY_PROTOCOL[protocol]).find(Boolean);
     if (mode) formValues.value.api_mode = mode;
   }
-  if (activeTab.value === "omp") {
-    const api = channel.protocols.map((protocol) => OMP_API_BY_PROTOCOL[protocol]).find(Boolean);
-    if (api) formValues.value.api = api;
-  }
+  if (ompApi) formValues.value.api = ompApi;
   // 协议兼容提示：单协议 harness 若渠道协议不含原生协议，直连会失败
   const compatible = channel.protocols.length === 0 || channel.protocols.some((protocol) => target.nativeProtocols.includes(protocol));
   if (!compatible) {
     channelFillHint.value = `该渠道协议为 ${channel.protocols.join("/")}，与 ${tabLabel(activeTab.value)} 原生协议（${target.nativeProtocols.join("/")}）不匹配，直连可能失败；经 silk 网关转换则无此问题`;
   }
-  message.success(`已从渠道「${channel.name}」填充名称、端点与 Key，可点击「获取模型」加载模型列表`);
+  // 模型列表：直接用渠道已保存的列表，不发 /v1/models 请求（是否实时刷新由用户连按两次决定）
+  const models = channel.models.map((id) => ({ id, object: null, created: null, owned_by: channel.name, supported_endpoint_types: [] }));
+  modelsFromChannel.value = channel.id;
+  lastModelsActionAt.value = Date.now();
+  if (models.length > 0) {
+    fetchedModels.value = models;
+    modelsFetched.value = true;
+  } else {
+    fetchedModels.value = [];
+    modelsFetched.value = false;
+  }
+  const modelNote = models.length > 0 ? `模型列表（${models.length} 个，来自渠道配置）` : "模型列表为空";
+  message.success(`已从渠道「${channel.name}」填充名称、端点、Key 与${modelNote}`);
   channelFillId.value = null; // 每次选择后复位，便于再次选择
 }
 
@@ -422,7 +451,9 @@ function updateModelCost(index: number, key: string, value: number | null) {
   const models = modelListValue().map((item) => ({ ...item }));
   if (!models[index]) return;
   const cost = { ...(models[index].cost && typeof models[index].cost === "object" ? models[index].cost as Record<string, unknown> : {}) };
-  if (value === null || value === undefined || value === 0) delete cost[key];
+  // 0 是合法的显式免费价（官方示例 cost 全 0），不再当作清空删除；
+  // 保存时 cleanModelDefs 会把部分填写的单价补齐为官方 schema 要求的四键。
+  if (value === null || value === undefined) delete cost[key];
   else cost[key] = value;
   if (Object.keys(cost).length) models[index].cost = cost;
   else delete models[index].cost;
@@ -626,12 +657,24 @@ async function fetchModels() {
     message.warning("请先填写 API 端点与 API Key");
     return;
   }
+  // 渠道填充的模型列表已就位时，短时间内连按两次才发 /v1/models 请求（第一次点击只提示，避免误触发上游请求）
+  const now = Date.now();
+  const withinWindow = now - lastModelsActionAt.value <= CHANNEL_REFETCH_WINDOW_MS;
+  lastModelsActionAt.value = now;
+  if (modelsFromChannel.value && modelsFetched.value && !withinWindow) {
+    message.info("模型列表已来自渠道配置，如需实时刷新请再点一次「获取模型」");
+    return;
+  }
+  if (modelsFromChannel.value && modelsFetched.value && withinWindow) {
+    message.info("正在实时刷新模型列表…");
+  }
   fetchingModels.value = true;
   modelsFetched.value = false;
   fetchedModels.value = [];
   try {
     fetchedModels.value = await providersApi.fetchModels({ api_base_url: baseUrl.trim(), api_key: apiKey.trim(), timeout_seconds: 10 });
     modelsFetched.value = true;
+    modelsFromChannel.value = null; // 已发真实请求，列表不再来自渠道配置
     message[fetchedModels.value.length ? "success" : "warning"](fetchedModels.value.length ? `已获取 ${fetchedModels.value.length} 个模型` : "未获取到模型");
   } catch (error: any) {
     message.error(error?.message || "获取模型失败");
@@ -640,6 +683,24 @@ async function fetchModels() {
   }
 }
 
+/** omp 官方必填校验（docs/models.md）：带 models 的 provider 需 baseUrl + apiKey（除非 auth:none）
+ *  + api（provider 级或每个模型都声明）；缺失时 omp 会静默跳过整个 provider。 */
+function validateOmpRequired(values: Record<string, unknown>) {
+  const models = Array.isArray(values.models) ? values.models : [];
+  if (models.length === 0) return; // 纯 override-only provider 无 models 时官方要求更宽松，不在此拦截
+  if (!String(values.baseUrl ?? "").trim()) throw new Error("API 端点必填：omp 对带模型定义的 provider 会因缺少 baseUrl 而跳过加载");
+  const providerApi = String(values.api ?? "").trim();
+  if (!providerApi) {
+    const missing = models.filter((item) => !String((item as Record<string, unknown>)?.api ?? "").trim());
+    if (missing.length) throw new Error("协议必填：请在顶部「协议」选择一次，或为每个模型单独指定（omp 缺少 api 会跳过该 provider）");
+  }
+  // 对齐 omp validateProviderConfiguration：auth 为 none / oauth 时 apiKey 可缺省
+  // （oauth 由 omp 登录态解析凭据；留空 = 使用 CLI 官方登录）
+  const auth = String(values.auth ?? "").trim() || "apiKey";
+  if (auth !== "none" && auth !== "oauth" && !String(values.apiKey ?? "").trim()) {
+    throw new Error("API Key 必填（认证方式为 none 或 oauth 时可留空）");
+  }
+}
 async function openAdd() {
   editingId.value = null;
   formName.value = "";
@@ -708,6 +769,7 @@ async function save(activateAfter: boolean) {
   try {
     const values = parseStructuredValues();
     validateStructuredValues(values);
+    if (activeTab.value === "omp") validateOmpRequired(values);
     settings = spec.value.toSettings(values);
   } catch (error: any) {
     message.error(error?.message || "高级配置格式错误");
