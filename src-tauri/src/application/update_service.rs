@@ -220,8 +220,16 @@ fn build_update_info(current_version: &str, release: GhRelease) -> UpdateInfo {
 }
 
 /// 构建 HTTP 客户端；`proxy_url` 非空时全程走代理
-fn build_client(proxy_url: Option<&str>) -> Result<reqwest::Client, ServiceError> {
-    let mut builder = reqwest::Client::builder().timeout(REQUEST_TIMEOUT);
+pub(crate) fn build_client(proxy_url: Option<&str>) -> Result<reqwest::Client, ServiceError> {
+    build_client_with_timeout(proxy_url, REQUEST_TIMEOUT)
+}
+
+/// 同上，但可指定超时（内核下载体积较大，需要比元数据请求宽松得多）
+pub(crate) fn build_client_with_timeout(
+    proxy_url: Option<&str>,
+    timeout: Duration,
+) -> Result<reqwest::Client, ServiceError> {
+    let mut builder = reqwest::Client::builder().timeout(timeout);
 
     if let Some(proxy) = proxy_url.map(str::trim).filter(|p| !p.is_empty()) {
         let proxy = reqwest::Proxy::all(proxy).map_err(|e| ServiceError::Internal {
@@ -239,7 +247,7 @@ fn build_client(proxy_url: Option<&str>) -> Result<reqwest::Client, ServiceError
 }
 
 /// 给常见的非 2xx 状态补一句可操作的原因
-fn github_error_hint(status: reqwest::StatusCode, body: &str) -> String {
+pub(crate) fn github_error_hint(status: reqwest::StatusCode, body: &str) -> String {
     if status == reqwest::StatusCode::FORBIDDEN && body.contains("rate limit") {
         return "GitHub API 匿名调用额度已用尽（每小时 60 次），稍后再试".to_string();
     }
@@ -254,7 +262,7 @@ fn github_error_hint(status: reqwest::StatusCode, body: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// 去掉标签/版本号可能的 `v` 前缀
-fn strip_tag_prefix(tag: &str) -> String {
+pub(crate) fn strip_tag_prefix(tag: &str) -> String {
     tag.trim().trim_start_matches(['v', 'V']).to_string()
 }
 

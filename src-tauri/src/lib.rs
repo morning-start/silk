@@ -421,6 +421,11 @@ pub fn run() {
             commands::presets::update_preset_order,
             // 软件更新（GitHub Releases REST API）
             commands::updater::check_app_update,
+            // 协议内核（prism.wasm）下载与更新
+            commands::kernel::get_kernel_status,
+            commands::kernel::check_kernel_update,
+            commands::kernel::install_kernel_update,
+            commands::kernel::restart_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

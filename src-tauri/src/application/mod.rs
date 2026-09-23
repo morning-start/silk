@@ -8,6 +8,7 @@ pub mod crud_macro;
 pub mod gateway_key_service;
 pub mod gateway_service;
 pub mod harness;
+pub mod kernel_service;
 pub mod log_service;
 pub mod model_catalog;
 pub mod model_fetcher;

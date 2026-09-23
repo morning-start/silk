@@ -30,26 +30,85 @@ use wasmtime_wasi::WasiCtxBuilder;
 /// 编译时嵌入的 prism.wasm 字节（兜底，确保开箱即用）
 const PRISM_WASM_EMBEDDED: &[u8] = include_bytes!("../../prism.wasm");
 
-/// 运行时加载 prism.wasm：优先从应用数据目录读取，不存在则使用嵌入版本。
-///
-/// 这样更新 wasm 只需替换文件并重启应用，无需重新编译。
-fn load_prism_wasm() -> Vec<u8> {
-    // 尝试从可执行文件同目录加载
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let wasm_path = exe_dir.join("prism.wasm");
-            if let Ok(bytes) = std::fs::read(&wasm_path) {
-                tracing::info!("从外部文件加载 prism.wasm: {}", wasm_path.display());
-                return bytes;
-            }
+/// 内核文件名（三个来源位置统一使用）
+pub const PRISM_WASM_FILE: &str = "prism.wasm";
+
+/// 当前 ABI 版本：宿主兼容的导出签名版本。新内核 `wasm_abi_version()` 返回值
+/// 必须与此相等才允许安装（ABI 变更意味着导出签名变了，装上会让网关直接报错）。
+pub const SUPPORTED_ABI: &str = "1";
+
+/// prism.wasm 的实际来源位置
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WasmSource {
+    /// 可执行文件同目录（优先级最高，通常由安装包分发）
+    ExeDir,
+    /// 应用数据目录（内核下载功能的写入目标）
+    DataDir,
+    /// 编译时内嵌（兜底，保证开箱即用）
+    Embedded,
+}
+
+impl WasmSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExeDir => "exe_dir",
+            Self::DataDir => "data_dir",
+            Self::Embedded => "embedded",
         }
     }
-    // 尝试从应用数据目录加载
-    if let Some(data_dir) = crate::get_settings_path().and_then(|p| p.parent()) {
-        let wasm_path = data_dir.join("prism.wasm");
-        if let Ok(bytes) = std::fs::read(&wasm_path) {
-            tracing::info!("从数据目录加载 prism.wasm: {}", wasm_path.display());
-            return bytes;
+}
+
+/// 可执行文件同目录下的 prism.wasm 路径（不存在则为 None）
+pub fn exe_dir_wasm_path() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let path = exe.parent()?.join(PRISM_WASM_FILE);
+    path.exists().then_some(path)
+}
+
+/// 应用数据目录下的 prism.wasm 路径（内核下载的写入目标；不要求已存在）
+pub fn data_dir_wasm_path() -> Option<std::path::PathBuf> {
+    crate::get_settings_path()
+        .and_then(|p| p.parent())
+        .map(|dir| dir.join(PRISM_WASM_FILE))
+}
+
+/// 解析内核来源与实际加载路径。
+///
+/// 优先级与 `load_prism_wasm` 保持一致：可执行文件同目录 → 应用数据目录 → 内嵌。
+/// 内核下载功能据此判断写入 AppData 是否真的会生效：若 exe 目录已存在
+/// prism.wasm，它会一直抢占加载权，写 AppData 将静默无效。
+pub fn resolve_wasm_source() -> (WasmSource, Option<std::path::PathBuf>) {
+    if let Some(path) = exe_dir_wasm_path() {
+        return (WasmSource::ExeDir, Some(path));
+    }
+    if let Some(path) = data_dir_wasm_path() {
+        if path.exists() {
+            return (WasmSource::DataDir, Some(path));
+        }
+    }
+    (WasmSource::Embedded, None)
+}
+
+/// 运行时加载 prism.wasm：优先从可执行文件同目录、其次应用数据目录，
+/// 都不存在则使用嵌入版本。这样更新 wasm 只需替换文件并重启应用，无需重新编译。
+fn load_prism_wasm() -> Vec<u8> {
+    let (source, path) = resolve_wasm_source();
+    if let Some(path) = path {
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                tracing::info!(source = source.as_str(), path = %path.display(), "从外部文件加载 prism.wasm");
+                return bytes;
+            }
+            // 解析到的路径读取失败（如权限/占用）时退回内嵌版本，而不是启动即失败
+            Err(error) => {
+                tracing::warn!(
+                    source = source.as_str(),
+                    path = %path.display(),
+                    error = %error,
+                    "读取外部 prism.wasm 失败，回退内嵌版本"
+                );
+            }
         }
     }
     tracing::info!("使用内嵌 prism.wasm ({}KB)", PRISM_WASM_EMBEDDED.len() / 1024);
@@ -502,6 +561,74 @@ pub fn list_providers() -> Result<Vec<String>, String> {
 }
 
 // ---------------------------------------------------------------------------
+// ABI 探测
+// ---------------------------------------------------------------------------
+
+/// 内核 ABI 信息（`wasm_abi_version()` 的解析结果）
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AbiInfo {
+    /// 导出签名版本（abi 变更 = 宿主调用方式可能不兼容）
+    pub abi: String,
+    /// Lucent IR schema 版本
+    pub ir_schema: String,
+}
+
+/// 解析 `wasm_abi_version()` 的信封：`{"value":{"abi":"1","ir_schema":"v1"}}`。
+///
+/// 注意与 `extract_value` 的区别：这里的 `value` 是**对象**而非字符串，
+/// 因此不能复用那条要求 `value.as_str()` 的路径。
+pub fn parse_abi_envelope(envelope: &str) -> Result<AbiInfo, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(envelope).map_err(|e| format!("解析 ABI 信封失败: {e}"))?;
+
+    if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+        return Err(format!("内核返回错误: {err}"));
+    }
+
+    let value = v
+        .get("value")
+        .and_then(|value| value.as_object())
+        .ok_or_else(|| "ABI 信封缺少 value 对象".to_string())?;
+
+    let abi = value
+        .get("abi")
+        .and_then(|abi| abi.as_str())
+        .ok_or_else(|| "ABI 信封缺少 abi 字段".to_string())?;
+
+    Ok(AbiInfo {
+        abi: abi.to_string(),
+        ir_schema: value
+            .get("ir_schema")
+            .and_then(|schema| schema.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+    })
+}
+
+/// 用给定字节实例化一个**独立**的 prism 实例并探测其 ABI。
+///
+/// 用于安装前校验：能在 wasmtime 中成功实例化且 ABI 匹配，才说明这份 wasm
+/// 真的可用。校验和只能证明「没被篡改」，不能证明「能跑」。
+/// 该函数不触碰进程级单例，因此校验失败不会影响正在运行的内核。
+pub fn probe_abi(wasm_bytes: &[u8]) -> Result<AbiInfo, String> {
+    let mut prism = PrismWasm::new(wasm_bytes)?;
+    let raw = prism.call("wasm_abi_version", &[])?;
+    parse_abi_envelope(&raw)
+}
+
+/// 当前运行内核的 ABI（单例未初始化或探测失败时返回 Err）
+pub fn current_abi() -> Result<AbiInfo, String> {
+    let mut p = prism()?;
+    let raw = p.call("wasm_abi_version", &[])?;
+    parse_abi_envelope(&raw)
+}
+
+/// 编译时内嵌的 prism.wasm 字节（供内核服务计算内嵌版本校验和）
+pub fn embedded_wasm() -> &'static [u8] {
+    PRISM_WASM_EMBEDDED
+}
+
+// ---------------------------------------------------------------------------
 // 日志与追踪（调试用）
 // ---------------------------------------------------------------------------
 
@@ -607,8 +734,106 @@ mod tests {
     }
 
     #[test]
-    fn test_list_providers() {
-        let providers = list_providers().expect("list providers");
+    fn test_parse_abi_envelope_object_value() {
+        // wasm_abi_version 的 value 是**对象**（不是字符串），这是与 extract_value 的关键差异
+        let info = parse_abi_envelope(r#"{"value":{"abi":"1","ir_schema":"v1"},"diagnostics":[]}"#)
+            .expect("parse abi envelope");
+        assert_eq!(info.abi, "1");
+        assert_eq!(info.ir_schema, "v1");
+    }
+
+    #[test]
+    fn test_parse_abi_envelope_rejects_string_value() {
+        // 字符串形态的 value 说明这不是 wasm_abi_version 的响应，必须报错而不是静默通过
+        assert!(parse_abi_envelope(r#"{"value":"pong"}"#).is_err());
+    }
+
+    #[test]
+    fn test_parse_abi_envelope_error_and_missing_fields() {
+        assert!(parse_abi_envelope(r#"{"error":"boom"}"#).is_err());
+        // 缺 abi 字段：无法判定兼容性，必须拒绝
+        assert!(parse_abi_envelope(r#"{"value":{"ir_schema":"v1"}}"#).is_err());
+        assert!(parse_abi_envelope("not json").is_err());
+    }
+
+    #[test]
+    fn test_parse_abi_envelope_ir_schema_optional() {
+        // ir_schema 缺失时用 unknown 兜底，但 abi 必须存在
+        let info = parse_abi_envelope(r#"{"value":{"abi":"1"}}"#).expect("abi only");
+        assert_eq!(info.ir_schema, "unknown");
+    }
+
+    #[test]
+    fn test_current_abi_matches_supported_when_available() {
+        // 注意：内嵌内核可能是 ABI 探测能力加入之前构建的版本（`wasm_abi_version`
+        // 于 prism 2026-09-21 才导出）。此类旧内核探测会失败，属正常状态而非缺陷，
+        // 因此这里只断言「能探测到时必须与宿主声明的 ABI 一致」。
+        match current_abi() {
+            Ok(info) => assert_eq!(
+                info.abi, SUPPORTED_ABI,
+                "当前内核 ABI {} 与宿主支持的 {} 不一致",
+                info.abi, SUPPORTED_ABI
+            ),
+            Err(error) => {
+                // 旧内核路径：必须是「找不到导出」这类明确错误，而不是 panic 或误判
+                assert!(
+                    error.contains("wasm_abi_version"),
+                    "旧内核应给出缺少 ABI 导出的明确错误，实际: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_probe_abi_agrees_with_running_kernel() {
+        // 不变式：若运行中的内核支持 ABI 探测，则用同样字节走 probe_abi（独立实例）
+        // 必须得到一致结果 —— 这验证了「安装前预检」与「运行时」两条路径的一致性。
+        if let Ok(running) = current_abi() {
+            let probed = probe_abi(embedded_wasm()).expect("probe embedded wasm");
+            assert_eq!(probed.abi, running.abi);
+            assert_eq!(probed.ir_schema, running.ir_schema);
+        }
+    }
+
+    #[test]
+    fn test_probe_abi_rejects_wasm_without_abi_export() {
+        // 缺少 wasm_abi_version 的内核无法判定兼容性 → 必须拒绝（安装门槛据此生效）。
+        // 用一个最小的合法 wasm 模块（只有 memory，无 ABI 导出）验证这条路径。
+        const MINIMAL_WASM: &[u8] = &[
+            0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+            0x05, 0x03, 0x01, 0x00, 0x01, // memory section: 1 memory, min 1 page
+        ];
+        let error = probe_abi(MINIMAL_WASM).expect_err("无 ABI 导出的模块必须被拒绝");
+        assert!(
+            error.contains("wasm_abi_version") || error.contains("_start"),
+            "应明确报告缺少 ABI 导出（或无法初始化），实际: {error}"
+        );
+    }
+
+    #[test]
+    fn test_probe_abi_rejects_garbage() {
+        // 非 wasm 字节必须在实例化阶段被拒绝，绝不能被当成可用内核
+        assert!(probe_abi(b"definitely not a wasm module").is_err());
+        assert!(probe_abi(&[]).is_err());
+    }
+
+    #[test]
+    fn test_resolve_wasm_source_returns_known_source() {
+        // 不假设具体来源（取决于运行环境是否有外部文件），只要求解析结果自洽：
+        // 非 Embedded 必须带路径，Embedded 必须无路径
+        let (source, path) = resolve_wasm_source();
+        match source {
+            WasmSource::Embedded => assert!(path.is_none(), "内嵌来源不应带路径"),
+            _ => {
+                let path = path.expect("外部来源必须带路径");
+                assert!(path.exists(), "解析出的外部路径必须真实存在");
+                assert!(path.ends_with(PRISM_WASM_FILE));
+            }
+        }
+    }
+
+    #[test]
+    fn test_list_providers() {        let providers = list_providers().expect("list providers");
         // 校验核心 provider 都被 wasm 支持（别名可能因版本变化）
         let core_providers = ["openai", "responses", "messages", "gemini"];
         for name in &core_providers {

@@ -47,3 +47,5 @@ export { discoveryApi } from "./discovery";
 export type { PresetProvider, PresetModel, InstalledAiApp } from "./discovery";
 export { updaterApi } from "./updater";
 export type { AppUpdateInfo } from "./updater";
+export { kernelApi } from "./kernel";
+export type { KernelStatus, KernelInfo, KernelInstallResult } from "./kernel";

@@ -45,16 +45,33 @@ prism.wasm (MoonBit 编译) 处理请求/响应/SSE 流的跨协议转换。
 
 ### 构建 & 更新 prism.wasm
 
+**常规途径：应用内下载**（推荐）。「关于」页 →「协议内核」卡片可检查/下载官方发布的内核，
+下载后自动做 SHA-256 校验 + ABI 探测，通过才替换，重启生效。
+
+**手动构建**（本地调试 prism 改动时）：
+
 ```bash
 cd E:\Workplace\APP\MoonBit\prism
-moon clean && moon build --target wasm
-# 输出: _build/wasm/debug/build/cmd/main/main.wasm
+moon clean && moon build --target wasm --release
+# 输出: _build/wasm/release/build/cmd/main/main.wasm
 
 # 复制到 AppData（silk 运行时加载）
-copy _build\wasm\debug\build\cmd\main\main.wasm %APPDATA%\morning-start.silk\prism.wasm
+copy _build\wasm\release\build\cmd\main\main.wasm %APPDATA%\morning-start.silk\prism.wasm
 ```
 
-silk 启动时优先从 AppData 加载 prism.wasm，不存在则用编译时嵌入的版本。
+**加载优先级**（`prism_wasm::resolve_wasm_source`，三处同名 `prism.wasm`）：
+1. 可执行文件同目录 —— 优先级最高；存在时会**抢占**加载权，应用内下载将拒绝安装并提示
+2. 应用数据目录 —— 应用内下载的写入目标
+3. 编译时内嵌（`src-tauri/prism.wasm`）—— 兜底，保证开箱即用
+
+**ABI 探测**：内核通过 `wasm_abi_version()` 自报 ABI（当前为 `1`）。宿主在
+`SUPPORTED_ABI` 声明兼容版本，安装前用 `prism_wasm::probe_abi()` 在独立实例中
+实例化并探测，ABI 不匹配或无法实例化一律拒绝安装。
+
+> ⚠️ **内嵌内核可能落后**：`wasm_abi_version` 是 prism 2026-09-21（commit `242d06c`，T01/T11）
+> 才导出的。早于该日期构建的内嵌内核**不支持 ABI 探测**，此时「协议内核」卡片 ABI 显示
+> 「未知」并提示更新 —— 这是预期行为。更新内嵌版本需重新构建 prism 并替换
+> `src-tauri/prism.wasm`，再重新打包应用。
 
 ### prism 调试
 
@@ -76,6 +93,8 @@ grep "事件转换完成\|转换输出\|SSE 流式转换" silk.log
 | `gateway.json` | 网关配置（channels、providers、keys、端口等） |
 | `api-key` | 本地 API Key（`sk-silk-xxx` 格式） |
 | `prism.wasm` | 协议转换模块（优先于编译时嵌入版本） |
+| `prism.release.json` | 已安装内核的构建清单（版本比对依据；由「协议内核」下载写入） |
+| `prism.wasm.bak` | 内核替换前的备份（供人工回滚） |
 | `logs/` | 日志目录 |
 | `logs/silk.log` | 当前日志文件 |
 | `logs/silk.log.YYYY-MM-DD` | 按天轮转的历史日志 |

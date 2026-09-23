@@ -266,6 +266,87 @@ interface GetPresetProviderByIdRequest {
 
 **返回值**：`PresetProvider | null`
 
+### 1.8 协议内核（prism.wasm）
+
+协议转换内核的检查、下载与更新。内核发布仓库为 `morning-start/prism`，
+每个 `v*` 发布提供 `prism.wasm`、`prism.wasm.sha256`、`prism.release.json`。
+
+#### `get_kernel_status`
+读取当前运行内核的版本、ABI 与来源位置。
+
+**参数**：无
+
+**返回值**：
+```typescript
+interface KernelStatus {
+  version: string | null;      // 仅数据目录来源可反查
+  abi: string | null;          // 内核不支持 ABI 探测时为 null
+  ir_schema: string | null;
+  source: string;              // exe_dir / data_dir / embedded
+  path: string | null;         // 内嵌来源为 null
+  supported_abi: string;       // 宿主兼容的 ABI
+  updatable: boolean;          // 程序目录抢占时为 false
+  updatable_reason: string | null;
+}
+```
+
+#### `check_kernel_update`
+检查内核更新。沿用「设置 → 请求与限流」的全局代理。
+
+**参数**：无
+
+**返回值**：
+```typescript
+interface KernelInfo {
+  current_version: string | null;
+  latest_version: string | null;
+  available: boolean;
+  name: string | null;
+  notes: string | null;
+  published_at: string | null;
+  release_url: string | null;
+  asset_size: number | null;
+  can_install: boolean;        // 程序目录抢占或发布缺资产时为 false
+  blocked_reason: string | null;
+}
+```
+
+#### `install_kernel_update`
+下载并安装最新内核。**两道校验关**：
+
+1. **SHA-256**：与发布方的 `.sha256` 比对，证明字节未被篡改；
+2. **ABI 探测**：用 wasmtime 独立实例化并调用 `wasm_abi_version()`，
+   证明内核可运行且导出签名与宿主兼容（`abi` 必须等于 `1`）。
+
+任一步失败都在落盘前中止，旧内核保持原样。通过后备份现有内核为
+`prism.wasm.bak`，原子替换 `prism.wasm`，并写入 `prism.release.json` 构建清单。
+
+**参数**：无
+
+**返回值**：
+```typescript
+interface KernelInstallResult {
+  version: string | null;
+  abi: string;
+  source: string;              // 安装后恒为 data_dir
+  requires_restart: boolean;   // 内核是进程级单例，恒为 true
+}
+```
+
+**错误码**：
+- `kernel_externally_managed` — 程序目录下的 prism.wasm 抢占加载权
+- `kernel_asset_missing` — 发布缺少必需资产
+- `kernel_probe_failed` — 内核无法实例化
+- `kernel_abi_mismatch` — ABI 与宿主不兼容
+
+#### `restart_app`
+重启应用（内核更新后生效用）。直接使用 Tauri 核心 `AppHandle::restart()`，
+无需额外插件。
+
+**参数**：无
+
+**返回值**：无
+
 ## 2. Gateway API
 
 Gateway API 是Silk对外提供的HTTP API。

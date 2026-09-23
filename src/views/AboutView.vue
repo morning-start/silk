@@ -16,6 +16,17 @@ import AppPageShell from "../components/AppPageShell.vue";
 import { useGatewayStore } from "../stores/gateway";
 import { copyWithFeedback } from "../utils/clipboard";
 import { checkForUpdates, downloadAndInstall, type UpdateInfo } from "../utils/updater";
+import {
+  checkKernelUpdate,
+  formatSize,
+  getKernelStatus,
+  installKernelUpdate,
+  restartApp,
+  sourceLabel,
+  type KernelCheckResult,
+} from "../utils/kernel";
+import type { KernelStatus } from "../api/kernel";
+import { renderMarkdown } from "../utils/markdown";
 
 const REPO_URL = "https://github.com/morning-start/silk";
 const REPO_LABEL = "morning-start/silk";
@@ -43,6 +54,96 @@ const checking = ref(false);
 const installing = ref(false);
 const progress = ref(0);
 const updateInfo = ref<UpdateInfo | null>(null);
+
+// ---------------------------------------------------------------------------
+// 协议内核（prism.wasm）
+//
+// 与「软件更新」分离：这里管的是协议转换内核，版本节奏与应用不同
+// （应用 v1.1.3 / 内核 v0.1.4）。内核是进程级单例，装完必须重启才生效。
+// ---------------------------------------------------------------------------
+const kernelStatus = ref<KernelStatus | null>(null);
+const kernelInfo = ref<KernelCheckResult | null>(null);
+const kernelChecking = ref(false);
+const kernelInstalling = ref(false);
+const kernelInstalled = ref(false);
+
+/** 当前内核版本展示：数据目录来源可反查，内嵌/程序目录来源无法反查 */
+const kernelVersionLabel = computed(() => {
+  const status = kernelStatus.value;
+  if (!status) return "…";
+  return status.version ? `v${status.version}` : "未知";
+});
+
+/** 内核来源的可读名称 */
+const kernelSourceLabel = computed(() =>
+  kernelStatus.value ? sourceLabel(kernelStatus.value.source) : ""
+);
+
+/** ABI 是否与宿主兼容（旧内核无 ABI 导出时无法判定） */
+const kernelAbiCompatible = computed(() => {
+  const status = kernelStatus.value;
+  if (!status?.abi) return null;
+  return status.abi === status.supported_abi;
+});
+
+const kernelIsLatest = computed(
+  () =>
+    kernelInfo.value !== null &&
+    !kernelInfo.value.available &&
+    !kernelInfo.value.error
+);
+
+/** 有更新且可安装时才允许点安装 */
+const canInstallKernel = computed(
+  () => kernelInfo.value?.available === true && kernelInfo.value?.canInstall === true
+);
+
+async function loadKernelStatus() {
+  try {
+    kernelStatus.value = await getKernelStatus();
+  } catch (error) {
+    console.error("读取内核状态失败:", error);
+  }
+}
+
+async function handleCheckKernel(force = false) {
+  kernelChecking.value = true;
+  try {
+    // 状态与检查一起刷新：安装后状态会变（来源、版本）
+    await loadKernelStatus();
+    kernelInfo.value = await checkKernelUpdate(force);
+  } finally {
+    kernelChecking.value = false;
+  }
+}
+
+async function handleInstallKernel() {
+  kernelInstalling.value = true;
+  try {
+    const result = await installKernelUpdate();
+    kernelInstalled.value = true;
+    message.success(
+      `内核已更新至 v${result.version ?? "?"}（ABI ${result.abi}），重启后生效`
+    );
+    // 状态里的来源/版本已变，重新读取
+    await loadKernelStatus();
+    kernelInfo.value = null;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error));
+  } finally {
+    kernelInstalling.value = false;
+  }
+}
+
+async function handleRestartApp() {
+  try {
+    await restartApp();
+  } catch (error) {
+    // 重启失败通常是权限或平台差异，提示用户手动重启即可
+    console.error("重启应用失败:", error);
+    message.error("重启失败，请手动退出并重新打开应用");
+  }
+}
 
 const running = computed(() => gatewayStore.status?.running ?? false);
 const endpoint = computed(
@@ -128,6 +229,8 @@ onMounted(async () => {
   await gatewayStore.fetchStatus().catch(() => undefined);
   // 静默检查一次，有新版本直接展示在页面中
   updateInfo.value = await checkForUpdates();
+  // 内核状态与检查同样静默执行（结果有 5 分钟缓存，来回切页面不会耗光 API 额度）
+  await handleCheckKernel();
 });
 </script>
 
@@ -223,7 +326,7 @@ onMounted(async () => {
                 </span>
               </div>
 
-              <pre v-if="updateInfo.body" class="ab-notes">{{ updateInfo.body }}</pre>
+              <div v-if="updateInfo.body" class="ab-notes md-render" v-html="renderMarkdown(updateInfo.body)"></div>
 
               <div v-if="installing" class="ab-progress">
                 <NProgress
@@ -277,6 +380,120 @@ onMounted(async () => {
 
             <div v-else class="ab-line ab-muted">
               点击右上角「检查更新」获取最新版本信息。
+            </div>
+          </div>
+        </section>
+
+        <!-- 协议内核：prism.wasm 的版本、ABI 与下载更新 -->
+        <section class="s-card">
+          <header class="s-card-head">
+            <span class="ab-kicker">协议内核</span>
+            <span class="s-card-meta">{{ kernelVersionLabel }}</span>
+          </header>
+          <div class="s-card-body">
+            <p class="ab-note ab-hint">
+              跨协议转换由 prism.wasm 提供。下载后会校验 SHA-256 并试运行探测 ABI，
+              两道关都通过才替换；替换后需重启应用生效。
+            </p>
+
+            <dl class="ab-kv">
+              <div class="ab-kv-row">
+                <dt>当前版本</dt>
+                <dd>
+                  <span class="ab-strong text-mono">{{ kernelVersionLabel }}</span>
+                  <span class="ab-note">{{ kernelSourceLabel }}</span>
+                </dd>
+              </div>
+              <div class="ab-kv-row">
+                <dt>ABI</dt>
+                <dd>
+                  <template v-if="kernelStatus?.abi">
+                    <NTag size="tiny" :type="kernelAbiCompatible ? 'success' : 'error'">
+                      {{ kernelStatus.abi }}
+                    </NTag>
+                    <span class="ab-note">
+                      {{ kernelAbiCompatible ? "与宿主兼容" : `宿主需要 ${kernelStatus.supported_abi}` }}
+                    </span>
+                  </template>
+                  <template v-else>
+                    <NTag size="tiny" type="warning">未知</NTag>
+                    <span class="ab-note">该内核不支持 ABI 探测，建议更新</span>
+                  </template>
+                </dd>
+              </div>
+            </dl>
+
+            <div v-if="kernelChecking" class="ab-line ab-muted">正在检查内核更新…</div>
+
+            <template v-else-if="kernelInfo?.available">
+              <div class="ab-line">
+                <span class="ab-dot ab-dot--accent"></span>
+                发现新内核
+                <span class="ab-strong text-mono">v{{ kernelInfo.version }}</span>
+                <span v-if="kernelInfo.assetSize" class="ab-note">
+                  {{ formatSize(kernelInfo.assetSize) }}
+                </span>
+                <span v-if="kernelInfo.date" class="ab-note">
+                  发布于 {{ formatDate(kernelInfo.date) }}
+                </span>
+              </div>
+
+              <div v-if="kernelInfo.body" class="ab-notes md-render" v-html="renderMarkdown(kernelInfo.body)"></div>
+
+              <p v-if="kernelInfo.blockedReason" class="ab-line ab-line--error">
+                <span class="ab-dot ab-dot--error"></span>
+                {{ kernelInfo.blockedReason }}
+              </p>
+
+              <div class="ab-actions">
+                <NButton
+                  type="primary"
+                  size="small"
+                  :loading="kernelInstalling"
+                  :disabled="!canInstallKernel || kernelInstalling"
+                  @click="handleInstallKernel"
+                >
+                  <template #icon><NIcon><DownloadOutline /></NIcon></template>
+                  {{ kernelInstalling ? "安装中…" : "下载并安装" }}
+                </NButton>
+                <NButton
+                  v-if="kernelInfo.releaseUrl"
+                  size="small"
+                  quaternary
+                  @click="openLink(kernelInfo.releaseUrl!)"
+                >
+                  查看发布页
+                </NButton>
+              </div>
+            </template>
+
+            <div v-else-if="kernelIsLatest" class="ab-line ab-line--ok">
+              <span class="ab-dot ab-dot--ok"></span>
+              内核已是最新版本
+            </div>
+
+            <div v-else-if="kernelInfo?.error" class="ab-line ab-line--error">
+              <span class="ab-dot ab-dot--error"></span>
+              检查内核更新失败
+              <span class="ab-note">{{ kernelInfo.error }}</span>
+            </div>
+
+            <div v-else class="ab-line ab-muted">
+              暂未获取到内核更新信息。
+            </div>
+
+            <!-- 安装成功：内核是进程级单例，必须重启才生效 -->
+            <div v-if="kernelInstalled" class="ab-line ab-line--ok ab-restart">
+              <span class="ab-dot ab-dot--ok"></span>
+              新内核已安装，重启后生效
+              <NButton size="tiny" type="primary" @click="handleRestartApp">
+                <template #icon><NIcon><RefreshOutline /></NIcon></template>
+                立即重启
+              </NButton>
+            </div>
+
+            <div v-if="kernelStatus && !kernelStatus.updatable" class="ab-line ab-muted">
+              {{ kernelStatus.updatable_reason }}
             </div>
           </div>
         </section>
@@ -503,12 +720,81 @@ onMounted(async () => {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: var(--surface-alt);
-  font-family: var(--font-sans);
   font-size: var(--fs-sm);
   line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
   color: var(--fg-2);
+}
+
+/* Markdown 渲染内容（内核与应用更新卡片的发布说明） */
+.ab-notes.md-render > :first-child { margin-top: 0; }
+.ab-notes.md-render > :last-child { margin-bottom: 0; }
+
+.ab-notes.md-render h1,
+.ab-notes.md-render h2 {
+  margin: 1.2em 0 0.4em;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.ab-notes.md-render h3,
+.ab-notes.md-render h4 {
+  margin: 1em 0 0.3em;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.ab-notes.md-render p {
+  margin: 0.5em 0;
+}
+.ab-notes.md-render ul,
+.ab-notes.md-render ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+.ab-notes.md-render li {
+  margin: 0.2em 0;
+}
+.ab-notes.md-render code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--fg-2);
+}
+.ab-notes.md-render pre {
+  margin: 0.6em 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow-x: auto;
+}
+.ab-notes.md-render pre code {
+  padding: 0;
+  background: transparent;
+}
+.ab-notes.md-render a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.ab-notes.md-render strong {
+  font-weight: 600;
+  color: var(--fg);
+}
+.ab-notes.md-render blockquote {
+  margin: 0.5em 0;
+  padding-left: var(--sp-3);
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.ab-notes.md-render hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--border-soft);
+}
+.ab-notes.md-render img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
 }
 
 .ab-progress {
@@ -522,5 +808,12 @@ onMounted(async () => {
   display: flex;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
+}
+
+/* 安装成功后的重启引导：与上方状态行留出间距，按钮紧跟文字 */
+.ab-restart {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-soft);
 }
 </style>

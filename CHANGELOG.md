@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 协议内核（prism.wasm）下载与更新：应用内检查/下载官方发布的内核，
+  SHA-256 校验 + ABI 探测双重把关后原子替换，支持一键重启生效
 - 启动画面 (Splash Screen)
 - 引导向导 (Onboarding Wizard)
 - 用户友好的错误提示
