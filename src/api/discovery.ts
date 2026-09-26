@@ -1,25 +1,28 @@
 import { invoke } from "@tauri-apps/api/core";
 
 // ---------------------------------------------------------------------------
-// 发现类接口：预置渠道模板、本地已安装 AI 应用检测
+// 发现类接口：渠道模板目录、本地已安装 AI 应用检测
 // 对应后端 `commands::discovery`
 // ---------------------------------------------------------------------------
 
-/** 预置渠道模板中的一个模型 */
-export interface PresetModel {
+/** 渠道模板中的一个预置模型项 */
+export interface ChannelTemplateModel {
   id: string;
   name: string;
   description: string;
 }
 
-/** 预置渠道模板（内置 `data/preset_providers.json`，用于快速填充渠道表单） */
-export interface PresetProvider {
+/**
+ * 渠道模板（内置 `data/channel_templates.json`，用于快速填充「添加渠道」表单）。
+ * 注意与 `Provider`（数据库中用户实际配置的渠道）区分：模板只是填写素材。
+ */
+export interface ChannelTemplate {
   id: string;
   name: string;
   description: string;
   /** 与渠道表单的协议值一致：openai / messages / responses / gemini */
   protocols: string[];
-  models: PresetModel[];
+  models: ChannelTemplateModel[];
   api_base_url: string;
   /** 申请 API Key 的官方页面 */
   api_key_url: string;
@@ -38,13 +41,13 @@ export interface InstalledAiApp {
 }
 
 export const discoveryApi = {
-  /** 获取全部预置渠道模板 */
-  getPresetProviders: (): Promise<PresetProvider[]> =>
-    invoke<PresetProvider[]>("get_preset_providers"),
+  /** 获取全部渠道模板 */
+  getChannelTemplates: (): Promise<ChannelTemplate[]> =>
+    invoke<ChannelTemplate[]>("get_channel_templates"),
 
-  /** 按 id 获取单个预置渠道模板 */
-  getPresetProviderById: (id: string): Promise<PresetProvider | null> =>
-    invoke<PresetProvider | null>("get_preset_provider_by_id", { id }),
+  /** 按 id 获取单个渠道模板 */
+  getChannelTemplateById: (id: string): Promise<ChannelTemplate | null> =>
+    invoke<ChannelTemplate | null>("get_channel_template_by_id", { id }),
 
   /** 检测本机已安装的 AI 应用（扫描其配置文件是否存在） */
   detectInstalledAiApps: (): Promise<InstalledAiApp[]> =>

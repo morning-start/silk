@@ -404,9 +404,9 @@ pub fn run() {
             commands::gateway_keys::reset_builtin_gateway_key,
             // 自动检测
             commands::discovery::detect_installed_ai_apps,
-            // 预置配置
-            commands::discovery::get_preset_providers,
-            commands::discovery::get_preset_provider_by_id,
+            // 渠道模板目录
+            commands::discovery::get_channel_templates,
+            commands::discovery::get_channel_template_by_id,
             // 预设管理（cc-switch 复刻）
             commands::presets::list_presets,
             commands::presets::get_preset,
@@ -425,6 +425,7 @@ pub fn run() {
             commands::kernel::get_kernel_status,
             commands::kernel::check_kernel_update,
             commands::kernel::install_kernel_update,
+            commands::kernel::rollback_kernel_update,
             commands::kernel::restart_app,
         ])
         .run(tauri::generate_context!())

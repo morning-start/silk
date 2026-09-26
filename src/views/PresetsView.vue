@@ -84,12 +84,17 @@ const channelOptions = computed(() =>
   })),
 );
 
-/** 累加模式 harness（多预设可同时激活，live 中存在 provider 段 = 已激活） */
-const ADDITIVE_HARNESSES = new Set(["opencode", "omp"]);
+/**
+ * 当前 Tab 是否累加模式（多预设可同时激活，独立启停）。
+ * 单一事实来源在 Rust（AgentType::is_additive），经 list_agent_types.additive 下发。
+ */
+const isAdditiveHarness = computed(
+  () => agentTypes.value.find((a) => a.id === activeTab.value)?.additive === true
+);
 
 /** 页头说明：对齐原 page-header 的 subtitle 文案 */
 const pageDesc = computed(() => {
-  if (ADDITIVE_HARNESSES.has(activeTab.value) && additiveActiveCount.value > 0) return `已激活 ${additiveActiveCount.value} 个配置`;
+  if (isAdditiveHarness.value && additiveActiveCount.value > 0) return `已激活 ${additiveActiveCount.value} 个配置`;
   if (currentPreset.value) return `当前激活：${currentPreset.value.name}`;
   return "未激活任何预设（live 配置保持原状）";
 });
@@ -261,7 +266,7 @@ function resetOfficial(preset: Preset) {
   });
 }
 const additiveActiveCount = computed(() => {
-  if (!ADDITIVE_HARNESSES.has(activeTab.value)) return 0;
+  if (!isAdditiveHarness.value) return 0;
   return presets.value.filter((preset) => preset.is_active).length;
 });
 const spec = computed<HarnessFormSpec | undefined>(() => formSpecFor(activeTab.value));
@@ -731,11 +736,11 @@ function openEdit(preset: Preset) {
 }
 
 async function activate(preset: Preset) {
-  // opencode / omp 为累加模式（对齐 cc-switch additive）：卡片按钮 = 对该预设独立启停，
+  // 累加模式 harness（对齐 cc-switch additive）：卡片按钮 = 对该预设独立启停，
   // 激活加入 live 配置、取消激活移出，均不影响其他已激活预设。
   // 其余应用为单激活整体切换（对齐 cc-switch Claude）：激活项主按钮已禁用为“当前激活”，
   // 此处只会被非激活卡片触发 = 切换到该预设并激活。
-  const isAdditive = activeTab.value === "opencode" || activeTab.value === "omp";
+  const isAdditive = isAdditiveHarness.value;
   const activating = !preset.is_active;
   try {
     const result = isAdditive
@@ -904,8 +909,8 @@ onMounted(async () => {
           <span class="s-card-title">{{ preset.name }}</span>
           <div class="preset-tags">
             <span v-if="isOfficialPreset(preset)" class="s-badge s-badge--accent">官方</span>
-            <span v-if="preset.is_active && ADDITIVE_HARNESSES.has(activeTab)" class="s-badge s-badge--success">已激活</span>
-            <span v-else-if="preset.is_active && !ADDITIVE_HARNESSES.has(activeTab)" class="s-badge s-badge--success">当前</span>
+            <span v-if="preset.is_active && isAdditiveHarness" class="s-badge s-badge--success">已激活</span>
+            <span v-else-if="preset.is_active && !isAdditiveHarness" class="s-badge s-badge--success">当前</span>
           </div>
         </div>
         <div class="s-card-body">
@@ -913,11 +918,11 @@ onMounted(async () => {
           <p v-else-if="preset.notes" class="preset-desc">{{ preset.notes }}</p>
           <div class="preset-actions">
             <!-- 单激活应用（claude_code/codex/hermes/gemini_cli）对齐 cc-switch：激活项无“取消激活”，
-                 主按钮禁用显示“当前激活”，切换只能点其他卡片；opencode/omp 为累加模式保留独立启停。
+                 主按钮禁用显示“当前激活”，切换只能点其他卡片；累加模式 harness 保留独立启停。
                  视觉层次（对齐全局样式语言）：激活 = 主色实心（黑底白字，主操作）；
                  取消激活 = 次级（中性浅灰，非红非黑），激活态由绿色边框 + “已激活”徽标承载 -->
-            <NButton v-if="!ADDITIVE_HARNESSES.has(activeTab) && preset.is_active" size="small" disabled>当前激活</NButton>
-            <NButton v-else-if="ADDITIVE_HARNESSES.has(activeTab) && preset.is_active" size="small" secondary @click="activate(preset)">取消激活</NButton>
+            <NButton v-if="!isAdditiveHarness && preset.is_active" size="small" disabled>当前激活</NButton>
+            <NButton v-else-if="isAdditiveHarness && preset.is_active" size="small" secondary @click="activate(preset)">取消激活</NButton>
             <NButton v-else size="small" type="primary" @click="activate(preset)">激活</NButton>
             <!-- 官方直连行：凭据可编辑 + 一键恢复默认，不允许删除 -->
             <template v-if="isOfficialPreset(preset)">

@@ -202,15 +202,30 @@ Authorization: Bearer <gateway-key>
 
 ### 9.1 通用错误格式
 
-非上游原样透传错误时，响应体统一为：
+**silk 自身产生的错误**（网关鉴权、路由、协议转换、连不通上游、超时、限流等）
+统一带 `【silk】` 标记，并同时给出顶层 `message` 与标准 `error` 对象（适配
+OpenAI 系 SDK、Claude Code、Codex 等按标准形状取错的客户端）：
 
 ```json
 {
-  "message": "错误描述"
+  "message": "【silk】未授权: Key 错误",
+  "error": {
+    "message": "【silk】未授权: Key 错误",
+    "type": "unauthorized",
+    "origin": "silk"
+  }
 }
 ```
 
+> **判定规则**：响应里带 `【silk】` ⇒ 问题出在 silk 侧；**不带** ⇒ 是上游的原话
+> （见 [9.3](#93-上游错误原样透传)）。
+
+历史教训：上游 403「模型不在当前套餐内」曾被统一文案成「认证失败 / API 密钥错误」，
+把用户引向改 Key 的错误方向 —— 实际上密钥有效，改 Key 无用。
+
 ### 9.2 状态码与错误码
+
+**silk 侧错误**（`origin: silk`）：
 
 | HTTP 状态码 | 错误码 | 说明 |
 |---|---|---|
@@ -218,26 +233,53 @@ Authorization: Bearer <gateway-key>
 | 400 | `transform_error` | 协议转换失败 |
 | 401 | `unauthorized` | 缺少或错误的 Gateway Key |
 | 404 | `not_found` | 路由、模型或 Provider 未命中 |
-| 429 | `too_many_requests` | 触发限流 |
+| 429 | `too_many_requests` | 触发本地限流 |
 | 500 | `database_error` | 数据库访问失败 |
-| 500 | `internal_error` | 内部错误（所有渠道和 Key 均已失败等） |
+| 500 | `internal_error` | 内部错误；回退耗尽且上游从未返回过错误时使用 |
 | 500 | `serialization_error` | 序列化/反序列化失败 |
-| 502 | `upstream_error` | 请求上游 Provider 失败（HTTP 请求错误） |
-| 504 | `timeout` | SSE 或上游请求超时 |
+| 502 | `upstream_unreachable` | **连不上**上游（DNS/连接/TLS/读超时）—— 上游没答话，是 silk 侧的报告 |
+| 504 | `timeout` | SSE 流超时或回退总超时 |
 
-> 注：`UpstreamError` 变体会透传上游返回的原始 HTTP 状态码和错误体，不由上表固定映射。详见 [9.3](#93-上游错误透传)。
+**上游侧错误**（`origin: upstream`，状态码与错误体均由上游决定）：
 
-### 9.3 上游错误透传
+| 错误码 | 说明 |
+|---|---|
+| `upstream_error` | 上游**确实返回了** 4xx/5xx 响应，网关原样透传。状态码不固定映射到本表，取决于上游 |
 
-当上游返回明确的 HTTP 错误时，网关会尽量保留上游状态码，并返回错误体：
+> 注：`upstream_unreachable`（silk 连不上）与 `upstream_error`（上游返回了错误）
+> 必须区分 —— 前者不是上游说过的话，不能伪装成上游错误体。
+
+### 9.3 上游错误原样透传
+
+当上游返回明确的 HTTP 错误时，网关**不做任何加工**：
+
+- **状态码**：保留上游原始状态码；
+- **响应体**：返回上游**原始字节**，不解析、不重包装、不截断。上游的错误体不一定是
+  JSON —— nginx 的 HTML 502、网关的纯文本 401 都很常见，强行解析失败后再包一层
+  `{"error":{"message":…}}` 等于篡改了上游的原话，还会丢掉原始信息；
+- **Content-Type**：原样转发，与上游保持一致。
+
+因此客户端收到什么形状，取决于上游返回什么形状：
 
 ```json
+// 上游是 OpenAI 系时（原样透传，无 【silk】 标记）
 {
   "error": {
-    "message": "upstream error message"
+    "message": "model is not available in the current token plan",
+    "type": "permission_denied_error",
+    "code": "7"
   }
 }
 ```
+
+**回退场景**：若一次请求在多个渠道间回退且最终全部失败，网关返回**最后一次**
+上游错误（原样透传），而不是 silk 自造的「所有渠道和 Key 均已失败」——
+后者掩盖了上游的真实原因。仅当上游全程从未返回过任何错误响应时，
+才回落到 `internal_error`。
+
+**流式场景**：流式响应一旦发出 200 响应头就无法再改状态码。此时网关会把错误作为
+一条 SSE `error` 事件写进流里再正常收尾（上游中途断流、流超时均如此），
+否则 hyper 会直接中止 body，客户端只能看到「连接被重置」而拿不到原因。
 
 ## 10. 示例
 

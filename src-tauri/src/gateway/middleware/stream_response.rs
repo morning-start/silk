@@ -625,6 +625,34 @@ pub fn stream_end_marker() -> Bytes {
     Bytes::from("data: [DONE]\n\n")
 }
 
+/// 流中途失败时下发的 SSE 错误事件
+///
+/// 流式响应一旦发出 200 响应头，就无法再改状态码；若只是把 `Err` 塞进流里，
+/// hyper 会直接中止 body，客户端只能看到「连接被重置」——原因完全丢失。
+/// 因此把错误作为一条 SSE 事件写进流里，再正常收尾，客户端至少能读到原因。
+///
+/// 事件体沿用 OpenAI 的错误形状（`{"error":{...}}`），并在 `message` 中带上
+/// 来源标记：silk 自身错误带 `【silk】`，上游原话则不带。
+pub fn sse_error_event(error: &GatewayError) -> Bytes {
+    let payload = match error.silk_body() {
+        // silk 自身错误：带标记
+        Some(body) => body,
+        // 上游错误：原样透传上游 body（能解析成 JSON 就用它，否则退化为文本消息）
+        None => match error {
+            GatewayError::UpstreamError(failure) => {
+                serde_json::from_slice(&failure.body).unwrap_or_else(|_| {
+                    serde_json::json!({ "error": { "message": failure.message() } })
+                })
+            }
+            _ => serde_json::json!({ "error": { "message": error.marked_message() } }),
+        },
+    };
+
+    let data = serde_json::to_string(&payload)
+        .unwrap_or_else(|_| r#"{"error":{"message":"stream error"}}"#.to_string());
+    Bytes::from(format!("event: error\ndata: {data}\n\n"))
+}
+
 /// 流状态追踪
 #[derive(Debug)]
 pub struct StreamState {

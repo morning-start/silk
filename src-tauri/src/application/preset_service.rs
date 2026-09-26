@@ -56,7 +56,7 @@ impl PresetService {
 
             // OpenCode / OMP 累加模式：live 中存在的 provider 段 = 已激活（对齐 cc-switch isInConfig）。
             // 启动时按 live 现状同步存量 preset 的激活位：在 live → 1，不在 live → 0。
-            if agent_type == "opencode" || agent_type == "omp" {
+            if crate::models::AgentType::is_additive(agent_type) {
                 let imported_ids: Vec<Option<String>> = imported
                     .iter()
                     .map(|settings| Self::startup_identity(agent_type, settings))
@@ -91,7 +91,7 @@ impl PresetService {
                 if regular_existing.iter().any(|preset| Self::startup_identity(agent_type, &serde_json::from_str::<serde_json::Value>(&preset.settings_config).unwrap_or(serde_json::Value::Null)) == Some(identity.clone())) { continue; }
                 let id = uuid::Uuid::new_v4().to_string();
                 // opencode/omp 新导入的 provider 来自 live 配置，天然处于激活态
-                let is_active = if agent_type == "opencode" || agent_type == "omp" { true } else { !active_claimed };
+                let is_active = if crate::models::AgentType::is_additive(agent_type) { true } else { !active_claimed };
                 let name = Self::startup_preset_name(agent_type, agent_name, &identity);
                 let settings_text = serde_json::to_string(&settings).map_err(|error| ServiceError::Internal { message: format!("保存 {agent_name} 导入配置失败: {error}"), detail: Some(error.to_string()) })?;
                 sqlx::query(
@@ -374,9 +374,9 @@ impl PresetService {
     /// 切换：写目标 preset 的 live 投影（注入网关 base_url/api_key）→ 更新 is_active。
     /// 写 live 失败时快照已由 writer 回滚，DB 状态不变。
     pub async fn switch(agent_type: String, preset_id: String) -> Result<SwitchResult, ServiceError> {
-        // OpenCode / OMP 为累加模式：多个预设可同时激活，“激活”=加入 live 配置并置位自身，
+        // 累加模式（OpenCode / OMP）：多个预设可同时激活，“激活”=加入 live 配置并置位自身，
         // 不清除其他预设。与单激活应用（整体切换）语义不同，走独立启停路径。
-        if agent_type == "opencode" || agent_type == "omp" {
+        if AgentType::is_additive(&agent_type) {
             return Self::set_active(agent_type, preset_id, true).await;
         }
         let pool = require_db()?;
@@ -496,7 +496,7 @@ impl PresetService {
         preset_id: String,
         active: bool,
     ) -> Result<SwitchResult, ServiceError> {
-        if agent_type != "opencode" && agent_type != "omp" {
+        if !AgentType::is_additive(&agent_type) {
             return Err(ServiceError::BadRequest {
                 message: "仅 OpenCode / OMP 支持多预设独立启停，其余应用请使用「激活」切换".to_string(),
                 code: None,
@@ -990,6 +990,34 @@ pub struct SwitchResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rust AgentType::all() 与 SQL CHECK 白名单必须对齐：
+    /// 新增 agent 类型只改 Rust 不加迁移 → 运行时 INSERT 会被 CHECK 静默拒绝，
+    /// 且该失败只在真实数据库路径出现（内存库测试同用此迁移，故能在此拦截）。
+    /// 对齐方向：SQL 是超集（历史上登记过 claude-desktop/grokbuild/pi 等），
+    /// 因此只要求 Rust ⊆ SQL。
+    #[tokio::test]
+    async fn sql_check_allows_every_rust_agent_type() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.expect("memory database");
+        sqlx::migrate!("./migrations").run(&pool).await.expect("schema");
+
+        for (id, name) in AgentType::all() {
+            let result = sqlx::query(
+                "INSERT INTO presets (id, name, agent_type, settings_config) VALUES ('check-' || ?1, ?2, ?1, '{}')",
+            )
+            .bind(id)
+            .bind(name)
+            .execute(&pool)
+            .await;
+            assert!(
+                result.is_ok(),
+                "AgentType::{id} 被 presets 表 CHECK 约束拒绝（实际错误: {:?}）—— 新增 agent 类型后必须追加迁移重建白名单",
+                result.err()
+            );
+            // 清理，避免影响同一连接上的后续断言
+            sqlx::query("DELETE FROM presets WHERE id = 'check-' || ?1").bind(id).execute(&pool).await.expect("cleanup");
+        }
+    }
 
     #[tokio::test]
     async fn imports_existing_opencode_providers_into_presets() {

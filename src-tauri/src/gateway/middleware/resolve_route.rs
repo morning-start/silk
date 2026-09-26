@@ -335,6 +335,19 @@ pub async fn try_next_channel(
     ctx.failed_keys.clear();
     ctx.selected_api_key = None;
     ctx.selected_key_encrypted = None;
+    // 换渠道必须从头重新走协议转换。
+    //
+    // `request_transformed` 为 true 时 transform_request 会跳过转换、直接把
+    // request_body 当上游格式发出。但 request_body 此刻是**上一个渠道**的转换结果
+    // （新渠道的 outbound 协议可能不同），照发 = 用 A 协议格式打 B 协议端点。
+    // 恢复原始客户端请求体并清标记，让新渠道重新转换。
+    //
+    // 注：apply_model_override 内部也会恢复 request_body，但它在
+    // `get_parsed_body()` 取不到 model 时被跳过（apply_upstream_request 会把
+    // parsed_body 置 None），不能依赖它兜底。
+    ctx.request_body = ctx.client_body.clone();
+    ctx.parsed_body = None;
+    ctx.request_transformed = false;
 
     Some(ctx)
 }

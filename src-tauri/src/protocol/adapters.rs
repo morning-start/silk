@@ -132,6 +132,11 @@ fn build_gemini_headers(_api_key: &str) -> Result<HeaderMap, GatewayError> {
 /// 根据出站协议构建上游请求（URL + Headers + Body）
 ///
 /// 请求体已由 prism.wasm 转换为目标协议格式，此处仅透传并构建 URL/headers。
+///
+/// URL 拼接前对 base_url 做规范化：`config.path` 已自带 `v1/` 前缀，
+/// 若渠道的 base_url 也带 `/v1`（历史数据、配置导入或手工改库都可能留下这种值），
+/// 直接拼接会得到 `/v1/v1/chat/completions` 这种双前缀地址，上游会返回
+/// 401/404，且错误信息看起来像「Key 无效」，极易误判为密钥问题。
 pub fn build_upstream_request(
     req_body: &[u8],
     provider: &Provider,
@@ -146,11 +151,17 @@ pub fn build_upstream_request(
         .map_err(|e| GatewayError::Serialization(e.to_string()))?;
 
     Ok(UpstreamRequest {
-        url: format!("{}/{}", provider.api_base_url, config.path),
+        url: build_url(&provider.api_base_url, config.path),
         method: "POST".to_string(),
         headers: (config.build_headers)(api_key)?,
         body,
     })
+}
+
+/// 拼接 base_url 与协议路径，并消除 `/v1` 双前缀
+fn build_url(base_url: &str, path: &str) -> String {
+    let base = crate::application::provider_service::normalize_api_base_url(base_url);
+    format!("{}/{}", base.trim_end_matches('/'), path)
 }
 
 #[cfg(test)]
@@ -226,5 +237,69 @@ mod tests {
         assert!(is_supported("messages"));
         assert!(is_supported("responses"));
         assert!(!is_supported("unknown"));
+    }
+
+    // -----------------------------------------------------------------------
+    // URL 拼接：/v1 双前缀回归（真实渠道数据里大量存在带 /v1 的 base_url）
+    // -----------------------------------------------------------------------
+
+    /// 带 `/v1` 的 base_url 不得产生 `/v1/v1/...`
+    #[test]
+    fn test_build_url_strips_duplicate_v1() {
+        assert_eq!(
+            build_url("https://relayfor.xyz/v1", "v1/chat/completions"),
+            "https://relayfor.xyz/v1/chat/completions"
+        );
+        assert_eq!(
+            build_url("https://api.b.ai/v1", "v1/messages"),
+            "https://api.b.ai/v1/messages"
+        );
+        // 带尾部斜杠的 /v1/ 同样要处理
+        assert_eq!(
+            build_url("https://vlimi.com/v1/", "v1/chat/completions"),
+            "https://vlimi.com/v1/chat/completions"
+        );
+    }
+
+    /// 不带 `/v1` 的 base_url 行为不变
+    #[test]
+    fn test_build_url_without_v1_suffix() {
+        assert_eq!(
+            build_url("https://api.openai.com", "v1/chat/completions"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_url("https://openrouter.ai/api", "v1/chat/completions"),
+            "https://openrouter.ai/api/v1/chat/completions"
+        );
+        assert_eq!(
+            build_url("https://api.openai.com/", "v1/chat/completions"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    /// gemini 的路径不含 v1，规范化的去 /v1 不会破坏它
+    #[test]
+    fn test_build_url_gemini_path() {
+        assert_eq!(
+            build_url("https://generativelanguage.googleapis.com", "v1beta/models"),
+            "https://generativelanguage.googleapis.com/v1beta/models"
+        );
+    }
+
+    /// 端到端：带 /v1 的 provider 经 build_upstream_request 后无重复前缀
+    #[test]
+    fn test_build_upstream_request_no_duplicate_v1() {
+        let mut provider = test_provider();
+        provider.api_base_url = "https://relayfor.xyz/v1".to_string();
+        let body = serde_json::to_vec(&serde_json::json!({"model": "gpt-4"})).unwrap();
+
+        let result = build_upstream_request(&body, &provider, "sk-test", "openai").unwrap();
+        assert_eq!(result.url, "https://relayfor.xyz/v1/chat/completions");
+        assert!(
+            !result.url.contains("/v1/v1"),
+            "上游地址不应出现重复 /v1 前缀: {}",
+            result.url
+        );
     }
 }

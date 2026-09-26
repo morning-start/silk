@@ -234,6 +234,11 @@ pub struct RequestContextInner {
     pub upstream_status: Option<axum::http::StatusCode>,
     pub upstream_headers: Option<HeaderMap>,
     pub upstream_body: Option<bytes::Bytes>,
+    /// 失败回退过程中最后一次「上游返回的错误」（原样保留，含原始字节）
+    ///
+    /// 回退全部耗尽时优先返回它，而不是 silk 自造的「所有渠道和 Key 均已失败」，
+    /// 保证客户端看到的是上游的原话。
+    pub last_upstream_error: Option<crate::gateway::error::UpstreamFailure>,
     /// 已发送给客户端的响应字节数（流式场景）
     pub response_bytes_sent: u64,
     /// 最后收到的 SSE 事件 ID（用于断线重连）
@@ -374,6 +379,7 @@ impl RequestContext {
                 upstream_status: None,
                 upstream_headers: None,
                 upstream_body: None,
+                last_upstream_error: None,
                 response_bytes_sent: 0,
                 last_event_id: None,
                 remote_model_override: None,

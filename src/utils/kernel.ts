@@ -115,6 +115,16 @@ export async function installKernelUpdate(): Promise<KernelInstallResult> {
   return kernelApi.install();
 }
 
+/**
+ * 回滚到上一次替换前的内核备份
+ *
+ * 内核更新后若应用起不来或转换异常，这是唯一的自救出口。
+ * 后端回滚前会用 wasmtime 探测备份内核，坏的备份会被拒绝。
+ */
+export async function rollbackKernelUpdate(): Promise<KernelInstallResult> {
+  return kernelApi.rollback();
+}
+
 /** 重启应用 */
 export async function restartApp(): Promise<void> {
   return kernelApi.restart();

@@ -27,7 +27,9 @@ Vue3 + NaiveUI → Tauri IPC (invoke) → commands/ → application/ services
 
 HTTP 网关 `127.0.0.1:1877`：**9 阶段管道** — extract → authenticate → resolve_route → select_channel → transform_request → dispatch_upstream → transform_response → persist_log → finalize
 
-**3 级失败回退**：重试(3次) → 换 Key → 换渠道 → 错误返回（总超时15s，最多10次，429/401/403/503 直接失败）
+**3 级失败回退**：重试(3次) → 换 Key → 换渠道 → 错误返回（总超时15s，最多10次）
+- 401/403/429/503 属**渠道级**错误（换 Key 无意义），跳过换 Key 直接换渠道，**不终止回退**
+- 回退耗尽时优先返回**最后一次上游错误**（原样透传），而非 silk 自造的「所有渠道和 Key 均已失败」
 
 ## Prism 协议转换
 
@@ -68,10 +70,11 @@ copy _build\wasm\release\build\cmd\main\main.wasm %APPDATA%\morning-start.silk\p
 `SUPPORTED_ABI` 声明兼容版本，安装前用 `prism_wasm::probe_abi()` 在独立实例中
 实例化并探测，ABI 不匹配或无法实例化一律拒绝安装。
 
-> ⚠️ **内嵌内核可能落后**：`wasm_abi_version` 是 prism 2026-09-21（commit `242d06c`，T01/T11）
-> 才导出的。早于该日期构建的内嵌内核**不支持 ABI 探测**，此时「协议内核」卡片 ABI 显示
-> 「未知」并提示更新 —— 这是预期行为。更新内嵌版本需重新构建 prism 并替换
-> `src-tauri/prism.wasm`，再重新打包应用。
+> ℹ️ **内嵌内核版本**：`src-tauri/prism.wasm` 当前为 prism v0.1.4
+> （350,749 字节，sha256 `738dcbc7…46295`），**已含 `wasm_abi_version` 导出**，支持 ABI 探测。
+> 早期版本（2026-09-21 前构建）不含该导出，此时「协议内核」卡片 ABI 显示「未知」并提示更新。
+> 更新内嵌版本：重新构建 prism 并替换 `src-tauri/prism.wasm`，再重新打包应用。
+> `prism_wasm.rs` 的 `test_current_abi_matches_supported` 会断言探测成功 —— 若内嵌内核退回旧版，该测试会失败。
 
 ### prism 调试
 
@@ -94,7 +97,8 @@ grep "事件转换完成\|转换输出\|SSE 流式转换" silk.log
 | `api-key` | 本地 API Key（`sk-silk-xxx` 格式） |
 | `prism.wasm` | 协议转换模块（优先于编译时嵌入版本） |
 | `prism.release.json` | 已安装内核的构建清单（版本比对依据；由「协议内核」下载写入） |
-| `prism.wasm.bak` | 内核替换前的备份（供人工回滚） |
+| `prism.wasm.bak` | 内核替换前的备份。**与 `prism.release.json.bak` 成对写入**，成对还原 |
+| `prism.release.json.bak` | 与 `prism.wasm.bak` 配对的版本记录（避免回滚后版本号指向不存在的内核） |
 | `logs/` | 日志目录 |
 | `logs/silk.log` | 当前日志文件 |
 | `logs/silk.log.YYYY-MM-DD` | 按天轮转的历史日志 |

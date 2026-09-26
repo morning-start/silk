@@ -835,11 +835,16 @@ await invoke('create_routing_rule', {
 
 所有 IPC 命令返回 `Result<T, String>`，失败时返回错误描述字符串。
 
-网关 HTTP 代理端的错误响应格式：
+网关 HTTP 代理端的错误响应格式（silk 自身错误带 `【silk】` 标记）：
 
 ```json
 {
-  "message": "错误描述"
+  "message": "【silk】错误描述",
+  "error": {
+    "message": "【silk】错误描述",
+    "type": "错误码",
+    "origin": "silk"
+  }
 }
 ```
 
@@ -847,7 +852,14 @@ await invoke('create_routing_rule', {
 |--------|--------|------|
 | 400 | `bad_request` | 请求格式错误 |
 | 400 | `transform_error` | 协议转换失败 |
+| 401 | `unauthorized` | 缺少或错误的 Gateway Key |
 | 404 | `not_found` | 路由不存在 |
-| 502 | `upstream_error` | 上游请求失败 |
+| 429 | `too_many_requests` | 触发本地限流 |
+| 500 | `internal_error` | 内部错误（回退耗尽且上游从未返回错误时） |
+| 502 | `upstream_unreachable` | **连不上**上游（DNS/连接/TLS/超时） |
 | 504 | `timeout` | 请求超时 |
-| 500 | `internal_error` | 内部错误 |
+
+上游返回 4xx/5xx 时，网关**原样透传**上游状态码与原始响应字节（不解析、不重包装），
+此时错误码为 `upstream_error`、`origin` 为 `upstream`，响应体形状取决于上游。
+**判定规则**：带 `【silk】` ⇒ silk 侧问题；不带 ⇒ 上游的原话。
+详见[网关 API 文档 §9](./gateway-api.md#9-错误响应)。

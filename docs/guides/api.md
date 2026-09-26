@@ -232,21 +232,26 @@ interface QuickSetupResponse {
 }
 ```
 
-### 1.7 预置配置
+### 1.7 渠道模板
 
-#### `get_preset_providers`
-获取所有预置配置。
+内置的渠道填写模板（`data/channel_templates.json`），用于「添加渠道」表单一键填充
+官方端点的地址、协议与常用模型。**注意与 `Provider`（数据库中用户实际配置的渠道）
+区分**：模板是静态素材，不参与路由。
+
+#### `get_channel_templates`
+获取所有渠道模板。
 
 **参数**：无
 
 **返回值**：
 ```typescript
-interface PresetProvider {
+interface ChannelTemplate {
   id: string;
   name: string;
   description: string;
+  /** 与渠道表单的协议值一致：openai / messages / responses / gemini */
   protocols: string[];
-  models: PresetModel[];
+  models: ChannelTemplateModel[];
   api_base_url: string;
   api_key_url: string;
   api_key_placeholder: string;
@@ -254,17 +259,17 @@ interface PresetProvider {
 }
 ```
 
-#### `get_preset_provider_by_id`
-根据ID获取预置配置。
+#### `get_channel_template_by_id`
+根据 ID 获取单个渠道模板。
 
 **参数**：
 ```typescript
-interface GetPresetProviderByIdRequest {
+interface GetChannelTemplateByIdRequest {
   id: string;
 }
 ```
 
-**返回值**：`PresetProvider | null`
+**返回值**：`ChannelTemplate | null`
 
 ### 1.8 协议内核（prism.wasm）
 
@@ -287,6 +292,8 @@ interface KernelStatus {
   supported_abi: string;       // 宿主兼容的 ABI
   updatable: boolean;          // 程序目录抢占时为 false
   updatable_reason: string | null;
+  backup_version: string | null;  // 备份内核版本（有备份且能读出清单时非 null）
+  backup_available: boolean;      // 是否存在可回滚的备份内核
 }
 ```
 
@@ -321,6 +328,10 @@ interface KernelInfo {
 任一步失败都在落盘前中止，旧内核保持原样。通过后备份现有内核为
 `prism.wasm.bak`，原子替换 `prism.wasm`，并写入 `prism.release.json` 构建清单。
 
+**备份是成对的两个文件**：`prism.wasm.bak` + `prism.release.json.bak`。
+只备份 wasm 而不备份版本记录，回滚后会出现「内核是旧的、版本号是新的」这种
+自相矛盾的状态。
+
 **参数**：无
 
 **返回值**：
@@ -338,6 +349,23 @@ interface KernelInstallResult {
 - `kernel_asset_missing` — 发布缺少必需资产
 - `kernel_probe_failed` — 内核无法实例化
 - `kernel_abi_mismatch` — ABI 与宿主不兼容
+
+#### `rollback_kernel_update`
+回滚到上一次替换前的内核备份。备份是**单槽位**的一对文件（内核 + 版本记录），
+回滚即把两者一起还原，并清掉备份（回滚后备份已失去意义，留着会让「可回滚」
+一直显示为真）。
+
+回滚前会用 wasmtime 探测备份内核 —— **坏的备份会被拒绝**（换上去比不换更糟）。
+这是「内核更新后起不来」的唯一自救出口，不必重装应用。
+
+**参数**：无
+
+**返回值**：`KernelInstallResult`
+
+**错误码**：
+- `kernel_externally_managed` — 程序目录下的 prism.wasm 抢占加载权，回滚不生效
+- `kernel_no_backup` — 没有可回滚的备份（从未更新过，或备份已被回滚消耗）
+- `kernel_probe_failed` — 备份内核无法加载，拒绝回滚
 
 #### `restart_app`
 重启应用（内核更新后生效用）。直接使用 Tauri 核心 `AppHandle::restart()`，

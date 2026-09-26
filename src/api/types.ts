@@ -217,6 +217,8 @@ export interface AgentTypeInfo {
   /** 该 harness 原生支持的协议能力：单协议 → 表单无需协议字段（silk 自动转换）；
    *  多协议 → 表单保留协议选择器（opencode npm / hermes api_mode） */
   protocols: AgentProtocolInfo[];
+  /** 累加模式（多预设可同时激活，独立启停）；单一事实来源在 Rust：AgentType::is_additive */
+  additive: boolean;
 }
 
 export interface Preset {

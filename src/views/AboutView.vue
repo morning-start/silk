@@ -22,6 +22,7 @@ import {
   getKernelStatus,
   installKernelUpdate,
   restartApp,
+  rollbackKernelUpdate,
   sourceLabel,
   type KernelCheckResult,
 } from "../utils/kernel";
@@ -65,6 +66,7 @@ const kernelStatus = ref<KernelStatus | null>(null);
 const kernelInfo = ref<KernelCheckResult | null>(null);
 const kernelChecking = ref(false);
 const kernelInstalling = ref(false);
+const kernelRollingBack = ref(false);
 const kernelInstalled = ref(false);
 
 /** 当前内核版本展示：数据目录来源可反查，内嵌/程序目录来源无法反查 */
@@ -132,6 +134,23 @@ async function handleInstallKernel() {
     message.error(error instanceof Error ? error.message : String(error));
   } finally {
     kernelInstalling.value = false;
+  }
+}
+
+async function handleRollbackKernel() {
+  kernelRollingBack.value = true;
+  try {
+    const result = await rollbackKernelUpdate();
+    kernelInstalled.value = true;
+    message.success(
+      `已回滚至 v${result.version ?? "备份版本"}（ABI ${result.abi}），重启后生效`
+    );
+    await loadKernelStatus();
+    kernelInfo.value = null;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error));
+  } finally {
+    kernelRollingBack.value = false;
   }
 }
 
@@ -495,6 +514,25 @@ onMounted(async () => {
             <div v-if="kernelStatus && !kernelStatus.updatable" class="ab-line ab-muted">
               {{ kernelStatus.updatable_reason }}
             </div>
+
+            <!-- 回滚：更新后起不来时的自救出口 -->
+            <div v-if="kernelStatus?.backup_available" class="ab-line ab-line--warn ab-rollback">
+              <span class="ab-dot ab-dot--warn"></span>
+              <span>
+                可回滚至
+                <span class="ab-strong text-mono">
+                  {{ kernelStatus.backup_version ? `v${kernelStatus.backup_version}` : "上一版内核" }}
+                </span>
+              </span>
+              <NButton
+                size="tiny"
+                :loading="kernelRollingBack"
+                :disabled="kernelRollingBack || !kernelStatus.updatable"
+                @click="handleRollbackKernel"
+              >
+                回滚
+              </NButton>
+            </div>
           </div>
         </section>
       </div>
@@ -593,6 +631,7 @@ onMounted(async () => {
 .ab-dot--accent { background: var(--accent); }
 .ab-dot--ok { background: var(--success); }
 .ab-dot--error { background: var(--danger); }
+.ab-dot--warn { background: var(--warn); }
 
 /* ---------- 标识 ---------- */
 .ab-id {
@@ -710,7 +749,16 @@ onMounted(async () => {
 
 .ab-line--ok { color: var(--success); }
 .ab-line--error { color: var(--danger); }
+.ab-line--warn { color: var(--warn); }
 .ab-muted { font-size: var(--fs-sm); color: var(--muted); }
+
+/* 回滚提示：可回滚时右侧按钮需要被推到行尾 */
+.ab-rollback {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.ab-rollback > span:nth-child(2) { flex: 1; min-width: 0; }
 
 .ab-notes {
   margin: var(--sp-3) 0 0;

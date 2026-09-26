@@ -28,6 +28,10 @@ export interface KernelStatus {
   updatable: boolean;
   /** 不可更新时的原因说明 */
   updatable_reason: string | null;
+  /** 备份内核的版本（有备份且能读出清单时非 null） */
+  backup_version: string | null;
+  /** 是否存在可回滚的备份内核 */
+  backup_available: boolean;
 }
 
 /** 内核更新检查结果，字段与后端 `KernelInfo` 一一对应 */
@@ -63,6 +67,10 @@ export const kernelApi = {
   /** 下载并安装最新内核（sha256 校验 + ABI 探测通过后才落盘） */
   install: (): Promise<KernelInstallResult> =>
     invoke<KernelInstallResult>("install_kernel_update"),
+
+  /** 回滚到上一次替换前的内核备份（更新后起不来的自救出口） */
+  rollback: (): Promise<KernelInstallResult> =>
+    invoke<KernelInstallResult>("rollback_kernel_update"),
 
   /** 重启应用（内核更新后生效用） */
   restart: (): Promise<void> => invoke<void>("restart_app"),

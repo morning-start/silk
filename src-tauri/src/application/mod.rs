@@ -1,6 +1,7 @@
 pub mod api_key_service;
 pub mod auto_detect;
 pub mod change_events;
+pub mod channel_templates;
 pub mod config_transfer_service;
 pub mod config_watcher;
 pub mod config_writer;
@@ -14,7 +15,6 @@ pub mod model_catalog;
 pub mod model_fetcher;
 pub mod model_mapping_service;
 pub mod models_listing;
-pub mod preset_providers;
 pub mod preset_service;
 pub mod provider_service;
 pub mod settings_service;

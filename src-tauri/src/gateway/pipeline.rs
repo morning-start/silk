@@ -207,23 +207,33 @@ impl GatewayPipeline {
                 ctx.selected_api_key = None; // 避免复用
                 ctx.selected_key_encrypted = None;
 
-                // 429/401/403/503 等明确错误不应换 Key 重试
-                if let GatewayError::UpstreamError { status, body } = &error {
-                    // 429 限流、401/403 认证失败、503 服务不可用：换 Key 无意义
-                    if *status == 429 || *status == 401 || *status == 403 || *status == 503 {
-                        let err_msg = body.get("error")
-                            .and_then(|e| e.get("message"))
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("未知错误");
+                // 429/401/403/503：换 Key 重试无意义（Key 本身无效、或渠道级限制），
+                // 但**换渠道仍然有意义** —— 同一个模型在另一个渠道可能是可用的。
+                // 因此不直接失败，而是跳过同级换 Key，直接升级到换渠道。
+                //
+                // 历史问题：这里曾直接 `return Err`，导致第一个渠道返回 403
+                // 「模型不在套餐内」就终止整个回退，后面明明有可用渠道也不试；
+                // 且最终错误被 silk 包装成「所有渠道和 Key 均已失败」，掩盖了
+                // 上游的真实原因，用户被引向改 Key 的错误方向。
+                if let GatewayError::UpstreamError(failure) = &error {
+                    // 上游的原话先记下来：回退全部耗尽时优先原样返回它
+                    ctx.last_upstream_error = Some(failure.clone());
+
+                    if matches!(failure.status, 401 | 403 | 429 | 503) {
                         tracing::warn!(
-                            status = *status,
-                            error = %err_msg,
-                            "上游返回不可重试错误，直接失败"
+                            status = failure.status,
+                            error = %failure.message(),
+                            provider = %ctx.provider.as_ref().map(|p| p.name.as_str()).unwrap_or("-"),
+                            "上游返回渠道级错误，跳过换 Key，直接换渠道"
                         );
-                        return Err(StageError::new(ctx, GatewayError::UpstreamError {
-                            status: *status,
-                            body: body.clone(),
-                        }));
+
+                        // 标记当前渠道失败，升级换渠道
+                        if let Some(p) = ctx.provider.clone() {
+                            if !ctx.failed_providers.contains(&p.id) {
+                                ctx.failed_providers.push(p.id.clone());
+                            }
+                        }
+                        return Ok(AttemptOutcome::Escalate(ctx));
                     }
                 }
 
@@ -294,10 +304,11 @@ impl GatewayPipeline {
                     attempts = ctx.total_retry_attempts,
                     "失败回退总超时"
                 );
-                Err(StageError::new(
-                    ctx,
-                    GatewayError::Internal("请求超时：失败回退超过15秒".to_string()),
-                ))
+                // 超时是 silk 侧的判定（上游可能只是慢），但若回退过程中上游明确
+                // 返回过错误，那才是更有信息量的原因，优先诚实返回它。
+                Err(StageError::new(ctx.clone(), terminal_error(&ctx, || {
+                    GatewayError::Internal("请求超时：失败回退超过15秒".to_string())
+                })))
             }
             Err(FailoverError::TooManyAttempts(ctx)) => {
                 let attempts = ctx.total_retry_attempts;
@@ -305,15 +316,37 @@ impl GatewayPipeline {
                     attempts = attempts,
                     "失败回退达到最大尝试次数"
                 );
-                Err(StageError::new(
-                    ctx,
-                    GatewayError::Internal(format!("请求失败：已尝试{attempts}次仍不成功")),
-                ))
+                Err(StageError::new(ctx.clone(), terminal_error(&ctx, || {
+                    GatewayError::Internal(format!("请求失败：已尝试{attempts}次仍不成功"))
+                })))
             }
             Err(FailoverError::NoChannelLeft(ctx)) => Err(StageError::new(
-                ctx,
-                GatewayError::Internal("所有渠道和 Key 均已失败".to_string()),
+                ctx.clone(),
+                terminal_error(&ctx, || {
+                    GatewayError::Internal("所有渠道和 Key 均已失败".to_string())
+                }),
             )),
         }
+    }
+}
+
+/// 回退耗尽时的最终错误：优先返回上游的原话，其次才是 silk 自己的说明
+///
+/// 回退过程中只要上游明确返回过错误响应（4xx/5xx），就把它原样上抛 ——
+/// 客户端看到的是上游的真实原因，而不是「所有渠道和 Key 均已失败」这种
+/// 掩盖了原因的 silk 文案。
+fn terminal_error<F>(ctx: &RequestContext, silk_fallback: F) -> GatewayError
+where
+    F: FnOnce() -> GatewayError,
+{
+    match ctx.last_upstream_error.clone() {
+        Some(failure) => {
+            tracing::info!(
+                status = failure.status,
+                "回退耗尽，返回最后一次上游错误（原样透传）"
+            );
+            GatewayError::UpstreamError(failure)
+        }
+        None => silk_fallback(),
     }
 }

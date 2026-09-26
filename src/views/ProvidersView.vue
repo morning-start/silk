@@ -18,7 +18,7 @@ import { storeToRefs } from "pinia";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { providersApi } from "../api/providers";
 import { discoveryApi } from "../api/discovery";
-import type { PresetProvider, Provider, ProviderHeaderEntry } from "../api";
+import type { ChannelTemplate, Provider, ProviderHeaderEntry } from "../api";
 import { copyWithFeedback } from "../utils/clipboard";
 import { healthStatusType } from "../utils/health";
 import { useConfirm } from "../utils/confirm";
@@ -87,50 +87,50 @@ const keyStrategyOptions = [
 // 预置模板：把官方地址 / 协议 / 常用模型一次填好，省掉查文档
 // ---------------------------------------------------------------------------
 
-const presetProviders = ref<PresetProvider[]>([]);
-const presetId = ref<string | null>(null);
+const channelTemplates = ref<ChannelTemplate[]>([]);
+const templateId = ref<string | null>(null);
 
-const presetOptions = computed(() =>
-  presetProviders.value.map((p) => ({ label: p.name, value: p.id })),
+const templateOptions = computed(() =>
+  channelTemplates.value.map((t) => ({ label: t.name, value: t.id })),
 );
 
-const selectedPreset = computed(
-  () => presetProviders.value.find((p) => p.id === presetId.value) ?? null,
+const selectedTemplate = computed(
+  () => channelTemplates.value.find((t) => t.id === templateId.value) ?? null,
 );
 
-async function loadPresetProviders() {
-  if (presetProviders.value.length > 0) return;
+async function loadChannelTemplates() {
+  if (channelTemplates.value.length > 0) return;
   try {
-    presetProviders.value = await discoveryApi.getPresetProviders();
+    channelTemplates.value = await discoveryApi.getChannelTemplates();
   } catch {
     /* 模板加载失败不影响手动填写 */
   }
 }
 
 /**
- * 应用预置模板
+ * 应用渠道模板
  *
  * 只覆盖"官方既定"的字段（地址、协议）；名称仅在用户还没填时补上；
  * 模型取并集追加，避免清掉用户已经勾好的模型。
  */
-function applyPreset(id: string) {
-  const preset = presetProviders.value.find((p) => p.id === id);
-  if (!preset) return;
-  presetId.value = id;
-  formValue.value.api_base_url = preset.api_base_url;
-  formValue.value.protocols = [...preset.protocols];
+function applyTemplate(id: string) {
+  const template = channelTemplates.value.find((t) => t.id === id);
+  if (!template) return;
+  templateId.value = id;
+  formValue.value.api_base_url = template.api_base_url;
+  formValue.value.protocols = [...template.protocols];
   if (!formValue.value.name.trim()) {
-    formValue.value.name = preset.name;
+    formValue.value.name = template.name;
   }
   const merged = new Set(formValue.value.models);
-  for (const model of preset.models) merged.add(model.id);
+  for (const model of template.models) merged.add(model.id);
   formValue.value.models = [...merged];
 }
 
-async function openPresetKeyUrl() {
-  if (!selectedPreset.value) return;
+async function openTemplateKeyUrl() {
+  if (!selectedTemplate.value) return;
   try {
-    await openUrl(selectedPreset.value.api_key_url);
+    await openUrl(selectedTemplate.value.api_key_url);
   } catch {
     message.error("打开链接失败");
   }
@@ -220,7 +220,7 @@ function resetForm() {
   editingId.value = null;
   selectedModels.value = [];
   modelSearch.value = "";
-  presetId.value = null;
+  templateId.value = null;
   keyVisibility.value = [false];
   formValue.value = {
     name: "",
@@ -251,7 +251,7 @@ function handleEdit(row: Provider) {
   editingId.value = row.id;
   selectedModels.value = [];
   modelSearch.value = "";
-  presetId.value = null;  keyVisibility.value = (row.keys && row.keys.length > 0)
+  templateId.value = null;  keyVisibility.value = (row.keys && row.keys.length > 0)
     ? row.keys.map(() => false)
     : [false];
   formValue.value = {
@@ -488,7 +488,7 @@ async function handleSubmit() {
 
 onMounted(() => {
   providersStore.fetchAll();
-  loadPresetProviders();
+  loadChannelTemplates();
 });
 </script>
 
@@ -587,23 +587,23 @@ onMounted(() => {
               <span class="m-sec-meta">{{ editingId ? "编辑已有渠道" : "新建渠道" }}</span>
             </div>
             <div class="m-grid" style="--m-cols: 4">
-              <div v-if="presetOptions.length > 0" class="m-field m-full">
+              <div v-if="templateOptions.length > 0" class="m-field m-full">
                 <label class="m-label">官方模板</label>
                 <div class="preset-row">
                   <NSelect
-                    :value="presetId"
-                    :options="presetOptions"
+                    :value="templateId"
+                    :options="templateOptions"
                     filterable
                     clearable
                     placeholder="选择官方渠道，自动填好地址 / 协议 / 常用模型"
-                    @update:value="(value: string | null) => { if (value) applyPreset(value); }"
+                    @update:value="(value: string | null) => { if (value) applyTemplate(value); }"
                   />
-                  <NButton v-if="selectedPreset" size="small" secondary @click="openPresetKeyUrl">
+                  <NButton v-if="selectedTemplate" size="small" secondary @click="openTemplateKeyUrl">
                     去申请 Key
                   </NButton>
                 </div>
                 <span class="m-note">
-                  {{ selectedPreset ? selectedPreset.description : "官方模板只覆盖地址、协议与常用模型，名称与 Key 仍可自行修改" }}
+                  {{ selectedTemplate ? selectedTemplate.description : "官方模板只覆盖地址、协议与常用模型，名称与 Key 仍可自行修改" }}
                 </span>
               </div>
               <div class="m-field m-span-2">
@@ -692,7 +692,7 @@ onMounted(() => {
                 <NInput
                   v-model:value="key.value"
                   :type="keyVisibility[index] ? 'text' : 'password'"
-                  :placeholder="selectedPreset?.api_key_placeholder || 'sk-...'"
+                  :placeholder="selectedTemplate?.api_key_placeholder || 'sk-...'"
                   style="flex: 1; min-width: 0"
                 />
                 <NButton quaternary size="small" @click="toggleKeyVisibility(index)">

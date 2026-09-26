@@ -764,35 +764,32 @@ mod tests {
     }
 
     #[test]
-    fn test_current_abi_matches_supported_when_available() {
-        // 注意：内嵌内核可能是 ABI 探测能力加入之前构建的版本（`wasm_abi_version`
-        // 于 prism 2026-09-21 才导出）。此类旧内核探测会失败，属正常状态而非缺陷，
-        // 因此这里只断言「能探测到时必须与宿主声明的 ABI 一致」。
-        match current_abi() {
-            Ok(info) => assert_eq!(
-                info.abi, SUPPORTED_ABI,
-                "当前内核 ABI {} 与宿主支持的 {} 不一致",
-                info.abi, SUPPORTED_ABI
-            ),
-            Err(error) => {
-                // 旧内核路径：必须是「找不到导出」这类明确错误，而不是 panic 或误判
-                assert!(
-                    error.contains("wasm_abi_version"),
-                    "旧内核应给出缺少 ABI 导出的明确错误，实际: {error}"
-                );
-            }
-        }
+    fn test_current_abi_matches_supported() {
+        // 内嵌内核自 v0.1.4（prism 2026-09-21 起导出 `wasm_abi_version`）已支持 ABI 探测。
+        // 这里断言正向结果：探测必须成功，且 ABI 与宿主声明一致。
+        // 若哪天内嵌内核被换成旧版本（无 ABI 导出），此测试会失败 —— 这是有意的：
+        // 内嵌内核是「开箱即用」的兜底，不应退回到无法自证兼容性的状态。
+        let info = current_abi().expect("内嵌内核必须支持 ABI 探测（wasm_abi_version）");
+        assert_eq!(
+            info.abi, SUPPORTED_ABI,
+            "内嵌内核 ABI {} 与宿主支持的 {} 不一致",
+            info.abi, SUPPORTED_ABI
+        );
+        assert!(
+            !info.ir_schema.is_empty(),
+            "ir_schema 不应为空（缺失时以 unknown 兜底）"
+        );
     }
 
     #[test]
     fn test_probe_abi_agrees_with_running_kernel() {
-        // 不变式：若运行中的内核支持 ABI 探测，则用同样字节走 probe_abi（独立实例）
-        // 必须得到一致结果 —— 这验证了「安装前预检」与「运行时」两条路径的一致性。
-        if let Ok(running) = current_abi() {
-            let probed = probe_abi(embedded_wasm()).expect("probe embedded wasm");
-            assert_eq!(probed.abi, running.abi);
-            assert_eq!(probed.ir_schema, running.ir_schema);
-        }
+        // 不变式：「安装前预检」与「运行时」两条路径必须得到一致结果 ——
+        // 安装门槛用 probe_abi 在独立实例中预检，运行时装到全局单例，
+        // 二者若不一致，就会出现「预检通过但装上跑不起来」。
+        let running = current_abi().expect("内嵌内核必须支持 ABI 探测");
+        let probed = probe_abi(embedded_wasm()).expect("probe embedded wasm");
+        assert_eq!(probed.abi, running.abi);
+        assert_eq!(probed.ir_schema, running.ir_schema);
     }
 
     #[test]

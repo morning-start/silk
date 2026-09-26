@@ -36,6 +36,15 @@ pub async fn install_kernel_update() -> Result<KernelInstallResult, String> {
         .map_err(|e| e.to_string())
 }
 
+/// 回滚到上一次替换前的内核备份
+///
+/// 内核更新后若应用起不来或转换异常，这是唯一的自救出口 —— 不必重装应用。
+/// 回滚前会用 wasmtime 探测备份内核，坏的备份会被拒绝（换上去比不换更糟）。
+#[tauri::command]
+pub async fn rollback_kernel_update() -> Result<KernelInstallResult, String> {
+    kernel_service::rollback_to_backup().map_err(|e| e.to_string())
+}
+
 /// 重启应用（内核更新后生效用）
 ///
 /// 直接使用 Tauri 核心的 `AppHandle::restart()`，无需额外插件或权限。

@@ -234,60 +234,72 @@ async fn dispatch_with_retries(
     }
 
     // 所有重试耗尽，返回最后一条错误
+    //
+    // 这里是「连不上上游」（DNS/连接/TLS/读超时），上游从未返回过错误响应，
+    // 因此**不能**伪装成上游的 4xx/5xx 错误体 —— 那会把 silk 的连接问题
+    // 说成是上游说的话。作为 silk 错误上抛，客户端会看到 【silk】 标记。
     Err(StageError::new(
         ctx,
         match last_error {
-            Some(err) => GatewayError::UpstreamError {
-                status: 0,
-                body: serde_json::json!({
-                    "error": { "message": err.to_string(), "type": "upstream_error" }
-                }),
-            },
+            Some(err) => GatewayError::Upstream(err),
             None => GatewayError::Internal("上游请求失败（无详细错误）".to_string()),
         },
     ))
 }
 
 
+/// 处理上游错误响应
+///
+/// **诚实原则**：上游的错误体原样保留（原始字节 + Content-Type），不做解析后重包装。
+/// 上游的错误体不一定是 JSON —— nginx 的 HTML 502、网关的纯文本 401 都很常见，
+/// 强行 `serde_json::from_slice` 失败后再包一层 `{"error":{"message":...}}`，
+/// 等于篡改了上游的原话，还会丢掉状态码之外的原始信息。
 async fn handle_upstream_error(
     mut ctx: RequestContext,
     response: reqwest::Response,
     headers: axum::http::HeaderMap,
 ) -> Result<RequestContext, StageError> {
     let status = response.status();
-    tracing::warn!(status = %status, "上游返回错误状态码");
-    let body = response.bytes().await.unwrap_or_else(|err| {
-        bytes::Bytes::from(
-            serde_json::json!({
-                "error": {
-                    "message": err.to_string(),
-                    "type": "upstream_error"
-                }
-            })
-            .to_string(),
-        )
-    });
-    let body_str = String::from_utf8_lossy(&body).chars().take(500).collect::<String>();
-    tracing::error!(status = %status, body = %body_str, "上游错误响应内容");
-    let parsed_body = serde_json::from_slice(&body).unwrap_or_else(|_| {
-        serde_json::json!({
-            "error": {
-                "message": body_str,
-                "type": "upstream_error"
-            }
-        })
-    });
+    let content_type = response
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(ToOwned::to_owned);
+
+    // 读取失败时保留一个可诊断的最小体（读取失败是 silk 侧问题，不是上游原话）
+    let body = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::error!(status = %status, error = %err, "读取上游错误响应体失败");
+            Bytes::from(
+                serde_json::json!({
+                    "error": {
+                        "message": format!("读取上游错误响应体失败: {err}"),
+                        "type": "silk_read_error"
+                    }
+                })
+                .to_string(),
+            )
+        }
+    };
+
+    let body_str = String::from_utf8_lossy(&body)
+        .chars()
+        .take(500)
+        .collect::<String>();
+    tracing::error!(status = %status, body = %body_str, "上游错误响应内容（原样透传）");
 
     ctx.upstream_status = Some(status);
     ctx.upstream_headers = Some(headers);
-    ctx.upstream_body = Some(body);
+    ctx.upstream_body = Some(body.clone());
 
     Err(StageError::new(
         ctx,
-        GatewayError::UpstreamError {
-            status: status.as_u16(),
-            body: parsed_body,
-        },
+        GatewayError::UpstreamError(crate::gateway::error::UpstreamFailure::new(
+            status.as_u16(),
+            body,
+            content_type,
+        )),
     ))
 }
 
@@ -479,7 +491,11 @@ async fn run_sse_read_task(
                             elapsed_ms = stream_start.elapsed().as_millis(),
                             "SSE 流上游错误"
                         );
-                        let _ = tx.send(Err(GatewayError::Upstream(err))).await;
+                        // 上游中途断流：先把已收到的内容交给客户端，再补一条错误事件，
+                        // 否则 hyper 会直接中止 body，客户端只看到「连接被重置」。
+                        let error = GatewayError::Upstream(err);
+                        let _ = tx.send(Ok(stream_response::sse_error_event(&error))).await;
+                        let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
                         // tx 在此被 drop，ReceiverStream 结束，HTTP 响应完成
                         let _ = complete_tx.send(());
                         return;
@@ -494,7 +510,10 @@ async fn run_sse_read_task(
                         timeout_secs = config.stream_timeout.as_secs(),
                         "SSE 流超时"
                     );
-                    let _ = tx.send(Err(GatewayError::Timeout)).await;
+                    // 流超时是 silk 侧的判定（上游可能只是慢），明确标注来源
+                    let error = GatewayError::Timeout;
+                    let _ = tx.send(Ok(stream_response::sse_error_event(&error))).await;
+                    let _ = tx.send(Ok(stream_response::stream_end_marker())).await;
                     // tx 在此被 drop，ReceiverStream 结束，HTTP 响应完成
                     let _ = complete_tx.send(());
                     return;

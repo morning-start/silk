@@ -45,7 +45,17 @@ impl AgentType {
         !matches!(id, "opencode" | "hermes" | "omp")
     }
 
-    /// silk 网关 prism 可转换的协议全集（与 prism_wasm::map_provider 白名单一致）。
+    /// 是否为累加模式 （live 中已存在的 provider 段 = 已激活，对齐 cc-switch isInConfig）：
+    /// - 启动时按 live 现状同步存量 preset 的激活位； 
+    /// - 新导入的 provider 来自 live 配置，天然处于激活态。
+    ///
+    /// 目前 OpenCode（npm SDK 多 provider 模式）和 OMP（models.yml providers）是累加模式。
+    pub fn is_additive(id: &str) -> bool {
+        matches!(id, "opencode" | "omp")
+    }
+
+    /// silk 网关 prism 可转换的协议全集
+    /// （与 prism_wasm::map_provider 白名单一致）。
     /// 命名的单一事实来源：各 harness 的能力表以此区分「可走网关自动转换」与「仅直连」。
     pub const GATEWAY_CONVERTIBLE_PROTOCOLS: &'static [&'static str] =
         &["openai", "responses", "messages", "gemini"];

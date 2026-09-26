@@ -116,7 +116,7 @@
           "description": "快速版本"
         }
       ],
-      "api_base_url": "https://dashscope.aliyuncs.com/api/v1",
+      "api_base_url": "https://dashscope.aliyuncs.com/api",
       "api_key_url": "https://dashscope.console.aliyun.com/apiKey",
       "api_key_placeholder": "sk-...",
       "color": "#ff6a00"

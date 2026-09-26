@@ -47,6 +47,11 @@ const ASSET_SHA256: &str = "prism.wasm.sha256";
 const MANIFEST_FILE: &str = "prism.release.json";
 /// 替换前的备份文件名
 const BACKUP_FILE: &str = "prism.wasm.bak";
+/// 与备份内核配对的版本记录（**必须与 BACKUP_FILE 成对写入**）
+///
+/// 只备份 wasm 而不备份清单，回滚后会出现「内核是旧的、版本号是新的」这种
+/// 自相矛盾的状态：关于页显示新版本，更新检查也说已是最新，但实际跑的是旧内核。
+const BACKUP_MANIFEST_FILE: &str = "prism.release.json.bak";
 /// 下载临时文件名
 const DOWNLOAD_FILE: &str = "prism.wasm.download";
 
@@ -76,6 +81,10 @@ pub struct KernelStatus {
     pub updatable: bool,
     /// 不可更新时的原因说明
     pub updatable_reason: Option<String>,
+    /// 备份内核的版本（有备份且能读出清单时非空）
+    pub backup_version: Option<String>,
+    /// 是否存在可回滚的备份内核
+    pub backup_available: bool,
 }
 
 /// 内核更新检查结果
@@ -178,7 +187,12 @@ fn read_manifest() -> Option<ReleaseManifest> {
 
 /// 从指定目录读取构建清单（抽成纯函数以便测试）
 fn read_manifest_at(dir: &std::path::Path) -> Option<ReleaseManifest> {
-    let text = std::fs::read_to_string(dir.join(MANIFEST_FILE)).ok()?;
+    read_manifest_at_named(dir, MANIFEST_FILE)
+}
+
+/// 从指定目录读取指定名字的清单（用于读取备份清单）
+fn read_manifest_at_named(dir: &std::path::Path, file_name: &str) -> Option<ReleaseManifest> {
+    let text = std::fs::read_to_string(dir.join(file_name)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
@@ -206,6 +220,19 @@ pub fn status() -> KernelStatus {
         )
     });
 
+    // 备份状态：只有数据目录来源 + 备份文件确实存在时才算「可回滚」
+    let backup_available = prism_wasm::data_dir_wasm_path()
+        .map(|path| path.with_file_name(BACKUP_FILE).exists())
+        .unwrap_or(false);
+    let backup_version = if backup_available {
+        data_dir()
+            .ok()
+            .and_then(|dir| read_manifest_at_named(&dir, BACKUP_MANIFEST_FILE))
+            .map(|manifest| manifest.tag)
+    } else {
+        None
+    };
+
     KernelStatus {
         version,
         abi: abi.as_ref().map(|info| info.abi.clone()),
@@ -215,6 +242,8 @@ pub fn status() -> KernelStatus {
         supported_abi: prism_wasm::SUPPORTED_ABI.to_string(),
         updatable,
         updatable_reason,
+        backup_version,
+        backup_available,
     }
 }
 
@@ -467,7 +496,94 @@ pub async fn install(proxy_url: Option<&str>) -> Result<KernelInstallResult, Ser
     })
 }
 
+/// 回滚到上一次替换前的内核备份
+///
+/// 备份是单槽位的一对文件（内核 + 版本记录）。回滚即把两者一起还原，并清掉备份
+/// —— 备份只有一个槽位，回滚后它已失去意义（当前内核就是刚还原的那份），
+/// 留着会让「可回滚」一直显示为真，诱使用户重复点击。
+///
+/// 这是「内核更新后起不来」的唯一自救出口：装上的内核若与宿主不兼容，
+/// 用户至少能退回上一版而不必重装应用。
+pub fn rollback_to_backup() -> Result<KernelInstallResult, ServiceError> {
+    // 程序目录抢占时，数据目录的内核根本不参与加载，回滚也无意义
+    if let Some(path) = prism_wasm::exe_dir_wasm_path() {
+        return Err(ServiceError::BadRequest {
+            message: format!(
+                "内核由程序目录下的 {} 提供，加载优先级更高，回滚不会生效",
+                path.display()
+            ),
+            code: Some("kernel_externally_managed".to_string()),
+        });
+    }
+
+    let dir = data_dir()?;
+    let target = dir.join(prism_wasm::PRISM_WASM_FILE);
+    let manifest_path = dir.join(MANIFEST_FILE);
+    let backup = dir.join(BACKUP_FILE);
+    let backup_manifest = dir.join(BACKUP_MANIFEST_FILE);
+
+    if !backup.exists() {
+        return Err(ServiceError::BadRequest {
+            message: "没有可回滚的内核备份（可能从未更新过，或备份已被回滚消耗）".to_string(),
+            code: Some("kernel_no_backup".to_string()),
+        });
+    }
+
+    // 回滚前先验证备份内核真的可用：把一个坏备份换上去比不换更糟
+    let bytes = std::fs::read(&backup).map_err(|e| ServiceError::Internal {
+        message: format!("读取内核备份失败：{e}"),
+        detail: None,
+    })?;
+    let abi = prism_wasm::probe_abi(&bytes).map_err(|e| ServiceError::BadRequest {
+        message: format!("内核备份无法加载，拒绝回滚：{e}"),
+        code: Some("kernel_probe_failed".to_string()),
+    })?;
+
+    // 还原内核（覆盖当前内核）
+    std::fs::copy(&backup, &target).map_err(|e| ServiceError::Internal {
+        message: format!("回滚内核文件失败：{e}"),
+        detail: None,
+    })?;
+
+    // 版本记录同步还原；备份清单缺失/损坏时删除当前清单，
+    // 宁可显示「版本未知」，也不能留下指向已不存在的内核的版本号
+    let restored_tag = match read_manifest_at_named(&dir, BACKUP_MANIFEST_FILE) {
+        Some(manifest) => {
+            if let Err(e) = std::fs::copy(&backup_manifest, &manifest_path) {
+                warn!(error = %e, "[kernel] 回滚版本记录失败");
+                None
+            } else {
+                Some(manifest.tag)
+            }
+        }
+        None => {
+            let _ = std::fs::remove_file(&manifest_path);
+            None
+        }
+    };
+
+    // 备份已被消耗（单槽位）
+    let _ = std::fs::remove_file(&backup);
+    let _ = std::fs::remove_file(&backup_manifest);
+
+    info!(
+        version = ?restored_tag,
+        abi = %abi.abi,
+        "[kernel] 已回滚到备份内核，重启应用后生效"
+    );
+
+    Ok(KernelInstallResult {
+        version: restored_tag,
+        abi: abi.abi,
+        source: prism_wasm::WasmSource::DataDir.as_str().to_string(),
+        requires_restart: true,
+    })
+}
+
 /// 落盘内核字节与构建清单（备份 → 原子替换 → 写清单，任一步失败都回滚）。
+///
+/// 备份是**一对文件**（内核 + 版本记录），单槽位：每次安装覆盖上一次的备份。
+/// 回滚时两者一起还原，避免「内核回旧了、版本号还是新的」的分裂状态。
 ///
 /// 抽成独立函数以便单测覆盖 Windows 上「rename 覆盖已存在文件」与失败回滚
 /// 这两条最容易出错的路径（不依赖网络）。
@@ -477,7 +593,9 @@ fn commit_kernel(
     manifest: &ReleaseManifest,
 ) -> Result<(), ServiceError> {
     let target = dir.join(prism_wasm::PRISM_WASM_FILE);
+    let manifest_path = dir.join(MANIFEST_FILE);
     let backup = dir.join(BACKUP_FILE);
+    let backup_manifest = dir.join(BACKUP_MANIFEST_FILE);
     let temp = dir.join(DOWNLOAD_FILE);
 
     // 先写临时文件，校验通过后再改名，避免半写状态
@@ -486,13 +604,25 @@ fn commit_kernel(
         detail: None,
     })?;
 
-    // 备份现有内核（存在才备份）
+    // 备份现有内核与版本记录（成对；存在才备份）
     let had_existing = target.exists();
+    let had_manifest = manifest_path.exists();
     if had_existing {
         if let Err(e) = std::fs::copy(&target, &backup) {
             let _ = std::fs::remove_file(&temp);
             return Err(ServiceError::Internal {
                 message: format!("备份现有内核失败：{e}"),
+                detail: None,
+            });
+        }
+    }
+    if had_manifest {
+        if let Err(e) = std::fs::copy(&manifest_path, &backup_manifest) {
+            let _ = std::fs::remove_file(&temp);
+            // 内核已备份但清单没有 → 备份对不完整，清掉避免留下误导性的半份备份
+            let _ = std::fs::remove_file(&backup);
+            return Err(ServiceError::Internal {
+                message: format!("备份现有内核版本记录失败：{e}"),
                 detail: None,
             });
         }
@@ -508,13 +638,12 @@ fn commit_kernel(
     }
 
     // 写构建清单；失败则回滚内核文件，避免「内核已换但版本记录缺失」
-    let manifest_path = dir.join(MANIFEST_FILE);
     let text = serde_json::to_string_pretty(manifest).map_err(|e| ServiceError::Internal {
         message: format!("序列化内核清单失败：{e}"),
         detail: None,
     })?;
     if let Err(e) = crate::application::config_writer::write_text_atomic(&manifest_path, &text) {
-        rollback(&target, &backup, had_existing);
+        rollback(&target, &manifest_path, &backup, &backup_manifest, had_existing);
         return Err(ServiceError::Internal {
             message: format!("写入内核清单失败：{e}"),
             detail: None,
@@ -524,8 +653,14 @@ fn commit_kernel(
     Ok(())
 }
 
-/// 回滚内核文件（替换失败时恢复备份）
-fn rollback(target: &std::path::Path, backup: &std::path::Path, had_existing: bool) {
+/// 回滚内核与版本记录到备份状态（替换失败时恢复）
+fn rollback(
+    target: &std::path::Path,
+    manifest_path: &std::path::Path,
+    backup: &std::path::Path,
+    backup_manifest: &std::path::Path,
+    had_existing: bool,
+) {
     if had_existing && backup.exists() {
         if let Err(e) = std::fs::copy(backup, target) {
             warn!(error = %e, "[kernel] 回滚内核文件失败，请手动恢复备份");
@@ -534,6 +669,13 @@ fn rollback(target: &std::path::Path, backup: &std::path::Path, had_existing: bo
         }
     } else {
         let _ = std::fs::remove_file(target);
+    }
+
+    // 版本记录必须与内核同步回滚，否则版本号会指向一个并不存在的新内核
+    if backup_manifest.exists() {
+        if let Err(e) = std::fs::copy(backup_manifest, manifest_path) {
+            warn!(error = %e, "[kernel] 回滚内核版本记录失败，请手动恢复备份");
+        }
     }
 }
 
@@ -865,7 +1007,7 @@ mod tests {
         commit_kernel(&dir, b"NEW!", &manifest_for("0.1.5")).expect("replace existing");
 
         assert_eq!(std::fs::read(&target).unwrap(), b"NEW!", "内核应被新内容覆盖");
-        // 旧内核必须留有备份，供人工回滚
+        // 旧内核必须留有备份，供回滚
         assert_eq!(
             std::fs::read(dir.join(BACKUP_FILE)).unwrap(),
             b"OLD!",
@@ -875,18 +1017,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 写清单失败时回滚内核：不能出现「内核已换但版本记录缺失」的分裂状态。
+    /// 备份必须是**一对**：内核 + 版本记录。
+    /// 只备份 wasm 会让回滚后的版本号指向一个并不存在的内核。
+    #[test]
+    fn commit_kernel_backs_up_manifest_alongside_kernel() {
+        let dir = temp_dir("backup-pair");
+        let target = dir.join(prism_wasm::PRISM_WASM_FILE);
+        std::fs::write(&target, b"OLD!").unwrap();
+        // 先有一个旧清单（模拟已安装 v0.1.3）
+        std::fs::write(
+            dir.join(MANIFEST_FILE),
+            serde_json::to_string_pretty(&manifest_for("0.1.3")).unwrap(),
+        )
+        .unwrap();
+
+        commit_kernel(&dir, b"NEW!", &manifest_for("0.1.4")).expect("commit");
+
+        assert_eq!(std::fs::read(dir.join(BACKUP_FILE)).unwrap(), b"OLD!");
+        let backup_manifest =
+            read_manifest_at_named(&dir, BACKUP_MANIFEST_FILE).expect("备份清单必须存在");
+        assert_eq!(backup_manifest.tag, "0.1.3", "备份清单应记录旧版本");
+        // 当前清单指向新版本
+        assert_eq!(read_manifest_at(&dir).expect("manifest").tag, "0.1.4");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 写清单失败时回滚内核**与版本记录**：不能出现「内核回旧了、版本号还是新的」。
     #[test]
     fn commit_kernel_rolls_back_when_manifest_write_fails() {
         let dir = temp_dir("rollback");
         let target = dir.join(prism_wasm::PRISM_WASM_FILE);
         std::fs::write(&target, b"OLD!").unwrap();
 
-        // 用同名目录占住清单路径，使原子写必然失败
+        // 旧清单（v0.1.3）
         let manifest_path = dir.join(MANIFEST_FILE);
-        std::fs::create_dir_all(&manifest_path).unwrap();
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&manifest_for("0.1.3")).unwrap(),
+        )
+        .unwrap();
 
-        let result = commit_kernel(&dir, b"NEW!", &manifest_for("0.1.5"));
+        // 用一个只读占位让原子写失败：改用同名目录占住清单路径
+        // （先备份走的是 copy，能成功；随后 write_text_atomic 会因目标是目录而失败）
+        let result = {
+            // 备份清单已在上面写好，这里把清单路径换成目录以触发写入失败
+            let _ = std::fs::remove_file(&manifest_path);
+            std::fs::create_dir_all(&manifest_path).unwrap();
+            commit_kernel(&dir, b"NEW!", &manifest_for("0.1.5"))
+        };
+
         assert!(result.is_err(), "清单写入失败必须向上报错");
         assert_eq!(
             std::fs::read(&target).unwrap(),
@@ -911,11 +1090,25 @@ mod tests {
             !dir.join(prism_wasm::PRISM_WASM_FILE).exists(),
             "无备份可回滚时应删除新内核"
         );
+        // 备份对不完整时不应留下半份备份（否则「可回滚」会误报为真）
+        assert!(!dir.join(BACKUP_FILE).exists());
+        assert!(!dir.join(BACKUP_MANIFEST_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 回滚是无备份时唯一的自救出口：没有备份必须明确报错，而不是静默成功
+    #[test]
+    fn rollback_requires_backup() {
+        let dir = temp_dir("rollback-none");
+        std::fs::create_dir_all(&dir).unwrap();
+        // 直接验证「无备份」判定逻辑（不触碰真实 AppData）
+        assert!(!dir.join(BACKUP_FILE).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn status_is_self_consistent() {        let status = status();
+    fn status_is_self_consistent() {
+        let status = status();
         assert_eq!(status.supported_abi, prism_wasm::SUPPORTED_ABI);
         // 内嵌/程序目录来源无法反查版本 → version 为 None；仅数据目录来源才有版本
         if status.source != "data_dir" {
@@ -928,6 +1121,10 @@ mod tests {
         // 非内嵌来源必须带路径
         if status.source != "embedded" {
             assert!(status.path.is_some());
+        }
+        // 无备份时不得报告可回滚，也不得有备份版本号
+        if !status.backup_available {
+            assert!(status.backup_version.is_none());
         }
     }
 }

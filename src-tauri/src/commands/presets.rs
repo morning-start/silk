@@ -85,11 +85,14 @@ pub struct AgentProtocolInfo {
 
 /// Agent 类型信息（前端 Tab + 协议能力提示用）。协议能力单一事实来源在
 /// AgentType::HARNESS_NATIVE_PROTOCOLS（Rust），前端不自建副本。
+/// 累加模式标记同理来自 AgentType::is_additive，前端不得另立清单。
 #[derive(serde::Serialize)]
 pub struct AgentTypeInfo {
     pub id: &'static str,
     pub name: &'static str,
     pub protocols: Vec<AgentProtocolInfo>,
+    /// 是否为累加模式（多预设可同时激活，独立启停）
+    pub additive: bool,
 }
 
 /// Agent 类型列表（前端 Tab 用），附带各 harness 原生协议能力：
@@ -109,6 +112,7 @@ pub async fn list_agent_types() -> Vec<AgentTypeInfo> {
                     convert: AgentType::is_gateway_convertible(protocol),
                 })
                 .collect(),
+            additive: AgentType::is_additive(id),
         })
         .collect()
 }
